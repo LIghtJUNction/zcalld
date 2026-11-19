@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/zcalld-plugin-api", "plugins/aliases", "plugins/policy"]
+members = [".", "crates/zcalld-plugin-api", "crates/zcalld-compat-client", "plugins/aliases", "plugins/policy", "plugins/redact", "plugins/community", "plugins/routing"]
 resolver = "3"
 
 [workspace.package]

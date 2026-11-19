@@ -1,0 +1,16 @@
+[package]
+name = "zcalld-plugin-routing"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Optional request routing, decision providers and usage for zcalld"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+zcalld-plugin-api = { path = "../../crates/zcalld-plugin-api", version = "=0.1.1" }
+zplugin = { version = "=0.3.0", features = ["std"] }
+zconv = { version = "=0.4.0", default-features = false }

@@ -1,14 +1,20 @@
-//! Linux-native AI gateway: small CLI, explicit routes, optional native plugins.
-#[cfg(not(target_os = "linux"))]
-compile_error!("zcalld currently targets Linux");
+//! Native AI gateway: small CLI, explicit routes, optional native plugins.
 
+mod adapters;
 mod config;
+mod control;
 mod curl;
+mod digest;
+mod extensions;
 mod http;
+mod maintenance;
+mod migration;
 mod plugins;
 mod protocol;
 mod server;
+mod state_json;
 mod system;
+mod transport;
 
 use std::{
     io::{Read, Write},
@@ -16,7 +22,7 @@ use std::{
     process::ExitCode,
 };
 
-const HELP: &str = "zcalld — compact Linux AI gateway\n\n\
+const HELP: &str = "zcalld — compact native AI gateway\n\n\
 Usage: zcalld <command> [--config PATH] [--json]\n\n\
 Commands:\n\
   init                 Create a starter config without overwriting files\n\
@@ -40,13 +46,21 @@ fn main() -> ExitCode {
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            eprintln!("zcalld: {error}");
+            if std::env::args().any(|a| a == "--json") {
+                println!("{{\"ok\":false,\"error\":{}}}", http::quote(&error));
+            } else {
+                eprintln!("zcalld: {error}");
+            }
             ExitCode::FAILURE
         }
     }
 }
 
 fn run() -> Result<(), String> {
+    let management_args: Vec<String> = std::env::args().skip(1).collect();
+    if let Some(result) = control::run(&management_args) {
+        return result;
+    }
     let mut args = std::env::args().skip(1);
     let mut command = None;
     let mut extra = Vec::new();
@@ -96,21 +110,26 @@ fn run() -> Result<(), String> {
     }
     let path = path.map(Ok).unwrap_or_else(config::default_path)?;
     if command == "init" {
+        #[cfg(unix)]
         use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
         if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
-            std::fs::DirBuilder::new()
-                .recursive(true)
-                .mode(0o700)
-                .create(parent)
-                .map_err(|e| e.to_string())?;
+            let mut directory = std::fs::DirBuilder::new();
+            directory.recursive(true);
+            #[cfg(unix)]
+            directory.mode(0o700);
+            directory.create(parent).map_err(|e| e.to_string())?;
         }
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        options.mode(0o600);
+        let mut file = options
             .open(&path)
             .map_err(|e| format!("{}: {e}", path.display()))?;
-        file.write_all(include_bytes!("../examples/config.conf"))
+        let starter = include_str!("../examples/config.conf");
+        #[cfg(unix)]
+        let starter = starter.replace("[server]", "[server]\nunix_socket = auto");
+        file.write_all(starter.as_bytes())
             .map_err(|e| e.to_string())?;
         println!("Created {}", path.display());
         return Ok(());
@@ -203,14 +222,15 @@ fn run() -> Result<(), String> {
                 .as_ref()
                 .map(|name| format!("\"${{{name}}}\""))
                 .unwrap_or_else(|| "zcalld".into());
-            let address = match config.listen.ip() {
+            let listen = config.listen.ok_or("client environment requires a TCP listener; use the Unix socket with a socket-capable client")?;
+            let address = match listen.ip() {
                 std::net::IpAddr::V4(ip) if ip.is_unspecified() => {
-                    format!("127.0.0.1:{}", config.listen.port())
+                    format!("127.0.0.1:{}", listen.port())
                 }
                 std::net::IpAddr::V6(ip) if ip.is_unspecified() => {
-                    format!("[::1]:{}", config.listen.port())
+                    format!("[::1]:{}", listen.port())
                 }
-                _ => config.listen.to_string(),
+                _ => listen.to_string(),
             };
             match extra.first().map(String::as_str).unwrap_or("openai") {
                 "openai" => println!(
@@ -227,27 +247,13 @@ fn run() -> Result<(), String> {
             Ok(())
         }
         "health" => {
-            let address = if config.listen.ip().is_unspecified() {
-                std::net::SocketAddr::new(
-                    if config.listen.is_ipv4() {
-                        "127.0.0.1".parse().unwrap()
-                    } else {
-                        "::1".parse().unwrap()
-                    },
-                    config.listen.port(),
-                )
-            } else {
-                config.listen
-            };
-            let mut socket =
-                std::net::TcpStream::connect_timeout(&address, std::time::Duration::from_secs(3))
-                    .map_err(|e| e.to_string())?;
+            let mut socket = transport::connect(&config).map_err(|e| e.to_string())?;
             socket
                 .set_read_timeout(Some(std::time::Duration::from_secs(3)))
                 .map_err(|e| e.to_string())?;
             write!(
                 socket,
-                "GET /healthz HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n\r\n"
+                "GET /healthz HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
             )
             .map_err(|e| e.to_string())?;
             let mut result = String::new();
