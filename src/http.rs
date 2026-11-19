@@ -1,8 +1,7 @@
 //! Bounded HTTP/1 request parsing and explicit response framing.
-use crate::system::STOPPING;
+use crate::{system::STOPPING, transport::Stream};
 use std::{
     io::{self, Read, Write},
-    net::TcpStream,
     sync::atomic::Ordering,
     time::{Duration, Instant},
 };
@@ -33,7 +32,7 @@ fn failure(status: u16, message: &'static str) -> HttpError {
 }
 
 struct Input<'a> {
-    socket: &'a mut TcpStream,
+    socket: &'a mut Stream,
     data: Vec<u8>,
     position: usize,
     deadline: Instant,
@@ -121,7 +120,7 @@ impl Input<'_> {
 }
 
 pub fn read_request(
-    socket: &mut TcpStream,
+    socket: &mut Stream,
     max_body: usize,
     timeout: Duration,
 ) -> Result<Request, HttpError> {
@@ -296,7 +295,7 @@ pub fn quote(value: &str) -> String {
 }
 
 pub fn respond(
-    socket: &mut TcpStream,
+    socket: &mut Stream,
     status: u16,
     content_type: &str,
     body: &[u8],
@@ -310,7 +309,7 @@ pub fn respond(
     write_socket(socket, body)
 }
 
-fn write_socket(socket: &mut TcpStream, mut bytes: &[u8]) -> io::Result<()> {
+fn write_socket(socket: &mut Stream, mut bytes: &[u8]) -> io::Result<()> {
     while !bytes.is_empty() {
         if STOPPING.load(Ordering::Relaxed) {
             return Err(io::Error::other("gateway is stopping"));
@@ -330,7 +329,7 @@ fn write_socket(socket: &mut TcpStream, mut bytes: &[u8]) -> io::Result<()> {
     Ok(())
 }
 
-pub fn error(socket: &mut TcpStream, status: u16, message: &str) -> io::Result<()> {
+pub fn error(socket: &mut Stream, status: u16, message: &str) -> io::Result<()> {
     let body = format!(
         "{{\"error\":{{\"message\":{},\"type\":\"zcalld_error\",\"code\":{status}}}}}",
         quote(message)
@@ -363,7 +362,7 @@ pub fn reason(status: u16) -> &'static str {
 }
 
 pub struct Chunked<'a> {
-    pub socket: &'a mut TcpStream,
+    pub socket: &'a mut Stream,
     pub started: bool,
     pub status: u16,
     pub content_type: String,

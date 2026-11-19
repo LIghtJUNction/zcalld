@@ -11,7 +11,8 @@ struct Slist {
     data: *mut c_char,
     next: *mut Slist,
 }
-#[link(name = "curl")]
+#[cfg_attr(all(windows, target_env = "msvc"), link(name = "libcurl"))]
+#[cfg_attr(not(all(windows, target_env = "msvc")), link(name = "curl"))]
 unsafe extern "C" {
     fn curl_global_init(flags: c_long) -> c_int;
     fn curl_easy_init() -> *mut c_void;
