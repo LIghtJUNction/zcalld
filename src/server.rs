@@ -181,7 +181,47 @@ fn handle(socket: &mut Stream, config: &Config, plugins: &mut Plugins, client: &
             return;
         }
     };
-    let selected = match plugins.route(&inspect.model) {
+    if plugins.has_context() {
+        let context = match request_context(
+            &request,
+            source,
+            &inspect,
+            path,
+            inspect.stream || path_stream,
+        ) {
+            Ok(context) => context,
+            Err(error) => {
+                let _ = http::error(socket, 400, &error);
+                return;
+            }
+        };
+        if let Err(error) = plugins.context(&context) {
+            let _ = http::error(socket, 503, &error);
+            return;
+        }
+    }
+    let patched = match plugins.request(protocol_id(source), &request.body, config.max_body) {
+        Ok(value) => value,
+        Err(error) => {
+            let _ = http::error(socket, request_plugin_status(&error), &error);
+            return;
+        }
+    };
+    let original = patched.as_deref().unwrap_or(&request.body);
+    let patched_inspection = if patched.is_some() {
+        match protocol::inspect(source, original, path_model.as_deref()) {
+            Ok(value) => Some(value),
+            Err(error) => {
+                let _ = http::error(socket, 400, &error);
+                return;
+            }
+        }
+    } else {
+        None
+    };
+    let effective = patched_inspection.as_ref().unwrap_or(&inspect);
+    let stream = effective.stream || path_stream;
+    let selected = match plugins.route(&effective.model) {
         Ok(model) => model,
         Err(error) => {
             let _ = http::error(socket, 403, &error);
@@ -198,25 +238,6 @@ fn handle(socket: &mut Stream, config: &Config, plugins: &mut Plugins, client: &
     };
     let provider = &config.providers[route.provider];
     let (target_protocol, target_url, target_auth) = provider.for_protocol(source);
-    let patched = match plugins.request(protocol_id(source), &request.body, config.max_body) {
-        Ok(value) => value,
-        Err(error) => {
-            let _ = http::error(socket, request_plugin_status(&error), &error);
-            return;
-        }
-    };
-    let original = patched.as_deref().unwrap_or(&request.body);
-    let stream = if patched.is_some() {
-        match protocol::inspect(source, original, path_model.as_deref()) {
-            Ok(value) => value.stream || path_stream,
-            Err(error) => {
-                let _ = http::error(socket, 400, &error);
-                return;
-            }
-        }
-    } else {
-        inspect.stream || path_stream
-    };
     let body = match protocol::prepare_request(
         source,
         target_protocol,
@@ -292,8 +313,61 @@ fn handle(socket: &mut Stream, config: &Config, plugins: &mut Plugins, client: &
     }
 }
 
+fn request_context(
+    request: &Request,
+    protocol: Protocol,
+    inspection: &protocol::Inspection,
+    path: &str,
+    stream: bool,
+) -> Result<String, String> {
+    let first = |names: &[&str]| {
+        names
+            .iter()
+            .find_map(|name| request.header(name))
+            .unwrap_or("")
+    };
+    let agent = first(&["x-agent-name", "user-agent"]);
+    let session = first(&[
+        "session-id",
+        "session_id",
+        "x-session-id",
+        "x-codex-session-id",
+    ]);
+    let cwd = first(&["x-opencode-directory", "x-cwd"]);
+    for (name, value, maximum) in [
+        ("agent", agent, 512),
+        ("session", session, 1024),
+        ("cwd", cwd, 4096),
+    ] {
+        if value.len() > maximum {
+            return Err(format!("{name} context exceeds {maximum} bytes"));
+        }
+    }
+    let context = format!(
+        "{{\"protocol\":{},\"model\":{},\"stream\":{stream},\"path\":{},\"agent\":{},\"session\":{},\"cwd\":{},\"origin\":\"local\",\"kind\":\"generation\",\"phase\":\"request\"}}",
+        http::quote(protocol::protocol_name(protocol)),
+        http::quote(&inspection.model),
+        http::quote(path),
+        http::quote(agent),
+        http::quote(session),
+        http::quote(cwd)
+    );
+    if context.len() > 16 * 1024 {
+        return Err("request context exceeds 16 KiB".into());
+    }
+    Ok(context)
+}
+
 fn request_plugin_status(error: &str) -> u16 {
-    if error.contains("privacy filter unavailable; request held back") {
+    if [
+        "privacy filter unavailable; request held back",
+        "community plugin unavailable; request held back",
+        "all group members unavailable; request held back",
+        "routing control or observer failed; request held back",
+    ]
+    .iter()
+    .any(|message| error.contains(message))
+    {
         503
     } else if error.contains("request blocked by privacy policy") {
         400
@@ -811,6 +885,45 @@ fn execute(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn context_contains_only_whitelisted_client_metadata() {
+        let request = Request {
+            method: "POST".into(),
+            path: "/v1/responses?private=query".into(),
+            body: b"{}".to_vec(),
+            headers: vec![
+                ("authorization".into(), "Bearer local-secret".into()),
+                ("cookie".into(), "private-cookie".into()),
+                ("session-id".into(), "session-123".into()),
+                ("x-cwd".into(), "/project".into()),
+                ("user-agent".into(), "fixture".into()),
+            ],
+        };
+        let inspection = protocol::Inspection {
+            model: "public-model".into(),
+            stream: true,
+        };
+        let text = request_context(
+            &request,
+            Protocol::OpenAiResponses,
+            &inspection,
+            "/v1/responses",
+            true,
+        )
+        .unwrap();
+        let value = crate::state_json::parse(text.as_bytes()).unwrap();
+        assert_eq!(value.get("protocol").as_str(), Some("responses"));
+        assert_eq!(value.get("session").as_str(), Some("session-123"));
+        assert!(
+            !text.contains("local-secret")
+                && !text.contains("private-cookie")
+                && !text.contains("private=query")
+        );
+        assert!(matches!(
+            value.get("request"),
+            crate::state_json::Value::Null
+        ));
+    }
     #[test]
     fn upstream_headers_preserve_configured_account_without_local_authorization() {
         let text = "[provider upstream]\nbase_url=http://127.0.0.1:1/v1\nprotocol=responses\nheader.ChatGPT-Account-Id=account\nheader.OpenAI-Beta=configured-beta\n[route test]\nprovider=upstream\nmodel=upstream-model\n";

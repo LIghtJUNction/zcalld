@@ -129,6 +129,9 @@ impl Config {
         if let Some(privacy) = crate::extensions::privacy_plugin(path)? {
             config.plugins.push(privacy);
         }
+        if let Some(routing) = crate::extensions::routing_plugin(path)? {
+            config.plugins.push(routing);
+        }
         if config.plugins.len() > 32 {
             return Err("configuration exceeds plugin limit after managed extensions".into());
         }
