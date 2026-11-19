@@ -377,18 +377,28 @@ fn request_plugin_status(error: &str) -> u16 {
 }
 
 fn authenticated(request: &Request, config: &Config, socket: &Stream) -> bool {
-    if config.trust_loopback && socket.is_loopback_peer() {
+    let loopback = socket.is_loopback_peer();
+    if config.trust_loopback && loopback {
         return true;
     }
-    let Some(token) = &config.token else {
+    if config.token.is_none() && config.caller_keys.is_none() {
         return true;
-    };
+    }
     let supplied = request
         .header("authorization")
         .and_then(|value| value.strip_prefix("Bearer "))
         .or_else(|| request.header("x-api-key"))
         .or_else(|| request.header("x-goog-api-key"));
-    supplied.is_some_and(|value| http::constant_eq(value.as_bytes(), token.as_bytes()))
+    supplied.is_some_and(|value| {
+        let mut accepted = config
+            .token
+            .as_ref()
+            .is_some_and(|token| http::constant_eq(value.as_bytes(), token.as_bytes()));
+        if let Some(keys) = &config.caller_keys {
+            accepted |= keys.permits(value, loopback);
+        }
+        accepted
+    })
 }
 
 fn loopback_host(host: &str) -> bool {

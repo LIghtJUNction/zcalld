@@ -26,6 +26,19 @@ class Upstream(http.server.BaseHTTPRequestHandler):
         request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         self.server.requests.append({"body": request, "headers": dict(self.headers)})
         mode = self.server.mode
+        if mode == "refresh" and self.path == "/token":
+            self.server.refresh_started.set()
+            self.server.refresh_release.wait(3)
+            body = json.dumps({"access_token": "fixture-rotated-access", "refresh_token": "fixture-rotated-refresh", "expires_in": 3600}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            try:
+                self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            return
         if mode == "delayed":
             time.sleep(0.2)
         text = request["messages"][0]["content"] if mode in ("echo", "delayed", "hold") else "socket works"
@@ -104,6 +117,8 @@ class TransportTests(unittest.TestCase):
         self.log_files = []
         self.upstream.requests.clear()
         self.upstream.mode = "default"
+        self.upstream.refresh_started = threading.Event()
+        self.upstream.refresh_release = threading.Event()
         with socket.socket() as probe:
             probe.bind(("127.0.0.1", 0))
             self.port = probe.getsockname()[1]
@@ -253,6 +268,41 @@ class TransportTests(unittest.TestCase):
         self.assertLess(time.monotonic() - started, 3)
         connection.close()
 
+    def test_pending_codex_refresh_is_saved_before_gateway_shutdown(self):
+        self.community()
+        codex = Path(__file__).resolve().parents[1] / "extensions" / "compat" / "community" / "builtin" / "codex.mjs"
+        if not codex.is_file():
+            self.skipTest("requires the optional builtin provider adapter source")
+        origin = f"http://127.0.0.1:{self.upstream.server_port}"
+        (self.root / "provider.mjs").write_text(
+            f"import {{createCodex}} from {json.dumps(str(codex))};export default async()=>createCodex({{baseURL:{json.dumps(origin)},tokenURL:{json.dumps(origin + '/token')},testMode:true}});")
+        self.config.write_text(self.config.read_text().replace(
+            "protocol=chat\nplugin=fixture\nplugin_npm=@ai-sdk/openai-compatible",
+            "protocol=responses\nplugin=builtin:codex\nplugin_account=builtin:codex#fixture\nplugin_npm=@ai-sdk/openai"))
+        registry = json.loads((self.root / "registry.json").read_text())
+        registry["config"] = {"provider": {"builtin:codex": {"npm": "@ai-sdk/openai", "models": {"upstream-test": {"name": "Fixture"}}}}}
+        (self.root / "registry.json").write_text(json.dumps(registry))
+        auth = self.root / "plugin-auth.json"
+        auth.write_text(json.dumps({"builtin:codex#fixture": {"type": "oauth", "access": "fixture-expired-access", "refresh": "fixture-old-refresh", "expires": 1}}))
+        self.upstream.mode = "refresh"
+        process = self.start()
+        connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        try:
+            connection.request("POST", "/v1/responses", json.dumps({"model": "test", "input": "fixture", "stream": False}), {"Content-Type": "application/json"})
+            self.assertTrue(self.upstream.refresh_started.wait(3), "token refresh did not start")
+            process.send_signal(signal.CTRL_BREAK_EVENT if os.name == "nt" else signal.SIGTERM)
+            time.sleep(0.15)
+            self.assertIsNone(process.poll(), "gateway killed its refreshing host before the token was saved")
+            self.upstream.refresh_release.set()
+            self.assertEqual(process.wait(timeout=4), 0)
+            saved = json.loads(auth.read_text())["builtin:codex#fixture"]
+            self.assertEqual(saved["refresh"], "fixture-rotated-refresh")
+            self.assertGreater(saved["expires"], time.time() * 1000)
+            self.assertEqual(len(self.upstream.requests), 1, "cancelled generation was replayed after refresh")
+        finally:
+            self.upstream.refresh_release.set()
+            connection.close()
+
     def test_tcp_start_health_and_shutdown(self):
         self.write_config()
         process = self.start()
@@ -279,6 +329,42 @@ class TransportTests(unittest.TestCase):
         self.assertEqual(request(connection(), "/v1/models", headers={"Authorization": "Bearer old-agent-token"})[0], 200)
         self.assertEqual(request(connection(), "/v1/models", headers={"Origin": "http://evil.example"})[0], 403)
         self.assertEqual(request(connection(), "/v1/models", headers={"Host": "evil.example"})[0], 403)
+
+    def test_private_caller_keys_authenticate_without_becoming_upstream_credentials(self):
+        self.write_config()
+        keys = self.root / "caller-keys.json"
+        keys.write_text(json.dumps([
+            {"id": "local", "name": "Local fixture", "lan": False, "secret": "fixture-caller-local"},
+            {"id": "lan", "name": "LAN fixture", "lan": True, "secret": "fixture-caller-lan"},
+        ]))
+        if os.name == "posix":
+            keys.chmod(0o600)
+        text = self.config.read_text().replace("[server]\n", "[server]\ncaller_keys_file=caller-keys.json\n")
+        self.config.write_text(text)
+        process = self.start()
+        connection = lambda: http.client.HTTPConnection("127.0.0.1", self.port, timeout=3)
+        for key, status in ((None, 401), ("fixture-caller-local", 200), ("fixture-caller-lan", 200), ("fixture-caller-wrong", 401)):
+            headers = {} if key is None else {"Authorization": "Bearer " + key}
+            self.assertEqual(request(connection(), "/v1/models", headers=headers)[0], status)
+        status, _ = request(connection(), "/v1/chat/completions", {"model": "test", "messages": [{"role": "user", "content": "fixture"}]}, {"x-api-key": "fixture-caller-lan"})
+        self.assertEqual(status, 200)
+        forwarded = {key.lower(): value for key, value in self.upstream.requests[-1]["headers"].items()}
+        self.assertNotIn("authorization", forwarded)
+        self.assertNotIn("x-api-key", forwarded)
+        self.stop(process)
+        keys.write_text("[]")
+        self.start()
+        self.assertEqual(request(connection(), "/v1/models")[0], 401, "an explicitly empty key file must not open the gateway")
+
+    def test_nonloopback_listener_requires_a_lan_enabled_credential(self):
+        self.write_config()
+        keys = self.root / "caller-keys.json"
+        keys.write_text(json.dumps([{"id": "local", "secret": "fixture-local", "lan": False}]))
+        if os.name == "posix":
+            keys.chmod(0o600)
+        self.config.write_text(self.config.read_text().replace("[server]\n", "[server]\ncaller_keys_file=caller-keys.json\n").replace("listen=127.0.0.1:", "listen=0.0.0.0:"))
+        process = self.start(ready=False)
+        self.assertNotEqual(process.wait(timeout=3), 0)
 
     @unittest.skipUnless(os.name == "posix", "Unix domain sockets")
     def test_dual_http_streaming_and_socket_preference(self):

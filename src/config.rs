@@ -1,8 +1,10 @@
-//! Small, strict configuration reader. Credentials are resolved from the environment.
+//! Small, strict configuration reader with separate inbound and upstream credentials.
+mod caller_keys;
 use crate::{
     plugins::PluginSpec,
     protocol::{self, Protocol},
 };
+pub use caller_keys::CallerKeys;
 use std::{
     collections::BTreeMap,
     env, fs,
@@ -82,6 +84,7 @@ pub struct Config {
     pub default_max_tokens: u64,
     pub token_env: Option<String>,
     pub token: Option<String>,
+    pub caller_keys: Option<CallerKeys>,
     pub providers: Vec<Provider>,
     pub routes: Vec<Route>,
     pub plugins: Vec<PluginSpec>,
@@ -191,8 +194,23 @@ impl Config {
             .as_deref()
             .map(|name| secret(name, directory))
             .transpose()?;
-        if listen.is_some_and(|address| !address.ip().is_loopback()) && token.is_none() {
-            return Err("a non-loopback listener requires token_env".into());
+        let caller_keys = server
+            .remove("caller_keys_file")
+            .map(|value| {
+                if value.is_empty() {
+                    Err("caller_keys_file must name a private JSON file".into())
+                } else {
+                    caller_keys::load(&resolve(directory, &value))
+                }
+            })
+            .transpose()?;
+        if listen.is_some_and(|address| !address.ip().is_loopback())
+            && token.is_none()
+            && !caller_keys.as_ref().is_some_and(CallerKeys::allows_lan)
+        {
+            return Err(
+                "a non-loopback listener requires token_env or a caller key with lan=true".into(),
+            );
         }
         unknown(&server, "server")?;
         let mut providers = Vec::new();
@@ -349,6 +367,7 @@ impl Config {
             default_max_tokens,
             token_env,
             token,
+            caller_keys,
             providers,
             routes,
             plugins,
