@@ -8,18 +8,19 @@ use std::{
     process::{Child, ChildStdin, Command, Stdio},
     sync::{
         Arc, Mutex, OnceLock, Weak,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         mpsc,
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 const MAX_LINE: usize = 24 * 1024 * 1024;
 const MAX_CALLS: usize = 64;
 static HOSTS: OnceLock<Mutex<HashMap<String, Weak<Inner>>>> = OnceLock::new();
 struct Inner {
-    input: Mutex<ChildStdin>,
+    input: Mutex<Option<ChildStdin>>,
     child: Mutex<Child>,
-    calls: Mutex<HashMap<u64, mpsc::Sender<Value>>>,
+    calls: Arc<Mutex<HashMap<u64, mpsc::Sender<Value>>>>,
+    alive: Arc<AtomicBool>,
     next: AtomicU64,
 }
 #[derive(Clone)]
@@ -32,12 +33,34 @@ pub struct Call {
 }
 impl Drop for Inner {
     fn drop(&mut self) {
-        if let Ok(c) = self.child.get_mut() {
-            let _ = c.kill();
-            let _ = c.wait();
+        self.alive.store(false, Ordering::Release);
+        if let Ok(mut calls) = self.calls.lock() {
+            calls.clear();
         }
+        // EOF asks the pinned host to finish any rotating-token write before exit.
+        self.input
+            .get_mut()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        let child = self
+            .child
+            .get_mut()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let deadline = Instant::now() + Duration::from_secs(35);
+        loop {
+            match child.try_wait() {
+                Ok(Some(_)) => return,
+                Ok(None) if Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(10))
+                }
+                _ => break,
+            }
+        }
+        let _ = child.kill();
+        let _ = child.wait();
     }
 }
+
 impl Host {
     pub fn shared(
         key: &str,
@@ -66,18 +89,24 @@ impl Host {
         let input = child.stdin.take().ok_or("worker stdin unavailable")?;
         let output = child.stdout.take().ok_or("worker stdout unavailable")?;
         let inner = Arc::new(Inner {
-            input: Mutex::new(input),
+            input: Mutex::new(Some(input)),
             child: Mutex::new(child),
-            calls: Mutex::new(HashMap::new()),
+            calls: Arc::new(Mutex::new(HashMap::new())),
+            alive: Arc::new(AtomicBool::new(true)),
             next: AtomicU64::new(1),
         });
         hosts.insert(key.into(), Arc::downgrade(&inner));
-        let weak = Arc::downgrade(&inner);
+        let calls = Arc::clone(&inner.calls);
+        let alive = Arc::clone(&inner.alive);
         std::thread::Builder::new()
             .name("zcalld-compat-read".into())
             .spawn(move || {
                 let mut reader = BufReader::with_capacity(65536, output);
                 loop {
+                    if !alive.load(Ordering::Acquire) {
+                        let _ = std::io::copy(&mut reader, &mut std::io::sink());
+                        break;
+                    }
                     let mut line = Vec::new();
                     match reader
                         .by_ref()
@@ -87,32 +116,40 @@ impl Host {
                         Ok(0) | Err(_) => break,
                         Ok(_) => {}
                     }
-                    if line.len() > MAX_LINE || line.last() != Some(&b'\n') {
+                    let value = if line.len() <= MAX_LINE && line.last() == Some(&b'\n') {
+                        json::parse(&line).ok()
+                    } else {
+                        None
+                    };
+                    let Some(value) = value else {
+                        alive.store(false, Ordering::Release);
+                        if let Ok(mut calls) = calls.lock() {
+                            calls.clear();
+                        }
+                        // Keep stdout open while EOF drains a pending credential refresh.
+                        let _ = std::io::copy(&mut reader, &mut std::io::sink());
                         break;
-                    }
-                    let Ok(value) = json::parse(&line) else { break };
-                    let Some(inner) = weak.upgrade() else { break };
+                    };
                     if let Some(id) = value.get("id").as_u64() {
-                        if let Ok(calls) = inner.calls.lock() {
+                        if let Ok(calls) = calls.lock() {
                             if let Some(tx) = calls.get(&id) {
                                 let _ = tx.send(value);
                             }
                         }
                     }
                 }
-                if let Some(inner) = weak.upgrade() {
-                    if let Ok(mut calls) = inner.calls.lock() {
-                        calls.clear();
-                    }
-                    if let Ok(mut child) = inner.child.lock() {
-                        let _ = child.kill();
-                    }
+                alive.store(false, Ordering::Release);
+                if let Ok(mut calls) = calls.lock() {
+                    calls.clear();
                 }
             })
             .map_err(|_| "worker reader unavailable")?;
         Ok((Self(inner), true))
     }
     pub fn start(&self, mut request: Value) -> Result<Call, String> {
+        if !self.0.alive.load(Ordering::Acquire) {
+            return Err("compatibility worker ended".into());
+        }
         let id = self.0.next.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = mpsc::channel();
         {
@@ -146,10 +183,15 @@ impl Host {
             return Err("compatibility request exceeds limit".into());
         }
         line.push('\n');
+        if !self.0.alive.load(Ordering::Acquire) {
+            return Err("compatibility worker ended".into());
+        }
         self.0
             .input
             .lock()
             .map_err(|_| "worker input poisoned")?
+            .as_mut()
+            .ok_or("compatibility worker ended")?
             .write_all(line.as_bytes())
             .map_err(|_| "compatibility worker ended".to_owned())
     }
@@ -290,6 +332,35 @@ pub fn decode(s: &str) -> Result<Vec<u8>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
+    #[test]
+    fn last_lease_drains_stdout_and_waits_for_private_write() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir =
+            std::env::temp_dir().join(format!("zcalld-drain-{}-{unique}", std::process::id()));
+        std::fs::create_dir(&dir).unwrap();
+        let checkpoint = dir.join("refresh-checkpoint");
+        let args = vec![
+            "-c".into(),
+            "cat >/dev/null; sleep 0.1; head -c 2097152 /dev/zero; printf rotated > \"$1\"".into(),
+            "fixture".into(),
+            checkpoint.to_string_lossy().into_owned(),
+        ];
+        let (host, fresh) = Host::shared(
+            &dir.to_string_lossy(),
+            Path::new("/bin/sh"),
+            &args,
+            Some(&dir),
+        )
+        .unwrap();
+        assert!(fresh);
+        drop(host);
+        assert_eq!(std::fs::read(&checkpoint).unwrap(), b"rotated");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
     #[test]
     fn encodings_roundtrip() {
         for v in [b"".as_slice(), b"a", b"ab", b"abc", b"hello\x00world"] {

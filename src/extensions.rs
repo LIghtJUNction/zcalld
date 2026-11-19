@@ -37,12 +37,12 @@ fn helper() -> Result<PathBuf, String> {
             .join("extensions/compat/bin")
             .join(&file),
     ];
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            candidates.insert(0, dir.join("libexec/zcalld").join(&file));
-            if let Some(prefix) = dir.parent() {
-                candidates.insert(0, prefix.join("libexec/zcalld").join(&file));
-            }
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(dir) = exe.parent()
+    {
+        candidates.insert(0, dir.join("libexec/zcalld").join(&file));
+        if let Some(prefix) = dir.parent() {
+            candidates.insert(0, prefix.join("libexec/zcalld").join(&file));
         }
     }
     for path in candidates {
@@ -127,12 +127,12 @@ fn library(kind: &str) -> Result<PathBuf, String> {
             .join("target/debug")
             .join(&name),
     ];
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            candidates.insert(0, dir.join("plugins").join(&name));
-            if let Some(prefix) = dir.parent() {
-                candidates.insert(0, prefix.join("lib/zcalld/plugins").join(&name));
-            }
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(dir) = exe.parent()
+    {
+        candidates.insert(0, dir.join("plugins").join(&name));
+        if let Some(prefix) = dir.parent() {
+            candidates.insert(0, prefix.join("lib/zcalld/plugins").join(&name));
         }
     }
     for path in candidates {
