@@ -14,6 +14,9 @@ use std::{
     time::{Duration, Instant},
 };
 
+const MAX_GROUP_ATTEMPTS: usize = 4;
+const RETRY_BODY_LIMIT: usize = 64 * 1024;
+
 pub fn serve(config: Config) -> Result<(), String> {
     system::setup_signals().map_err(|e| e.to_string())?;
     curl::init()?;
@@ -125,7 +128,6 @@ fn accept(listeners: &mut Listeners, sender: &mpsc::SyncSender<Stream>) -> Resul
 }
 
 fn handle(socket: &mut Stream, config: &Config, plugins: &mut Plugins, client: &mut Client) {
-    let started = Instant::now();
     let request = match http::read_request(
         socket,
         config.max_body,
@@ -221,95 +223,176 @@ fn handle(socket: &mut Stream, config: &Config, plugins: &mut Plugins, client: &
     };
     let effective = patched_inspection.as_ref().unwrap_or(&inspect);
     let stream = effective.stream || path_stream;
-    let selected = match plugins.route(&effective.model) {
+    let mut selected = match plugins.route(&effective.model) {
         Ok(model) => model,
         Err(error) => {
             let _ = http::error(socket, 403, &error);
             return;
         }
     };
-    let Some(route) = config.route(&selected) else {
-        let _ = http::error(
-            socket,
-            404,
-            "unknown model; list configured models with GET /v1/models",
-        );
-        return;
-    };
-    let provider = &config.providers[route.provider];
-    let (target_protocol, target_url, target_auth) = provider.for_protocol(source);
-    let body = match protocol::prepare_request(
-        source,
-        target_protocol,
-        original,
-        &route.model,
-        stream,
-        config.default_max_tokens,
-    ) {
-        Ok(body) if body.len() <= config.max_body => body,
-        Ok(_) => {
-            let _ = http::error(socket, 413, "converted request exceeds max_body_bytes");
+    let deadline = Instant::now() + Duration::from_millis(config.upstream_timeout_ms);
+    let mut attempted = Vec::with_capacity(MAX_GROUP_ATTEMPTS);
+    let mut retry_body: Option<Vec<u8>> = None;
+    for attempt in 0..MAX_GROUP_ATTEMPTS {
+        let Some(route) = config.route(&selected) else {
+            let _ = http::error(
+                socket,
+                404,
+                "unknown model; list configured models with GET /v1/models",
+            );
             return;
-        }
-        Err(error) => {
-            let _ = http::error(socket, 422, &error);
-            return;
-        }
-    };
-    let url = match protocol::endpoint(target_url, target_protocol, &route.model, stream) {
-        Ok(url) => url,
-        Err(error) => {
-            let _ = http::error(socket, 500, &error);
-            return;
-        }
-    };
-    let headers = upstream_headers(provider, &request, stream, target_protocol, target_auth);
-    let options = curl::Options {
-        url: &url,
-        body: &body,
-        headers: &headers,
-        timeout_ms: config.upstream_timeout_ms,
-        connect_timeout_ms: config.connect_timeout_ms,
-    };
-    let forward = ForwardOptions {
-        source: target_protocol,
-        target: source,
-        model: &inspect.model,
-        stream,
-        maximum: config.max_response,
-    };
-    let upstream = Upstream {
-        client,
-        plugins,
-        provider,
-        model: &route.model,
-    };
-    let outcome = if stream && source != target_protocol {
-        match protocol::with_stream_converter(
-            target_protocol,
+        };
+        let provider = &config.providers[route.provider];
+        let (target_protocol, target_url, target_auth) = provider.for_protocol(source);
+        attempted.push((route.provider, target_protocol, route.model.clone()));
+        let input = retry_body.as_deref().unwrap_or(original);
+        let body = match protocol::prepare_request(
             source,
-            &inspect.model,
-            |transform| execute(upstream, socket, options, forward, Some(transform)),
+            target_protocol,
+            input,
+            &route.model,
+            stream,
+            config.default_max_tokens,
         ) {
-            Ok(outcome) => outcome,
+            Ok(body) if body.len() <= config.max_body => body,
+            Ok(_) => {
+                let _ = http::error(socket, 413, "converted request exceeds max_body_bytes");
+                return;
+            }
             Err(error) => {
                 let _ = http::error(socket, 422, &error);
-                Outcome {
-                    status: 422,
-                    bytes: 0,
+                return;
+            }
+        };
+        let url = match protocol::endpoint(target_url, target_protocol, &route.model, stream) {
+            Ok(url) => url,
+            Err(error) => {
+                let _ = http::error(socket, 500, &error);
+                return;
+            }
+        };
+        let remaining = deadline
+            .saturating_duration_since(Instant::now())
+            .as_millis()
+            .min(u64::MAX as u128) as u64;
+        if remaining == 0 || STOPPING.load(Ordering::Relaxed) {
+            let _ = http::error(
+                socket,
+                503,
+                "gateway request deadline reached or service is stopping",
+            );
+            return;
+        }
+        let headers = upstream_headers(provider, &request, stream, target_protocol, target_auth);
+        let options = curl::Options {
+            url: &url,
+            body: &body,
+            headers: &headers,
+            timeout_ms: remaining,
+            connect_timeout_ms: config.connect_timeout_ms.min(remaining),
+        };
+        let forward = ForwardOptions {
+            source: target_protocol,
+            target: source,
+            model: &inspect.model,
+            stream,
+            maximum: config.max_response,
+            defer_rejections: plugins.has_retry() && attempt + 1 < MAX_GROUP_ATTEMPTS,
+        };
+        let upstream = Upstream {
+            client,
+            plugins,
+            provider,
+            model: &route.model,
+        };
+        let attempt_started = Instant::now();
+        let mut outcome = if stream && source != target_protocol {
+            match protocol::with_stream_converter(
+                target_protocol,
+                source,
+                &inspect.model,
+                |transform| execute(upstream, socket, options, forward, Some(transform)),
+            ) {
+                Ok(outcome) => outcome,
+                Err(error) => {
+                    let _ = http::error(socket, 422, &error);
+                    Outcome {
+                        status: 422,
+                        bytes: 0,
+                        rejected: None,
+                    }
                 }
             }
+        } else {
+            execute(upstream, socket, options, forward, None)
+        };
+        // Observers see each real upstream attempt before retry selection. The
+        // router can cool the refused member without re-running classification.
+        if let Err(error) = plugins.observe(
+            outcome.status as u32,
+            attempt_started.elapsed().as_millis().min(u64::MAX as u128) as u64,
+            request.body.len() as u64,
+            outcome.bytes as u64,
+        ) {
+            eprintln!("plugin observer: {error}");
+            if outcome.rejected.is_some() {
+                let _ = http::error(socket, 503, "routing observer failed; request held back");
+            }
+            return;
         }
-    } else {
-        execute(upstream, socket, options, forward, None)
-    };
-    if let Err(error) = plugins.observe(
-        outcome.status as u32,
-        started.elapsed().as_millis().min(u64::MAX as u128) as u64,
-        request.body.len() as u64,
-        outcome.bytes as u64,
-    ) {
-        eprintln!("plugin observer: {error}");
+        let Some(rejected) = outcome.rejected.take() else {
+            return;
+        };
+        if STOPPING.load(Ordering::Relaxed) || Instant::now() >= deadline {
+            send_rejection(socket, plugins, rejected, config.max_response);
+            return;
+        }
+        let next = match plugins.retry(
+            protocol_id(source),
+            outcome.status as u32,
+            &selected,
+            input,
+            config.max_body,
+        ) {
+            Ok(Some(next)) => next,
+            Ok(None) => {
+                send_rejection(socket, plugins, rejected, config.max_response);
+                return;
+            }
+            Err(error) => {
+                let _ = http::error(socket, 503, &error);
+                return;
+            }
+        };
+        let Some(next_route) = config.route(&next.model) else {
+            let _ = http::error(socket, 503, "retry plugin selected an unknown model");
+            return;
+        };
+        let (next_protocol, _, _) = config.providers[next_route.provider].for_protocol(source);
+        if attempted.iter().any(|(provider, protocol, model)| {
+            *provider == next_route.provider
+                && *protocol == next_protocol
+                && *model == next_route.model
+        }) || Instant::now() >= deadline
+        {
+            send_rejection(socket, plugins, rejected, config.max_response);
+            return;
+        }
+        if let Some(body) = next.body {
+            match protocol::inspect(source, &body, path_model.as_deref()) {
+                Ok(next_inspection) if (next_inspection.stream || path_stream) == stream => {}
+                _ => {
+                    let _ = http::error(
+                        socket,
+                        503,
+                        "retry plugin returned an invalid request or changed stream mode",
+                    );
+                    return;
+                }
+            }
+            retry_body = Some(body);
+        }
+        selected = next.model;
     }
 }
 
@@ -553,6 +636,13 @@ fn protocol_id(protocol: Protocol) -> u32 {
 struct Outcome {
     status: u16,
     bytes: usize,
+    rejected: Option<RejectedResponse>,
+}
+struct RejectedResponse {
+    status: u16,
+    content_type: String,
+    extra: Vec<(String, String)>,
+    body: Vec<u8>,
 }
 
 struct Upstream<'a> {
@@ -679,6 +769,7 @@ struct ForwardOptions<'a> {
     model: &'a str,
     stream: bool,
     maximum: usize,
+    defer_rejections: bool,
 }
 struct Forward<'s, 't, 'f, 'p> {
     writer: Chunked<'s>,
@@ -689,6 +780,24 @@ struct Forward<'s, 't, 'f, 'p> {
     convert: bool,
     header_bytes: usize,
     ready: bool,
+    defer_rejections: bool,
+    deferred_rejection: bool,
+}
+impl Forward<'_, '_, '_, '_> {
+    fn begin_response(&mut self) -> Result<(), String> {
+        let content_type = if self.convert
+            && (200..300).contains(&self.writer.status)
+            && self.writer.status != 204
+        {
+            "application/json"
+        } else {
+            &self.writer.content_type
+        };
+        self.plugins
+            .response_begin(self.writer.status as u32, content_type)?;
+        self.response_begun = true;
+        Ok(())
+    }
 }
 impl Sink for Forward<'_, '_, '_, '_> {
     fn header(&mut self, bytes: &[u8]) -> Result<(), String> {
@@ -712,20 +821,13 @@ impl Sink for Forward<'_, '_, '_, '_> {
             self.writer.content_type = "application/json".into();
             self.writer.extra.clear();
             self.ready = false;
+            self.deferred_rejection = false;
         } else if line.is_empty() {
             self.ready = self.writer.status >= 200;
-            if self.ready {
-                let content_type = if self.convert
-                    && (200..300).contains(&self.writer.status)
-                    && self.writer.status != 204
-                {
-                    "application/json"
-                } else {
-                    &self.writer.content_type
-                };
-                self.plugins
-                    .response_begin(self.writer.status as u32, content_type)?;
-                self.response_begun = true;
+            self.deferred_rejection =
+                self.ready && self.defer_rejections && matches!(self.writer.status, 429 | 503);
+            if self.ready && !self.deferred_rejection {
+                self.begin_response()?;
             }
         } else {
             let (key, value) = line.split_once(':').ok_or("malformed upstream header")?;
@@ -748,6 +850,24 @@ impl Sink for Forward<'_, '_, '_, '_> {
     fn body(&mut self, bytes: &[u8]) -> Result<(), String> {
         if !self.ready {
             return Err("upstream body arrived before final headers".into());
+        }
+        if self.deferred_rejection {
+            let maximum = RETRY_BODY_LIMIT.min(self.writer.maximum);
+            if bytes.len() <= maximum.saturating_sub(self.buffered.len()) {
+                self.buffered.extend_from_slice(bytes);
+                return Ok(());
+            }
+            // Large rejection bodies retain their original streaming behavior;
+            // bounded failover is abandoned before writing any of their bytes.
+            self.deferred_rejection = false;
+            self.begin_response()?;
+            let buffered = std::mem::take(&mut self.buffered);
+            ResponseWriter {
+                writer: &mut self.writer,
+                plugins: self.plugins,
+            }
+            .write_all(&buffered)
+            .map_err(|e| e.to_string())?;
         }
         if self.convert && (200..300).contains(&self.writer.status) && self.writer.status != 204 {
             if bytes.len() > self.writer.maximum.saturating_sub(self.buffered.len()) {
@@ -801,6 +921,7 @@ fn execute(
                 return Outcome {
                     status: 502,
                     bytes: 0,
+                    rejected: None,
                 };
             }
         }
@@ -824,6 +945,8 @@ fn execute(
         convert: !forward.stream && forward.source != forward.target,
         header_bytes: 0,
         ready: false,
+        defer_rejections: forward.defer_rejections,
+        deferred_rejection: false,
     };
     let result = match &mut community {
         Some(response) => plugin_perform(
@@ -832,8 +955,22 @@ fn execute(
             Duration::from_millis(options.timeout_ms),
         ),
         None => client.perform(options, &mut sink),
+    };
+    // Only a complete, explicitly refused response is eligible. A timeout,
+    // disconnect, 200 response or already forwarded body is never replayed.
+    if result.is_ok() && sink.deferred_rejection {
+        return Outcome {
+            status: sink.writer.status,
+            bytes: sink.buffered.len(),
+            rejected: Some(RejectedResponse {
+                status: sink.writer.status,
+                content_type: std::mem::take(&mut sink.writer.content_type),
+                extra: std::mem::take(&mut sink.writer.extra),
+                body: std::mem::take(&mut sink.buffered),
+            }),
+        };
     }
-    .and_then(|()| {
+    let result = result.and_then(|()| {
         if !sink.ready {
             return Err("upstream sent no final response".into());
         }
@@ -877,24 +1014,157 @@ fn execute(
         Ok(()) => Outcome {
             status: sink.writer.status,
             bytes: sink.writer.bytes,
+            rejected: None,
         },
         Err(error) => {
             if !sink.writer.started {
                 let _ = http::error(sink.writer.socket, 502, &error);
             }
             // An interrupted chunked response has no final zero chunk: clients
-            // observe truncation. Generation POSTs are never replayed.
+            // observe truncation. An uncertain generation is never replayed.
             Outcome {
                 status: 502,
                 bytes: sink.writer.bytes,
+                rejected: None,
             }
         }
+    }
+}
+
+fn send_rejection(
+    socket: &mut Stream,
+    plugins: &mut Plugins,
+    rejected: RejectedResponse,
+    maximum: usize,
+) {
+    let mut writer = Chunked {
+        socket,
+        started: false,
+        status: rejected.status,
+        content_type: rejected.content_type,
+        extra: rejected.extra,
+        bytes: 0,
+        maximum,
+    };
+    let result = (|| -> Result<(), String> {
+        plugins.response_begin(writer.status as u32, &writer.content_type)?;
+        ResponseWriter {
+            writer: &mut writer,
+            plugins,
+        }
+        .write_all(&rejected.body)
+        .map_err(|e| e.to_string())?;
+        if let Some(bytes) =
+            plugins.response_write(&[], true, maximum.saturating_sub(writer.bytes))?
+        {
+            writer.write_all(&bytes).map_err(|e| e.to_string())?;
+        }
+        writer.finish().map_err(|e| e.to_string())
+    })();
+    if let Err(error) = result
+        && !writer.started
+    {
+        let _ = http::error(writer.socket, 502, &error);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn downstream() -> (Stream, std::thread::JoinHandle<Vec<u8>>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let mut reader = std::net::TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        reader
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        let (writer, _) = listener.accept().unwrap();
+        let output = std::thread::spawn(move || {
+            let mut bytes = Vec::new();
+            reader.read_to_end(&mut bytes).unwrap();
+            bytes
+        });
+        (Stream::Tcp(writer), output)
+    }
+
+    fn rejection_forward<'a>(
+        socket: &'a mut Stream,
+        plugins: &'a mut Plugins,
+    ) -> Forward<'a, 'a, 'a, 'a> {
+        Forward {
+            writer: Chunked {
+                socket,
+                started: false,
+                status: 502,
+                content_type: "application/json".into(),
+                extra: Vec::new(),
+                bytes: 0,
+                maximum: RETRY_BODY_LIMIT * 2,
+            },
+            plugins,
+            response_begun: false,
+            transform: None,
+            buffered: Vec::new(),
+            convert: false,
+            header_bytes: 0,
+            ready: false,
+            defer_rejections: true,
+            deferred_rejection: false,
+        }
+    }
+
+    #[test]
+    fn only_explicit_refusals_hold_back_downstream_headers() {
+        for status in [200, 401, 429, 500, 502, 503, 504] {
+            let (mut socket, output) = downstream();
+            let mut plugins = Plugins::load(&[]).unwrap();
+            let deferred = matches!(status, 429 | 503);
+            {
+                let mut sink = rejection_forward(&mut socket, &mut plugins);
+                sink.header(format!("HTTP/1.1 {status} Fixture\r\n").as_bytes())
+                    .unwrap();
+                sink.header(b"Content-Type: application/json\r\n").unwrap();
+                sink.header(b"\r\n").unwrap();
+                sink.body(b"{\"fixture\":true}").unwrap();
+                assert_eq!(sink.deferred_rejection, deferred);
+                assert_eq!(sink.writer.started, !deferred);
+                assert_eq!(sink.response_begun, !deferred);
+                if !deferred {
+                    sink.writer.finish().unwrap();
+                }
+            }
+            drop(socket);
+            let bytes = output.join().unwrap();
+            assert_eq!(bytes.is_empty(), deferred);
+        }
+    }
+
+    #[test]
+    fn oversized_refusal_streams_original_response_without_retry() {
+        let (mut socket, output) = downstream();
+        let mut plugins = Plugins::load(&[]).unwrap();
+        {
+            let mut sink = rejection_forward(&mut socket, &mut plugins);
+            sink.header(b"HTTP/1.1 503 Service Unavailable\r\n")
+                .unwrap();
+            sink.header(b"Retry-After: 9\r\n").unwrap();
+            sink.header(b"\r\n").unwrap();
+            sink.body(b"prefix").unwrap();
+            sink.body(&vec![b'x'; RETRY_BODY_LIMIT]).unwrap();
+            assert!(!sink.deferred_rejection);
+            assert!(sink.writer.started);
+            assert_eq!(sink.writer.bytes, RETRY_BODY_LIMIT + 6);
+            sink.writer.finish().unwrap();
+        }
+        drop(socket);
+        let bytes = output.join().unwrap();
+        let text = std::str::from_utf8(&bytes).unwrap();
+        assert!(text.starts_with("HTTP/1.1 503"));
+        assert!(text.contains("Retry-After: 9\r\n"));
+        assert!(text.contains("6\r\nprefix\r\n"));
+        assert!(text.ends_with("0\r\n\r\n"));
+    }
+
     #[test]
     fn context_contains_only_whitelisted_client_metadata() {
         let request = Request {

@@ -3,8 +3,8 @@
 use std::{path::PathBuf, rc::Rc};
 use zcalld_plugin_api::{
     ContextPluginApi, ContextPluginProxy, GatewayPluginApi, GatewayPluginProxy, MAX_MODEL_BYTES,
-    ProviderPluginApi, ProviderPluginProxy, ResponsePluginApi, ResponsePluginProxy, protocol,
-    status,
+    ProviderPluginApi, ProviderPluginProxy, ResponsePluginApi, ResponsePluginProxy, RetryPluginApi,
+    RetryPluginProxy, protocol, status,
 };
 use zplugin::{Error, Plugin, UnloadPolicy};
 
@@ -33,6 +33,12 @@ struct Entry {
     context: Option<ContextPluginProxy<'static>>,
     response: Option<ResponsePluginProxy<'static>>,
     provider: Option<ProviderPluginProxy<'static>>,
+    retry: Option<RetryPluginProxy<'static>>,
+}
+
+pub struct RetryPlan {
+    pub model: String,
+    pub body: Option<Vec<u8>>,
 }
 
 /// Each worker constructs and owns this value on its own thread.
@@ -111,6 +117,17 @@ impl Plugins {
                 Err(Error::InterfaceNotFound) => None,
                 Err(e) => return Err(hook_error(&path, "provider create", e)),
             };
+            let retry = match Plugin::create_owned(&library, RetryPluginApi::SPEC) {
+                Ok(instance) => {
+                    let mut p = RetryPluginApi::wrap(instance)
+                        .map_err(|e| hook_error(&path, "retry bind", e))?;
+                    p.configure(&spec.config)
+                        .map_err(|e| hook_error(&path, "retry configure", e))?;
+                    Some(p)
+                }
+                Err(Error::InterfaceNotFound) => None,
+                Err(e) => return Err(hook_error(&path, "retry create", e)),
+            };
             if provider.is_some() && entries.iter().any(|e: &Entry| e.provider.is_some()) {
                 return Err("only one community provider host may be configured".into());
             }
@@ -120,6 +137,7 @@ impl Plugins {
                 context,
                 response,
                 provider,
+                retry,
             });
         }
         Ok(Self { entries })
@@ -188,6 +206,67 @@ impl Plugins {
 
     pub fn has_context(&self) -> bool {
         self.entries.iter().any(|entry| entry.context.is_some())
+    }
+
+    pub fn has_retry(&self) -> bool {
+        self.entries.iter().any(|entry| entry.retry.is_some())
+    }
+
+    /// The first willing retry controller selects an alternative and adjusts
+    /// only the already filtered request. General middleware is never replayed.
+    pub fn retry(
+        &mut self,
+        protocol: u32,
+        status: u32,
+        previous_model: &str,
+        body: &[u8],
+        max_body: usize,
+    ) -> Result<Option<RetryPlan>, String> {
+        if !matches!(status, 429 | 503) {
+            return Ok(None);
+        }
+        validate_model(previous_model)?;
+        if !protocol::is_supported(protocol) || max_body == 0 || body.len() > max_body {
+            return Err("invalid protocol or request size for group retry".into());
+        }
+        for entry in &mut self.entries {
+            let Some(retry) = &mut entry.retry else {
+                continue;
+            };
+            let mut selected = [0_u8; MAX_MODEL_BYTES];
+            let count = retry
+                .retry(status, previous_model, &mut selected)
+                .map_err(|e| hook_error(&entry.path, "retry route", e))?;
+            let count = checked_count(count, selected.len(), &entry.path)?;
+            if count == 0 {
+                continue;
+            }
+            let model = std::str::from_utf8(&selected[..count])
+                .map_err(|_| "retry plugin returned an invalid UTF-8 model")?;
+            validate_model(model)?;
+            let mut output = Vec::new();
+            let count = loop {
+                match retry.request(protocol, body, &mut output) {
+                    Ok(n) => break n,
+                    Err(Error::BufferTooSmall) if output.len() < max_body => {
+                        let next = if output.is_empty() {
+                            body.len().saturating_add(1024).max(256).min(max_body)
+                        } else {
+                            output.len().saturating_mul(2).min(max_body)
+                        };
+                        output.resize(next, 0);
+                    }
+                    Err(e) => return Err(hook_error(&entry.path, "retry request", e)),
+                }
+            };
+            let count = checked_count(count, output.len(), &entry.path)?;
+            output.truncate(count);
+            return Ok(Some(RetryPlan {
+                model: model.to_owned(),
+                body: (count != 0).then_some(output),
+            }));
+        }
+        Ok(None)
     }
 
     pub fn context(&mut self, metadata: &str) -> Result<(), String> {
@@ -419,6 +498,13 @@ mod tests {
     fn empty_chain_preserves_input_without_an_output_allocation() {
         let mut plugins = Plugins::load(&[]).unwrap();
         assert!(plugins.is_empty());
+        assert!(!plugins.has_retry());
+        assert!(
+            plugins
+                .retry(protocol::OPENAI_CHAT, 429, "local", b"{}", 1024)
+                .unwrap()
+                .is_none()
+        );
         assert_eq!(plugins.route("local").unwrap(), "local");
         assert_eq!(
             plugins.request(protocol::OPENAI_CHAT, b"{}", 1024).unwrap(),
