@@ -138,9 +138,11 @@ Both units use `Type=notify`; readiness is sent after the listener and all worke
 
 The defaults are 4 workers and 16 queued sockets. One active generation occupies a worker; excess accepted connections receive HTTP 503 when the queue is full. The daemon creates no model subprocesses and no thread per request. Upstream TLS and HTTP live in the shared system libcurl.
 
-Headers are limited to 16 KiB; request bodies default to 4 MiB and responses to 16 MiB. Both body limits can be configured up to 16 MiB. Input, conversion and plugin workspaces have explicit caps. Cross-protocol SSE has a 64 KiB framing/payload limit and 256 KiB aggregate/pending regions. [The benchmark script](scripts/benchmark.py) measures the actual daemon and uses a deterministic loopback upstream.
+Headers are limited to 16 KiB; request bodies default to 4 MiB and responses to 16 MiB. Both body limits can be configured up to 16 MiB. Input, conversion and plugin workspaces have explicit caps. Cross-protocol SSE has a 64 KiB framing/payload limit and 256 KiB aggregate/pending regions. [The benchmark script](https://github.com/LIghtJUNction/zcalld/blob/main/scripts/benchmark.py) measures the actual daemon and uses a deterministic loopback upstream.
 
 Pricing, subscriptions and payment decisions belong to the upstream service. The client has no hardcoded prices, plans, license checks or paid routing gates.
+
+See [measured performance](docs/PERFORMANCE.md) for three runs with and without native plugins, including raw results and limits.
 
 ## Build and release
 

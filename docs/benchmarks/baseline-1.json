@@ -1,0 +1,84 @@
+{
+  "schema_version": 1,
+  "measured_at_utc": "2026-11-19T19:09:22.380939+00:00",
+  "version": "zcalld 0.1.0",
+  "environment": {
+    "platform": "Linux",
+    "architecture": "x86_64",
+    "kernel": "7.3.4-arch1-1",
+    "python": "3.14.10",
+    "available_cpu_count": 24
+  },
+  "configuration": {
+    "workers": 4,
+    "queue": 16,
+    "plugins": [],
+    "configured_routes": 11,
+    "warmup_requests": 100,
+    "payload_bytes": 79,
+    "new_downstream_connection_per_request": true,
+    "mock_transport": "HTTP over loopback; no TLS or provider generation",
+    "mock_tcp_nodelay": true
+  },
+  "binary_bytes": 1174304,
+  "startup_to_health_ms": 11.371,
+  "idle": {
+    "rss_kib": 10004,
+    "rss_high_water_kib": 10004,
+    "threads": 5,
+    "open_fds": 4,
+    "child_processes": 0
+  },
+  "after_warmup": {
+    "rss_kib": 13188,
+    "rss_high_water_kib": 13188,
+    "threads": 5,
+    "open_fds": 16,
+    "child_processes": 0
+  },
+  "after_workload": {
+    "rss_kib": 13188,
+    "rss_high_water_kib": 13188,
+    "threads": 5,
+    "open_fds": 16,
+    "child_processes": 0
+  },
+  "sampled_peak_rss_kib": 13188,
+  "gateway": {
+    "requests": 5000,
+    "successful_requests": 5000,
+    "concurrency": 4,
+    "elapsed_seconds": 2.141445,
+    "requests_per_second": 2334.87,
+    "latency": {
+      "min_ms": 0.4601,
+      "mean_ms": 1.6969,
+      "p50_ms": 1.6479,
+      "p95_ms": 2.4729,
+      "p99_ms": 2.985,
+      "max_ms": 26.3714
+    }
+  },
+  "direct_mock_reference": {
+    "requests": 5000,
+    "successful_requests": 5000,
+    "concurrency": 4,
+    "elapsed_seconds": 3.332959,
+    "requests_per_second": 1500.17,
+    "latency": {
+      "min_ms": 0.8078,
+      "mean_ms": 2.6488,
+      "p50_ms": 2.4224,
+      "p95_ms": 3.9072,
+      "p99_ms": 9.4853,
+      "max_ms": 22.6983
+    }
+  },
+  "notes": [
+    "Measurements include loopback HTTP, the Python mock, and client scheduling.",
+    "Latency starts when a benchmark worker begins a request; executor queue time is excluded.",
+    "RSS is from the daemon's /proc status; child process count is reported explicitly.",
+    "The direct mock reference uses the same client concurrency and fresh connections.",
+    "No comparison with Magpie or real model-provider latency is implied."
+  ]
+}

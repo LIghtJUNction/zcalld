@@ -7,3 +7,5 @@ credentials
 /packaging/aur/*/pkg/
 *.pkg.tar.*
 /_release/
+__pycache__/
+*.py[cod]

@@ -1,0 +1,22 @@
+pkgbase = zcalld-bin
+	pkgdesc = Compact Linux AI gateway built on zcall with native zplugin extensions (binary)
+	pkgver = @VERSION@
+	pkgrel = 1
+	url = https://github.com/@REPOSITORY@
+	arch = x86_64
+	arch = aarch64
+	license = MIT
+	depends = glibc
+	depends = libgcc
+	depends = curl
+	optdepends = systemd: system and user service management
+	provides = zcalld=@VERSION@
+	conflicts = zcalld
+	options = !strip
+	backup = etc/zcalld/config.conf
+	source_x86_64 = https://github.com/@REPOSITORY@/releases/download/v@VERSION@/zcalld-@VERSION@-x86_64-unknown-linux-gnu.tar.gz
+	sha256sums_x86_64 = @X86_64_SHA256@
+	source_aarch64 = https://github.com/@REPOSITORY@/releases/download/v@VERSION@/zcalld-@VERSION@-aarch64-unknown-linux-gnu.tar.gz
+	sha256sums_aarch64 = @AARCH64_SHA256@
+
+pkgname = zcalld-bin
