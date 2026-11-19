@@ -5,6 +5,7 @@ LIBDIR := $(PREFIX)/lib
 DATADIR := $(PREFIX)/share
 BUMP ?= patch
 VERSION ?=
+PLUGINS := zcalld_aliases zcalld_policy zcalld_redact zcalld_community zcalld_plugin_routing
 
 .PHONY: build check install package bump release
 build:
@@ -15,12 +16,13 @@ check:
 
 install:
 	install -Dm755 target/release/zcalld "$(DESTDIR)$(BINDIR)/zcalld"
-	install -Dm755 target/release/libzcalld_aliases.so "$(DESTDIR)$(LIBDIR)/zcalld/plugins/libzcalld_aliases.so"
-	install -Dm755 target/release/libzcalld_policy.so "$(DESTDIR)$(LIBDIR)/zcalld/plugins/libzcalld_policy.so"
+	@for plugin in $(PLUGINS); do install -Dm755 "target/release/lib$$plugin.so" "$(DESTDIR)$(LIBDIR)/zcalld/plugins/lib$$plugin.so"; done
 	install -d "$(DESTDIR)$(LIBDIR)/systemd/system" "$(DESTDIR)$(LIBDIR)/systemd/user"
 	sed 's|/usr/bin/zcalld|$(BINDIR)/zcalld|g' packaging/systemd/zcalld.service > "$(DESTDIR)$(LIBDIR)/systemd/system/zcalld.service"
 	sed 's|/usr/bin/zcalld|$(BINDIR)/zcalld|g' packaging/systemd/user/zcalld.service > "$(DESTDIR)$(LIBDIR)/systemd/user/zcalld.service"
 	chmod 644 "$(DESTDIR)$(LIBDIR)/systemd/system/zcalld.service" "$(DESTDIR)$(LIBDIR)/systemd/user/zcalld.service"
+	install -Dm644 packaging/sysusers.d/zcalld.conf "$(DESTDIR)$(LIBDIR)/sysusers.d/zcalld.conf"
+	install -Dm644 packaging/tmpfiles.d/zcalld.conf "$(DESTDIR)$(LIBDIR)/tmpfiles.d/zcalld.conf"
 	install -Dm644 packaging/man/zcalld.1 "$(DESTDIR)$(DATADIR)/man/man1/zcalld.1"
 	install -Dm644 LICENSE "$(DESTDIR)$(DATADIR)/licenses/zcalld/LICENSE"
 	install -Dm644 README.md "$(DESTDIR)$(DATADIR)/doc/zcalld/README.md"

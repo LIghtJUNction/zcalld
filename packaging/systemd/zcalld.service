@@ -2,16 +2,22 @@
 Description=zcalld local AI gateway
 Documentation=https://github.com/LIghtJUNction/zcalld
 After=network.target
+ConditionPathExists=/var/lib/zcalld/config.conf
 
 [Service]
 Type=notify
 NotifyAccess=main
-ExecStart=/usr/bin/zcalld serve --config /etc/zcalld/config.conf
-EnvironmentFile=-/etc/zcalld/credentials
-DynamicUser=yes
+ExecStart=/usr/bin/zcalld serve --config /var/lib/zcalld/config.conf
+User=zcalld
+Group=zcalld
+StateDirectory=zcalld
+StateDirectoryMode=0700
 Restart=on-failure
 RestartSec=2s
-TimeoutStopSec=15s
+TimeoutStopSec=60s
+KillMode=mixed
+RuntimeDirectory=zcalld
+RuntimeDirectoryMode=0700
 UMask=0077
 NoNewPrivileges=yes
 ProtectSystem=strict

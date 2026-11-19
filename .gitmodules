@@ -1,0 +1,18 @@
+[submodule "extensions/compat"]
+	path = extensions/compat
+	url = https://github.com/LIghtJUNction/zcalld-compat.git
+[submodule "vendor/zcall"]
+	path = vendor/zcall
+	url = https://github.com/LIghtJUNction/zcall.git
+[submodule "vendor/zconv"]
+	path = vendor/zconv
+	url = https://github.com/LIghtJUNction/zconv.git
+[submodule "vendor/zplugin"]
+	path = vendor/zplugin
+	url = https://github.com/LIghtJUNction/zplugin.git
+[submodule "vendor/zsys"]
+	path = vendor/zsys
+	url = https://github.com/LIghtJUNction/zsys.git
+[submodule "apps/zcall-gui"]
+	path = apps/zcall-gui
+	url = https://github.com/LIghtJUNction/zcall-gui.git

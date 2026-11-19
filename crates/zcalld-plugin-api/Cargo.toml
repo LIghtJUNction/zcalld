@@ -9,7 +9,7 @@ description = "Versioned native plugin interface for the zcalld AI gateway"
 readme = "README.md"
 
 [dependencies]
-zplugin = { version = "=0.3.0", default-features = false, features = ["macros"] }
+zplugin = { version = "=0.3.1", default-features = false, features = ["macros"] }
 
 [dev-dependencies]
-zplugin = { version = "=0.3.0", default-features = false, features = ["std"] }
+zplugin = { version = "=0.3.1", default-features = false, features = ["std"] }

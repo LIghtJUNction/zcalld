@@ -7,10 +7,12 @@ After=network.target
 Type=notify
 NotifyAccess=main
 ExecStart=/usr/bin/zcalld serve --config %E/zcalld/config.conf
-EnvironmentFile=-%E/zcalld/credentials
 Restart=on-failure
 RestartSec=2s
-TimeoutStopSec=15s
+TimeoutStopSec=60s
+KillMode=mixed
+RuntimeDirectory=zcalld
+RuntimeDirectoryMode=0700
 UMask=0077
 NoNewPrivileges=yes
 

@@ -1,5 +1,6 @@
 [workspace]
 members = [".", "crates/zcalld-plugin-api", "crates/zcalld-compat-client", "plugins/aliases", "plugins/policy", "plugins/redact", "plugins/community", "plugins/routing"]
+exclude = ["apps/zcall-gui", "extensions/compat", "vendor/zcall", "vendor/zconv", "vendor/zplugin", "vendor/zsys"]
 resolver = "3"
 
 [workspace.package]
@@ -16,16 +17,16 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "A compact Linux AI gateway built on zcall with native zplugin extensions"
+description = "A compact native AI gateway built on zcall with optional zplugin extensions"
 readme = "README.md"
 keywords = ["ai", "gateway", "linux", "systemd", "plugins"]
 categories = ["command-line-utilities", "network-programming"]
-include = ["src/**", "examples/config.conf", "README.md", "LICENSE", "Cargo.toml", "Cargo.lock"]
+include = ["src/**", "examples/config.conf", "README.md", "LICENSE", "Cargo.toml", "Cargo.lock", "extensions/builtin-providers.json"]
 
 [dependencies]
 zcall = { version = "=0.3.0", default-features = false }
 zconv = { version = "=0.4.0", default-features = false }
-zplugin = { version = "=0.3.0", features = ["std"] }
+zplugin = { version = "=0.3.1", features = ["std"] }
 zcalld-plugin-api = { version = "=0.1.1", path = "crates/zcalld-plugin-api" }
 
 [profile.release]
@@ -35,3 +36,10 @@ strip = "symbols"
 
 [profile.dev]
 debug = 1
+
+[patch.crates-io]
+zcall = { path = "vendor/zcall" }
+zconv = { path = "vendor/zconv" }
+zplugin = { path = "vendor/zplugin" }
+zplugin-macros = { path = "vendor/zplugin/crates/zplugin-macros" }
+zsys = { path = "vendor/zsys" }

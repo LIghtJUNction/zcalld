@@ -20,7 +20,7 @@ class ReleaseTransactionTests(unittest.TestCase):
         shutil.copyfile(SCRIPT, self.root / "scripts" / "release.py")
         (self.root / "Cargo.toml").write_text(
             '[workspace]\n'
-            'members = [".", "crates/zcalld-plugin-api", "plugins/aliases", "plugins/policy"]\n'
+            'members = [".", "crates/zcalld-plugin-api", "crates/zcalld-compat-client", "plugins/aliases", "plugins/policy"]\n'
             'resolver = "3"\n\n'
             '[workspace.package]\nversion = "0.1.0"\nedition = "2024"\n\n'
             '[package]\nname = "zcalld"\nversion.workspace = true\nedition.workspace = true\n\n'
@@ -31,6 +31,7 @@ class ReleaseTransactionTests(unittest.TestCase):
         (self.root / "src/main.rs").write_text("fn main() {}\n")
         for path, name in [
             ("crates/zcalld-plugin-api", "zcalld-plugin-api"),
+            ("crates/zcalld-compat-client", "zcalld-compat-client"),
             ("plugins/aliases", "zcalld-plugin-aliases"),
             ("plugins/policy", "zcalld-plugin-policy"),
         ]:
@@ -40,7 +41,12 @@ class ReleaseTransactionTests(unittest.TestCase):
                 f'[package]\nname = "{name}"\n'
                 'version.workspace = true\nedition.workspace = true\n'
             )
-            if name != "zcalld-plugin-api":
+            if name == "zcalld-plugin-policy":
+                text += (
+                    '\n[dependencies]\n'
+                    'zcalld-compat-client = { path = "../../crates/zcalld-compat-client", version = "=0.1.0" }\n'
+                )
+            elif name != "zcalld-plugin-api":
                 text += (
                     '\n[dependencies]\n'
                     'zcalld-plugin-api = { path = "../../crates/zcalld-plugin-api", version = "=0.1.0" }\n'

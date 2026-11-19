@@ -34,6 +34,7 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
+          submodules: recursive
       - name: Prepare the pinned toolchain and registry dependencies
         run: |
           rustup toolchain install 1.100.0 --profile minimal

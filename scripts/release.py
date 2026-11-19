@@ -21,6 +21,7 @@ import urllib.request
 ROOT = Path(__file__).resolve().parent.parent
 VERSION_RE = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)")
 ARCHES = ("x86_64", "aarch64")
+TARGETS = ("x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu", "x86_64-pc-windows-msvc", "aarch64-apple-darwin", "x86_64-apple-darwin")
 REPOSITORY = "LIghtJUNction/zcalld"
 
 
@@ -123,7 +124,7 @@ def bump(args: argparse.Namespace) -> None:
                     raise ValueError("workspace version assignment was not found")
             lines = []
             for line in content.splitlines(keepends=True):
-                if re.match(r"\s*zcalld-plugin-api\s*=", line):
+                if re.match(r"\s*(?:zcalld-plugin-api|zcalld-compat-client)\s*=", line):
                     line, changed = re.subn(
                         r'(version\s*=\s*")=?' + re.escape(old) + r'(")',
                         lambda m: m[1] + "=" + new + m[2], line)
@@ -186,8 +187,17 @@ def archive_name(ver: str, arch: str) -> str:
     return f"zcalld-{ver}-{arch}-unknown-linux-gnu.tar.gz"
 
 
+def artifact_names() -> list[str]:
+    ver = version()
+    names = [f"zcalld-{ver}-source.tar.gz"]
+    for target in TARGETS:
+        stem = f"zcalld-{ver}-{target}"
+        names.extend([stem + (".zip" if "windows" in target else ".tar.gz"), stem + (".exe" if "windows" in target else "")])
+    return names
+
+
 def checksums(directory: Path) -> None:
-    names = [archive_name(version(), arch) for arch in ARCHES]
+    names = artifact_names()
     for name in names:
         if not (directory / name).is_file():
             raise ValueError(f"missing release asset: {name}")
@@ -200,7 +210,7 @@ def publish(args: argparse.Namespace) -> None:
     verify_ref(args.tag)
     directory = args.directory.resolve()
     checksums(directory)
-    names = [archive_name(version(), arch) for arch in ARCHES] + ["SHA256SUMS"]
+    names = artifact_names() + ["SHA256SUMS"]
     result = subprocess.run(
         ["gh", "release", "view", args.tag, "--repo", args.repo, "--json", "assets,isDraft"],
         cwd=ROOT, text=True, capture_output=True)
@@ -252,7 +262,7 @@ def aur(args: argparse.Namespace) -> None:
     directory = args.directory.resolve()
     directory.mkdir(parents=True, exist_ok=True)
     source = directory / f"zcalld-{ver}-source.tar.gz"
-    source_url = f"https://github.com/{args.repo}/archive/refs/tags/v{ver}.tar.gz"
+    source_url = f"https://github.com/{args.repo}/releases/download/v{ver}/zcalld-{ver}-source.tar.gz"
     if args.download:
         download(source_url, source)
         for arch in ARCHES:

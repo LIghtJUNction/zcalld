@@ -14,4 +14,4 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 zcalld-plugin-api = { path = "../../crates/zcalld-plugin-api", version = "=0.1.1" }
-zplugin = { version = "=0.3.0", default-features = false, features = ["std", "macros"] }
+zplugin = { version = "=0.3.1", default-features = false, features = ["std", "macros"] }
