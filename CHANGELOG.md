@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.1 — 2026-11-19
+
+- fix: use portable byte pointers in native curl callbacks
+
 ## 0.1.0
 
 - Add Linux-native local gateway and CLI using zcall 0.3.0 and zconv 0.4.0.

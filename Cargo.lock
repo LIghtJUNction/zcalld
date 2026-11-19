@@ -48,7 +48,7 @@ dependencies = [
 
 [[package]]
 name = "zcalld"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "zcall",
  "zcalld-plugin-api",
@@ -58,7 +58,7 @@ dependencies = [
 
 [[package]]
 name = "zcalld-plugin-aliases"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "zcalld-plugin-api",
  "zplugin",
@@ -66,14 +66,14 @@ dependencies = [
 
 [[package]]
 name = "zcalld-plugin-api"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "zplugin",
 ]
 
 [[package]]
 name = "zcalld-plugin-policy"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "zcalld-plugin-api",
  "zplugin",
