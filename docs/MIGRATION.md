@@ -55,6 +55,10 @@ The copied privacy configuration must refer to the installed worker, and its key
 
 Google installed-application OAuth credentials, when required by an existing login, belong in the private migration input. They are not embedded in the public repository. An account without its matching OAuth client configuration needs that configuration before it can refresh.
 
+The importer also copies library metadata and the complete instruction-set, instruction and skill bodies under the original library directory. Internal file and directory links are materialized as ordinary private files; links outside the library and directory cycles stop the import. Helper scripts keep owner-only execution permission, but migration never runs them. The copied data therefore remains available after the original application is removed.
+
+Original MCP OAuth sign-in state is preserved in the private snapshot and in migration-archive/mcp-signins.json when present. Retaining that state does not activate an MCP authorization flow or claim that a new MCP host is already connected.
+
 ## 2. Prepare the recovery journal
 
 Run the script as the desktop user who owns Magpie, without sudo. Choose the actual Magpie main PID that owns port 3425. The script checks the executable, UID, process start identity and open listening socket; it does not select a process merely by its name.

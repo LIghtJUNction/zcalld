@@ -498,8 +498,11 @@ fn copy_checked(source: &Path, destination: &Path) -> Result<(u64, u64), String>
     options.write(true).create_new(true);
     #[cfg(unix)]
     {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        // Keep helper scripts runnable by their owner without exposing copied
+        // credentials or skill content to other users.
+        let executable = metadata.permissions().mode() & 0o111 != 0;
+        options.mode(if executable { 0o700 } else { 0o600 });
     }
     let mut target = options.open(destination).map_err(|e| e.to_string())?;
     // Usage logs append while the old gateway is live. Copy and verify a fixed
@@ -533,6 +536,54 @@ fn copy_checked(source: &Path, destination: &Path) -> Result<(u64, u64), String>
         }
     }
     Ok((1, bytes))
+}
+
+// Materialize internal library links so the imported skills keep working after
+// Magpie is removed. Never follow a link outside the library or execute a file.
+fn copy_library_tree(source: &Path, destination: &Path) -> Result<(u64, u64), String> {
+    let metadata = fs::symlink_metadata(source).map_err(|e| e.to_string())?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err("the Magpie library root must be a real directory".into());
+    }
+    let root = source.canonicalize().map_err(|e| e.to_string())?;
+    fn visit(
+        path: &Path,
+        destination: &Path,
+        root: &Path,
+        ancestors: &mut Vec<std::path::PathBuf>,
+    ) -> Result<(u64, u64), String> {
+        let resolved = path.canonicalize().map_err(|e| e.to_string())?;
+        if !resolved.starts_with(root) {
+            return Err("library contains a link outside its own directory".into());
+        }
+        let metadata = fs::metadata(&resolved).map_err(|e| e.to_string())?;
+        if metadata.is_file() {
+            return copy_checked(&resolved, destination);
+        }
+        if !metadata.is_dir() {
+            return Err("library contains a special file requiring review".into());
+        }
+        if ancestors.contains(&resolved) {
+            return Err("library contains a directory link cycle".into());
+        }
+        ancestors.push(resolved.clone());
+        private_dir(destination)?;
+        let mut total = (0, 0);
+        for entry in fs::read_dir(&resolved).map_err(|e| e.to_string())? {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let copied = visit(
+                &entry.path(),
+                &destination.join(entry.file_name()),
+                root,
+                ancestors,
+            )?;
+            total.0 += copied.0;
+            total.1 += copied.1;
+        }
+        ancestors.pop();
+        Ok(total)
+    }
+    visit(&root, destination, &root, &mut Vec::new())
 }
 
 fn import(context: &Context, args: &[String]) -> Result<(), String> {
@@ -609,7 +660,11 @@ fn import(context: &Context, args: &[String]) -> Result<(), String> {
             skipped.push(name_text.into_owned().into());
             continue;
         }
-        let (count, size) = copy_checked(&entry.path(), &snapshot.join(&name))?;
+        let (count, size) = if name_text == "library" {
+            copy_library_tree(&entry.path(), &snapshot.join(&name))?
+        } else {
+            copy_checked(&entry.path(), &snapshot.join(&name))?
+        };
         files += count;
         bytes += size;
     }
@@ -745,6 +800,17 @@ fn import(context: &Context, args: &[String]) -> Result<(), String> {
             copy_checked(&from, &context.directory.join(name))?;
         }
     }
+    if source.join("library").exists() {
+        copy_library_tree(&source.join("library"), &context.directory.join("library"))?;
+    }
+    if source.join("mcp-signins.json").is_file() {
+        // Preserve original OAuth state privately without claiming it is an
+        // active zcalld MCP authorization or executing an imported login flow.
+        copy_checked(
+            &source.join("mcp-signins.json"),
+            &context.directory.join("migration-archive/mcp-signins.json"),
+        )?;
+    }
     json::atomic_write(&context.path, plan.config.as_bytes())?;
     let record = object([
         ("format", 1u64.into()),
@@ -805,6 +871,84 @@ fn verify(context: &Context) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    struct LibraryFixture(std::path::PathBuf);
+    impl LibraryFixture {
+        fn new() -> Self {
+            let nonce = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!(
+                "zcalld-library-migration-{}-{nonce}",
+                std::process::id()
+            ));
+            fs::create_dir_all(path.join("source/skills/example/scripts")).unwrap();
+            Self(path)
+        }
+    }
+    impl Drop for LibraryFixture {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+    #[test]
+    fn library_migration_copies_bodies_without_executing_helpers() {
+        let fixture = LibraryFixture::new();
+        let source = fixture.0.join("source");
+        let skill = source.join("skills/example");
+        fs::write(
+            skill.join("SKILL.md"),
+            b"Run the helper only when requested.",
+        )
+        .unwrap();
+        let helper = skill.join("scripts/run.sh");
+        fs::write(&helper, b"#!/bin/sh\nexit 73\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&helper, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let destination = fixture.0.join("destination");
+        let (files, _) = copy_library_tree(&source, &destination).unwrap();
+        assert_eq!(files, 2);
+        let copied = destination.join("skills/example/scripts/run.sh");
+        assert_eq!(fs::read(&copied).unwrap(), fs::read(&helper).unwrap());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(copied).unwrap().permissions().mode() & 0o777,
+                0o700
+            );
+        }
+    }
+    #[cfg(unix)]
+    #[test]
+    fn library_migration_materializes_internal_links_and_rejects_escape_or_cycle() {
+        use std::os::unix::fs::symlink;
+        let fixture = LibraryFixture::new();
+        let source = fixture.0.join("source");
+        fs::write(source.join("shared.md"), b"shared instructions").unwrap();
+        symlink("../../shared.md", source.join("skills/example/SKILL.md")).unwrap();
+        let destination = fixture.0.join("destination");
+        copy_library_tree(&source, &destination).unwrap();
+        let body = destination.join("skills/example/SKILL.md");
+        assert_eq!(fs::read(&body).unwrap(), b"shared instructions");
+        assert!(
+            !fs::symlink_metadata(&body)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        fs::write(fixture.0.join("outside"), b"must not copy").unwrap();
+        symlink("../outside", source.join("escape")).unwrap();
+        let error = copy_library_tree(&source, &fixture.0.join("escape-result")).unwrap_err();
+        assert!(error.contains("outside"));
+        fs::remove_file(source.join("escape")).unwrap();
+        symlink(".", source.join("loop")).unwrap();
+        let error = copy_library_tree(&source, &fixture.0.join("cycle-result")).unwrap_err();
+        assert!(error.contains("cycle"));
+    }
     #[test]
     fn private_ids_are_path_safe_and_collision_resistant() {
         assert_ne!(safe_internal("a@b"), safe_internal("a#b"));
