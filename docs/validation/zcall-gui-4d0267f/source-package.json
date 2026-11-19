@@ -1,0 +1,48 @@
+{
+  "timestamp_utc": "2026-11-19T23:31:12.208766+00:00",
+  "source_commit": "4d0267f229c3fea7277369e50404a455d8dabc06",
+  "zui_commit": "5e37fcfb791eec9ac523fc19373e95d0a513112f",
+  "source_archive": "zcall-gui-v0.1.0-source.tar.gz",
+  "source_archive_bytes": 387466,
+  "source_archive_sha256": "1aea5904be4bb53a5ef634cee296064e08b878a002690580c48a36112102fd7c",
+  "package": "zcall-gui-0.1.0-1-x86_64.pkg.tar.zst",
+  "package_bytes": 536856,
+  "package_sha256": "5fe9486e921c7e9ed418a43a8330e8ce4f36c18b9e44b13f2e265ed2fc112650",
+  "build_system": {
+    "NAME": "\"Omarchy\"",
+    "PRETTY_NAME": "\"Omarchy\"",
+    "ID": "omarchy",
+    "ID_LIKE": "arch",
+    "BUILD_ID": "\"4.5.0\"",
+    "VERSION_ID": "\"4.5.0\"",
+    "ANSI_COLOR": "\"38;2;158;206;106\"",
+    "HOME_URL": "\"https://omarchy.org/\"",
+    "DOCUMENTATION_URL": "\"https://learn.omacom.io/2/the-omarchy-manual\"",
+    "SUPPORT_URL": "\"https://discord.gg/tXFUdasqhY\"",
+    "BUG_REPORT_URL": "\"https://github.com/omacom/omarchy/issues\"",
+    "LOGO": "omarchy"
+  },
+  "host": "x86_64",
+  "rustc": "rustc 1.100.0 (0ef1bc386 2026-11-09)",
+  "package_version": "zcall-gui 0.1.0",
+  "srcinfo_matches_generated_release_metadata": true,
+  "source_records_compared": [
+    "Cargo.toml",
+    "src/main.rs",
+    "vendor/zui/native/linux.c",
+    "vendor/zui/Cargo.lock"
+  ],
+  "namcap": "zcall-gui W: Dependency included, but may not be needed ('zcalld')\nzcall-gui W: Dependency included, but may not be needed ('curl')\n",
+  "desktop_file_validate": "pass",
+  "required_files": [
+    "usr/bin/zcall-gui",
+    "usr/share/applications/zcall-gui.desktop",
+    "usr/share/icons/hicolor/scalable/apps/zcall-gui.svg",
+    "usr/share/licenses/zcall-gui/LICENSE",
+    "usr/share/licenses/zcall-gui/zui-LICENSE",
+    "usr/share/doc/zcall-gui/README.md"
+  ],
+  "scope": "Built final committed source with its pinned zui using real SHA256; production PKGBUILD differs only by local source transport. No installation or public release performed.",
+  "dependency_check": "makepkg --nodeps because required zcalld>=0.2.0 has not been published/installed; all build and check functions ran.",
+  "staging_cleanup": "makepkg --clean removed build staging; private verify extraction removed"
+}

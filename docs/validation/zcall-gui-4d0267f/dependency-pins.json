@@ -1,0 +1,31 @@
+{
+  "zui": {
+    "commit": "5e37fcfb791eec9ac523fc19373e95d0a513112f",
+    "repository": "https://github.com/LIghtJUNction/zui"
+  },
+  "gui": {
+    "commit": "4d0267f229c3fea7277369e50404a455d8dabc06",
+    "repository": "https://github.com/LIghtJUNction/zcall-gui",
+    "submodule_path": "vendor/zui"
+  },
+  "core": {
+    "commit": "e116a543d8320a7a5b50f040bee9b03019ecba62",
+    "repository": "https://github.com/LIghtJUNction/zcalld",
+    "submodule_path": "apps/zcall-gui",
+    "observed_gitlink": "4d0267f229c3fea7277369e50404a455d8dabc06",
+    "verification_url": "https://api.github.com/repos/LIghtJUNction/zcalld/contents/apps/zcall-gui?ref=e116a543d8320a7a5b50f040bee9b03019ecba62"
+  },
+  "pending_receipts": [
+    {
+      "repository": "ztype",
+      "owner": "Existing ztype maintainer",
+      "required": "Final source pin, pushed commit and native/compact-window validation receipt"
+    },
+    {
+      "repository": "project_z",
+      "owner": "Existing Project Z coordinator",
+      "required": "Updated aggregate source pins, dependency graph edge and consistency-check receipt"
+    }
+  ],
+  "receipt_collection_owner": "zcalld integration maintainer"
+}
