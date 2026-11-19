@@ -100,3 +100,38 @@ pub const fn version_component(value: &str) -> u32 {
     }
     number
 }
+
+/// Optional response transformer, bound separately from GatewayPlugin v1.
+/// begin resets request-local state; write receives the caller's protocol after
+/// conversion. A zero result means output is held, not passthrough. final_chunk
+/// is 0 or 1. BufferTooSmall retries must replay the same input exactly.
+#[zplugin::interface(id = "dev.zcalld.response", version = 1)]
+pub trait ResponsePlugin {
+    fn configure(&mut self, config: &str) -> Result<(), zplugin::Error>;
+    fn begin(&mut self, status: u32, content_type: &str) -> Result<(), zplugin::Error>;
+    fn write(
+        &mut self,
+        input: &[u8],
+        final_chunk: u32,
+        output: &mut [u8],
+    ) -> Result<u64, zplugin::Error>;
+}
+
+/// Optional custom provider transport. The request is the documented JSON
+/// envelope, never a gateway credential. The returned resource has type
+/// dev.zcalld.provider-stream v1. Operation 1 reads response metadata JSON,
+/// operation 2 reads a body fragment (empty means EOF), and 3 cancels.
+/// Resource calls obey replay-safe BufferTooSmall and own cancellation on drop.
+#[zplugin::interface(id = "dev.zcalld.provider", version = 1)]
+pub trait ProviderPlugin {
+    fn configure(&mut self, config: &str) -> Result<(), zplugin::Error>;
+    fn fetch(&mut self, request: &[u8]) -> Result<zplugin::OwnedResource, zplugin::Error>;
+}
+
+/// Optional bounded local request context, including the original JSON request.
+/// The host never adds HTTP authentication or cookie headers to this envelope.
+#[zplugin::interface(id = "dev.zcalld.context", version = 1)]
+pub trait ContextPlugin {
+    fn configure(&mut self, config: &str) -> Result<(), zplugin::Error>;
+    fn context(&mut self, metadata: &str) -> Result<(), zplugin::Error>;
+}

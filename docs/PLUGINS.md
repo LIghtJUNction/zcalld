@@ -1,8 +1,9 @@
 # Native plugins
 
-zcalld loads optional native plugins through `zplugin 0.3.0`. The gateway uses
+zcalld loads optional native plugins through the pinned `zplugin` ABI. The gateway uses
 `zcall` for protocol handling; plugins add explicit routing and request policy
-without a second runtime or background plugin process.
+without a second runtime for those native hooks. Optional compatibility plugins
+start their own helper processes only when that capability is used.
 
 ## Enable the included plugins
 
@@ -67,7 +68,7 @@ The shared crate is `zcalld-plugin-api`. Its interface ID is
 | `request` | Protocol ID and JSON request bytes | Zero keeps the input; a byte count replaces the body |
 | `observe` | HTTP status, elapsed milliseconds, input/output body bytes | Records a completed call without receiving its content |
 
-Routing and request hooks run once per plugin in configuration order. A request
+Request hooks run before routing, once per plugin in configuration order. A request
 hook runs before the gateway's normal protocol conversion. The gateway validates
 rewritten requests and keeps its own authentication and resource limits.
 Plugins cannot replace these core checks through this interface.
@@ -173,6 +174,98 @@ blocked model and an oversized request, and invokes the observation hook.
 The gateway integration tests exercise plugins through its HTTP ingress. Memory
 and request timings belong to measured gateway workloads, not the interface's
 type definitions.
+
+
+## Optional privacy and community interfaces
+
+The gateway keeps `dev.zcalld.gateway` version 1 unchanged. Additional capabilities
+use separate version 1 interfaces. A library can export several interfaces with
+`zplugin::export_interfaces!`; each interface binding constructs an instance.
+Plugins that share request state between bindings must arrange that sharing
+explicitly on the worker thread. The included adapters use worker-local shared
+state and never make native proxies `Send` or `Sync`.
+
+| Interface ID | Purpose and contract |
+| --- | --- |
+| `dev.zcalld.context` | Receives bounded request metadata. `phase=request` precedes request hooks; `phase=route` contains the filtered request after those hooks. HTTP credentials and cookies are excluded. |
+| `dev.zcalld.response` | Begins after final upstream headers, then transforms chunks after protocol conversion. A zero result holds output; it does not mean passthrough. The final flush is delivered once. |
+| `dev.zcalld.provider` | Returns an owned provider-stream resource for explicitly selected community providers. The resource retains its native library and cancels unfinished work when dropped. |
+
+Request hooks run in configuration order before route selection. Managed
+community hooks are followed by privacy and then group routing. The gateway
+validates the modified request before choosing the upstream model. Context
+consumers choose the phase they need: community middleware starts one transaction
+during `request`; routing can inspect the filtered `route` phase. Request text
+must not be persisted by a routing classifier.
+
+Response transforms run in reverse plugin order. Privacy restores placeholders
+before community middleware receives the reply, including JSON and placeholders
+split across SSE events. The community adapter reconstructs supported reply
+objects and usage for the upstream `onResponse` contract. It bounds capture at
+16 MiB and opens the Bun process only when enabled provider or middleware code
+needs it.
+
+The provider-stream resource is `dev.zcalld.provider-stream`, version 1. Its
+operations are head (1), body (2), and cancel (3). Head metadata is bounded at
+16 KiB; status 3 means pending. Both head and body polling return promptly so
+the gateway can enforce request deadlines and shutdown. Raw body bytes use a
+512 KiB credit window in the Bun host; cancellation does not replay a POST.
+The native bridge translates the core's UTF-8 JSON body string to the host's
+base64 wire representation. Plugin-specific wire formats stay outside the core.
+
+| Application status | Meaning |
+| --- | --- |
+| 3 | Provider head or body is pending |
+| 4 | Privacy policy blocked the request |
+| 5 | Required privacy filtering is unavailable |
+| 6 | Community plugin operation is unavailable |
+| 7 | All members of the requested routing group are unavailable |
+| 8 | Routing control or observation failed |
+
+Response buffer retries must preserve exactly one logical write. A plugin may
+cache the pending transformed bytes and copy them on retry; it must not advance
+its stream twice. The host rejects lengths larger than the supplied buffer.
+The native trust boundary still applies: bounds checks do not make untrusted
+machine code safe.
+
+## Install community packages
+
+The optional [zcalld-compat component](https://github.com/LIghtJUNction/zcalld-compat)
+contains the private privacy worker and pinned Magpie-compatible Bun host. It
+opens no separate gateway listener. Neither runtime is started by an unconfigured
+core. The native adapters are supplied with zcalld; the helper package and Bun
+are needed only for the capabilities that use them.
+
+```sh
+zcalld plugins install /absolute/plugin.mjs --name sample --json
+zcalld plugins install npm:package-name@1.2.3 --json
+zcalld plugins install github:owner/repository --revision FULL_COMMIT_HASH --json
+zcalld plugins inspect sample --json
+zcalld plugins config sample --file /absolute/private-options.json --json
+zcalld plugins enable sample --json
+zcalld plugins disable sample --json
+zcalld plugins update sample --revision NEW_FULL_COMMIT_HASH --json
+zcalld plugins remove sample --json
+```
+
+New packages start disabled. Git revisions are immutable full hashes, npm
+versions are exact, and copied local packages have recorded SHA-256 digests.
+An optional supplied digest must match. Native packages are verified before
+activation and loading. Package lifecycle scripts are disabled. These controls
+identify what is installed; they do not sandbox code or establish its publisher's
+trustworthiness.
+
+The registry, options and copied authentication live beside the selected
+configuration, inside its private `extensions` directory. Public list and
+inspect results omit credentials and options. Importing an existing Magpie setup
+preserves its enabled package choices, custom privacy rules, keyed placeholders,
+installed model cache and historical masking records in a separate candidate.
+Import never refreshes live credentials.
+
+See the compatibility component's README for model availability, migration
+boundaries, public plugin RPC and the persistent authorization session helper.
+The local AstrLink Guard path is tested with actual pinned model files; other
+explicit model selections fail closed until their adapters are installed.
 
 ## Sources
 

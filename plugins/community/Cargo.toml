@@ -1,0 +1,15 @@
+[package]
+name="zcalld-plugin-community"
+version.workspace=true
+edition.workspace=true
+license.workspace=true
+rust-version.workspace=true
+repository.workspace=true
+publish=false
+[lib]
+name="zcalld_community"
+crate-type=["cdylib","rlib"]
+[dependencies]
+zplugin={version="=0.3.0",features=["std"]}
+zcalld-plugin-api={path="../../crates/zcalld-plugin-api"}
+zcalld-compat-client={path="../../crates/zcalld-compat-client"}
