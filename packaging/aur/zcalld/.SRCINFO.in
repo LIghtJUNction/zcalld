@@ -14,6 +14,7 @@ pkgbase = zcalld
 	optdepends = systemd: system and user service management
 	optdepends = zcalld-compat: privacy model, OAuth accounts and community plugins
 	optdepends = zcall-gui: optional native desktop interface
+	optdepends = libsecret: configure Zed credentials through Secret Service
 	backup = etc/zcalld/config.conf
 	source = zcalld-@VERSION@.tar.gz::https://github.com/@REPOSITORY@/releases/download/v@VERSION@/zcalld-@VERSION@-source.tar.gz
 	sha256sums = @SOURCE_SHA256@

@@ -2,7 +2,7 @@
 
 ## Small core, explicit extensions
 
-zcalld accepts a local HTTP request, reads its public model name, applies configured routing hooks, selects a provider, and asks zcall to prepare the upstream call. A fixed worker owns its HTTP connection, libcurl handle and native plugin instances until the request finishes. Model aliases and policy are separately built libraries.
+zcalld accepts a local HTTP request, reads its public model name, applies configured routing hooks, selects a provider, and asks zcall to prepare the upstream call. A fixed worker owns its HTTP connection, libcurl handle and native plugin instances until the request finishes. Aliases, policy, privacy, community providers and model-group decisions are separately built libraries. The GUI and compatibility host have independent lifecycles.
 
 ```mermaid
 flowchart TD
@@ -16,18 +16,18 @@ flowchart TD
     H --> A
 ```
 
-The Rust runtime dependencies are zcall, zconv, zplugin and the local SDK. zconv is already zcall's pinned protocol dependency; zcalld uses its JSON parser for borrowed routing inspection. zplugin's procedural macro dependencies run at build time. TLS, DNS and HTTP transport use the distribution's shared libcurl rather than a per-request executable.
+The Rust runtime dependencies are zcall, zconv, zplugin and the local SDK. zconv is already zcall's pinned protocol dependency; zcalld uses its JSON parser for borrowed routing inspection. zplugin uses zsys for shared dynamic loading; its procedural macro dependencies run at build time. TLS, DNS and HTTP transport use the distribution's shared libcurl rather than a per-request executable.
 
 ## Request lifecycle
 
-1. Parse bounded HTTP framing, rejecting duplicate headers, conflicting lengths and unsupported encodings.
-2. Authenticate the local token when configured. Loopback listeners require a loopback Host; browser Origin requests are rejected.
-3. Inspect JSON using borrowed token views and resolve plugin aliases/policies in declared order.
-4. Select a named route and construct the upstream URL using zcall's `HttpEndpoint`.
-5. Preserve the same-protocol request apart from model/stream edits, or convert through zcall with strict semantics.
-6. Build upstream headers from the selected provider; consume local credentials at ingress.
-7. Stream the response with bounded writes, or buffer only a cross-protocol non-streaming response within its cap.
-8. Report status, duration and body-byte counts to configured observation hooks.
+1. Parse bounded HTTP framing and validate caller credentials for the actual peer.
+2. Provide bounded, whitelisted request context to enabled plugins.
+3. Apply explicit/community request hooks, then privacy, then group routing. A classifier therefore sees already filtered request text.
+4. Validate the modified request, resolve the public route and select its provider.
+5. Preserve same-protocol values or convert through zcall with strict semantics.
+6. Build upstream headers from provider credentials; do not forward caller credentials.
+7. Stream bounded response chunks through reverse-order response hooks. Privacy restoration precedes community response middleware.
+8. Record bounded usage/status observations without logging request text.
 
 No prompts, keys or response bodies are written to the daemon's normal log. Plugin code is trusted native code and can use the host process's privileges. Hook arguments exclude provider credentials, but native loading itself is not a security sandbox.
 
@@ -62,11 +62,11 @@ Long generations occupy workers. Raising `workers` increases active concurrency 
 
 ## Transport and failure semantics
 
-libcurl connection caches are per worker. Request upload uses read/seek callbacks; the seek hook rejects rewinding after any upload bytes have been consumed. This prevents libcurl's reused-connection recovery from silently replaying a generation POST. No application retry or failover is performed. Upstream redirects are returned without following them or forwarding credentials to a new location.
+libcurl connection caches are per worker. Request upload uses read/seek callbacks; the seek hook rejects rewinding after any upload bytes have been consumed. This prevents libcurl's reused-connection recovery from silently replaying a generation POST. Optional group routing may retry only a complete explicit 429/503 refusal before downstream headers are committed. The refusal buffer is capped at 64 KiB; an oversized response is forwarded as received. At most four attempts share one deadline and never repeat a provider/protocol/model tuple. Privacy, middleware and classification run once; the retry hook only selects a new member and patches model/effort. A started stream, HTTP 500 or uncertain network failure is not replayed. Upstream redirects are returned without following them or forwarding credentials to a new location.
 
 Same-protocol and error bodies use fresh downstream framing. Upstream compressed responses are decoded by libcurl, so compressed Content-Length/Content-Encoding fields are not copied. Successful streaming responses end with a zero chunk. A transfer or conversion failure after headers leaves the stream incomplete, allowing clients to detect truncation. Status 204/304 responses are bodyless.
 
-SIGINT and SIGTERM stop admission. Read loops, socket writes and libcurl progress callbacks check the stop flag. The service reports readiness only after listener and worker initialization, reports stopping, joins its workers and exits. Native plugins remain pinned until process exit; service restart applies updates.
+SIGINT and SIGTERM stop admission. Read loops, socket writes and libcurl progress callbacks check the stop flag. The service reports readiness only after listener and worker initialization, reports stopping, joins its workers and drains the optional compatibility host before exit. The host preserves an in-progress rotating credential write; the packaged service allows 60 seconds. Native plugins remain pinned until process exit; service restart applies updates.
 
 ## Sources
 

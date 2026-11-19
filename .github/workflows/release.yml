@@ -78,7 +78,7 @@ jobs:
         run: |
           & ./_release/vcpkg/bootstrap-vcpkg.bat -disableMetrics
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          & ./_release/vcpkg/vcpkg.exe install 'curl[core,schannel]:x64-windows' --disable-metrics
+          & ./_release/vcpkg/vcpkg.exe install 'curl[core,ssl]:x64-windows' --disable-metrics
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           $root = Join-Path $pwd '_release/vcpkg/installed/x64-windows'
           "RUSTFLAGS=-L native=$root/lib" >> $env:GITHUB_ENV

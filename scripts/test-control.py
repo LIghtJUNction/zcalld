@@ -167,6 +167,18 @@ class ControlTests(unittest.TestCase):
         self.cli("profiles", "save", "with-secret")
         self.assertFalse((self.directory / "profiles/with-secret/credentials").exists())
 
+
+    def test_migrated_usage_and_group_listing_do_not_leak_credentials(self):
+        (self.directory / "usage.jsonl").write_text(
+            '{"in":17,"out":9,"status":200}\n{"input_tokens":3,"output_tokens":4,"status":503}\n')
+        totals = self.cli("usage", "summary")
+        self.assertEqual((totals["requests"], totals["failed"], totals["input_tokens"], totals["output_tokens"]), (2, 1, 20, 13))
+        (self.directory / "routing.json").write_text(json.dumps({"groups": [], "deciders": [
+            {"id":"classifier", "url":"http://127.0.0.1", "key":"fixture-secret", "protocol":"chat"}]}))
+        listed = self.cli("groups", "list")
+        self.assertNotIn("fixture-secret", json.dumps(listed))
+        self.assertTrue(listed["deciders"][0]["credential_configured"])
+
     def test_migration_dry_run_does_not_change_originals(self):
         source = self.home / ".config/magpie"
         source.mkdir()

@@ -103,7 +103,7 @@ implementation. Each instance keeps its own counters and configuration.
 Aggregating state across workers belongs to a plugin designed to do so.
 
 Inputs and outputs are borrowed for one method call. A plugin must not retain
-their pointers. Route names are limited to 4,096 UTF-8 bytes. The host accepts
+their pointers. Public route names are limited to 512 UTF-8 bytes. The host accepts
 at most 32 configured plugins and 65,536 configuration bytes per plugin.
 
 Unchanged request hooks use an empty output slice, so aliases and policy do not
@@ -128,8 +128,8 @@ Use a separate `cdylib` crate and the shared SDK:
 crate-type = ["cdylib"]
 
 [dependencies]
-zcalld-plugin-api = "0.1"
-zplugin = { version = "=0.3.0", default-features = false, features = ["std", "macros"] }
+zcalld-plugin-api = { path = "../zcalld/crates/zcalld-plugin-api" }
+zplugin = { version = "=0.3.1", default-features = false, features = ["std", "macros"] }
 ```
 
 Implement all four `GatewayPlugin` methods, then export the generated adapter:
@@ -187,7 +187,7 @@ state and never make native proxies `Send` or `Sync`.
 
 | Interface ID | Purpose and contract |
 | --- | --- |
-| `dev.zcalld.context` | Receives bounded request metadata. `phase=request` precedes request hooks; `phase=route` contains the filtered request after those hooks. HTTP credentials and cookies are excluded. |
+| `dev.zcalld.context` | Receives bounded request metadata. `phase=request` precedes request hooks; `phase=route` carries bounded routing metadata. Request text is supplied to transformation hooks, not copied into the metadata envelope. HTTP credentials and cookies are excluded. |
 | `dev.zcalld.response` | Begins after final upstream headers, then transforms chunks after protocol conversion. A zero result holds output; it does not mean passthrough. The final flush is delivered once. |
 | `dev.zcalld.provider` | Returns an owned provider-stream resource for explicitly selected community providers. The resource retains its native library and cancels unfinished work when dropped. |
 | `dev.zcalld.retry` | Offers a next public route and an optional patch to an already filtered body. The server independently limits retry eligibility; zero declines. |
@@ -196,7 +196,7 @@ Request hooks run in configuration order before route selection. Managed
 community hooks are followed by privacy and then group routing. The gateway
 validates the modified request before choosing the upstream model. Context
 consumers choose the phase they need: community middleware starts one transaction
-during `request`; routing can inspect the filtered `route` phase. Request text
+during `request`; routing reads its already filtered request-hook input. Request text
 must not be persisted by a routing classifier.
 
 Response transforms run in reverse plugin order. Privacy restores placeholders
@@ -267,6 +267,12 @@ See the compatibility component's README for model availability, migration
 boundaries, public plugin RPC and the persistent authorization session helper.
 The local AstrLink Guard path is tested with actual pinned model files; other
 explicit model selections fail closed until their adapters are installed.
+
+## Bounded member retry
+
+The independent RetryPlugin v1 interface leaves GatewayPlugin v1 unchanged. Its retry method proposes a next public route; zero declines. Its request method optionally patches the already filtered request. BufferTooSmall must not advance group counters, choose a second member or duplicate an observation.
+
+The core permits only complete 429/503 refusals before downstream headers. It limits the refusal buffer to 64 KiB, the entire request to four attempts and one deadline, and rejects repeated provider/protocol/model targets. Selection does not rerun request middleware, privacy filtering or the classifier. A started SSE stream, HTTP 500 or interrupted transport is never replayed.
 
 ## Sources
 

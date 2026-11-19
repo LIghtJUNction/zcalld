@@ -1,60 +1,55 @@
 # zcalld
 
-A compact Linux AI gateway built on [zcall](https://github.com/LIghtJUNction/zcall), with optional native [zplugin](https://github.com/LIghtJUNction/zplugin) extensions.
+A native local AI gateway for Linux, macOS and Windows, built on [zcall](https://github.com/LIghtJUNction/zcall), [zconv](https://github.com/LIghtJUNction/zconv), [zplugin](https://github.com/LIghtJUNction/zplugin) and [zsys](https://github.com/LIghtJUNction/zsys).
 
-One CLI and one foreground service connect AI clients to explicitly configured upstreams. The core handles HTTP, routing, credentials and protocol conversion. Model aliases and access policy are separate `.so` plugins. There is no GUI, embedded browser, JavaScript runtime, database, billing table or hardcoded paid feature gate.
+The CLI daemon owns transport, bounded queues, credentials and protocol conversion. Privacy, community providers and model-group decisions are optional plugins. [zcall-gui](https://github.com/LIghtJUNction/zcall-gui) is a separate native application built with [zui](https://github.com/LIghtJUNction/zui); closing it leaves the gateway running. There is no embedded browser in either application. The optional compatibility package supplies the Go privacy worker and a lazy Bun host for existing JavaScript community plugins.
 
 ## Install
 
-On Arch Linux, choose the source package or the prebuilt package:
+On Arch Linux, choose one core package and add the capabilities you use:
 
 ```sh
-yay -S zcalld
-# or
-yay -S zcalld-bin
+paru -S zcalld-bin
+# Source build alternative: paru -S zcalld
+paru -S zcalld-compat    # Privacy model, community plugins and subscription accounts
+paru -S zcall-gui       # Optional native desktop application
 ```
 
-Without an AUR helper, use the published package repository:
-
-```sh
-git clone https://aur.archlinux.org/zcalld-bin.git
-cd zcalld-bin
-makepkg -si
-```
-
-Native x86_64 and aarch64 archives are available in [Releases](https://github.com/LIghtJUNction/zcalld/releases). They contain an `install.sh`, the executable, optional plugins, systemd units, configuration, man page and license. The runtime uses the distribution's libcurl and CA certificates.
-
-## Start
+[Releases](https://github.com/LIghtJUNction/zcalld/releases) provide Linux x86_64/aarch64, Windows x86_64 and macOS Apple Silicon/Intel archives with platform-native plugin libraries. Linux and macOS use the system libcurl; the Windows archive includes its TLS transport DLLs. These are real operating-system dependencies, not an embedded browser runtime.
 
 ```sh
 zcalld init
-# Edit ~/.config/zcalld/config.conf for your upstream and installed model.
-zcalld check
+# Edit the generated provider and route to match an available upstream.
+zcalld check --json
 zcalld serve
 ```
 
-The starter config uses an Ollama-compatible upstream at `http://127.0.0.1:11434/v1`, with the public route `local`. Change its upstream model to one actually installed on your machine. zcalld does not download or run a model.
+The default configuration uses an Ollama-compatible upstream. zcalld does not download or execute an LLM. Configuration follows `--config`, `ZCALLD_CONFIG`, then the platform user configuration directory. Run `zcalld --help` for the exact local path and command list.
 
-In another terminal:
+## Preserve an existing Magpie setup
+
+Migration first creates a private copy; it does not stop Magpie or change agent settings:
 
 ```sh
-eval "$(zcalld env openai)"
-curl "$OPENAI_BASE_URL/chat/completions" \
-  -H "Authorization: Bearer $OPENAI_API_KEY" \
-  -H 'Content-Type: application/json' \
-  -d '{"model":"local","messages":[{"role":"user","content":"Hello"}],"stream":true}'
+zcalld migrate magpie --json
+zcalld migrate magpie --apply --json
+zcalld migrate verify --json
+zcalld check --json
 ```
 
-Configuration resolves from `--config PATH`, then `ZCALLD_CONFIG`, then `$XDG_CONFIG_HOME/zcalld/config.conf`, or `$HOME/.config/zcalld/config.conf`. `init` creates a mode-0600 file and never overwrites an existing one.
+The importer preserves public model IDs and catalog metadata, routes, accounts, enabled community packages, the reversible privacy key, custom rules and history. It reports unresolved routes or unsupported rules explicitly. The old TCP address can remain unchanged while zcalld's own CLI and GUI prefer a private Unix socket on Linux and macOS.
 
-## Configure providers and routes
+See [MIGRATION.md](docs/MIGRATION.md) for the service transaction and rollback. Credential refresh ownership matters: an active native Codex login remains externally managed and is reread for each request. The gateway does not race another process to rotate that account's refresh token. Explicit handoff requires the recorded original owners to have exited.
+
+## Configure and use
 
 ```ini
 [server]
 listen = 127.0.0.1:9415
+unix_socket = auto
 workers = 4
 queue = 16
-token_env = ZCALLD_TOKEN
+token_env = ZCALLD_GATEWAY_TOKEN
 
 [provider cloud]
 base_url = https://api.example.com/v1
@@ -63,78 +58,50 @@ api_key_env = CLOUD_API_KEY
 
 [route coding]
 provider = cloud
-model = your-upstream-model
+model = upstream-model
 ```
 
-Set the two environment variables before running the service. `ZCALLD_TOKEN` authenticates clients to this gateway; `CLOUD_API_KEY` authenticates the gateway to its upstream. The gateway builds upstream authorization from provider configuration and does not forward the caller's credentials, cookies or query-string keys.
+Put secrets in the private `credentials` file beside the configuration, as `NAME="value"` assignments. Environment values take precedence. Provider credentials and caller credentials are separate; incoming authorization, cookies and query keys are not forwarded upstream. A non-loopback listener requires a LAN-capable credential.
 
-Protocol names are `chat`, `responses`, `anthropic`, `gemini`, `completions` and `interactions`. The provider's authentication header defaults to Bearer for OpenAI formats, `x-api-key` for Anthropic, and `x-goog-api-key` for Gemini. `auth = bearer|x-api-key|x-goog-api-key|none` overrides this choice.
+Protocol names are `chat`, `responses`, `anthropic`, `gemini`, `completions` and `interactions`. Native per-protocol endpoint overrides accept a base URL or a complete endpoint URL. Same-protocol forwarding retains provider extensions. Cross-protocol conversion uses strict zcall semantics and rejects unsupported information loss.
 
-The configuration format is deliberately small: named sections, `key=value`, optional surrounding quotes, and full-line `#` or `;` comments. Duplicate keys, unknown options, missing providers, invalid URLs and missing credential variables fail validation. Plugin sections run in declaration order.
-
-## Gateway API
-
-| Endpoint | Protocol |
+| Endpoint | Purpose |
 | --- | --- |
-| `POST /v1/chat/completions` | OpenAI Chat Completions |
-| `POST /v1/responses` | OpenAI Responses |
-| `POST /v1/messages` | Anthropic Messages |
-| `POST /v1beta/models/{model}:generateContent` | Gemini GenerateContent |
-| `POST /v1beta/models/{model}:streamGenerateContent` | Gemini SSE |
-| `POST /v1/completions` | OpenAI Completions |
-| `POST /v1beta/interactions` | Gemini Interactions |
-| `GET /v1/models` | Configured public route names |
-| `GET /healthz` | Process readiness and version |
+| `/v1/chat/completions`, `/v1/responses` | OpenAI-style generation |
+| `/v1/messages` | Anthropic Messages |
+| `/v1beta/models/{model}:generateContent` | Gemini generation |
+| `/v1beta/models/{model}:streamGenerateContent` | Gemini streaming |
+| `/v1/completions`, `/v1beta/interactions` | Additional protocol ingress |
+| `GET /v1/models` | Public routes with preserved catalog metadata |
+| `GET /healthz` | Readiness |
 
-Same-protocol requests retain provider-specific fields and exact JSON values, with only the selected model and streaming fields adjusted. Responses stream incrementally through libcurl; the daemon does not collect a same-protocol SSE response before forwarding it.
-
-Cross-protocol requests, complete responses and SSE use zcall's semantic interfaces. Conversion is strict: unsupported metadata or reasoning semantics produce an explicit error rather than disappearing. For example, some Chat-to-Anthropic streams need input-token usage before Chat provides it. See [protocol and resource limits](docs/ARCHITECTURE.md) for the supported contract.
-
-The transport reuses connections per worker. A non-rewindable upload callback prevents automatic replay after generation upload begins. Redirects are not followed; interrupted responses are terminated without a successful final chunk. This avoids silently replaying a generation after an ambiguous failure.
-
-## CLI
+## Management
 
 ```sh
-zcalld check --config ./gateway.conf --json
-zcalld models --json
-zcalld providers --json
-zcalld plugins --json
-zcalld env openai
-zcalld env anthropic
-zcalld env gemini
-zcalld health
-zcalld --version
+zcalld status --json
+zcalld providers list --json
+zcalld providers add work --base-url https://api.example.com/v1 --api-key-stdin
+zcalld routes list --json
+zcalld groups set group/work --members work/model-a,work/model-b --mode rotate
+zcalld agents detect --json
+zcalld agents apply claude --route group/work --json
+zcalld agents revert claude --json
+zcalld plugins list --json
+zcalld accounts list --json
+zcalld privacy show --json
+zcalld profiles save work --json
+zcalld library list --json
+zcalld usage summary --json
+zcalld update check --json
 ```
 
-`env` emits shell exports and references the configured token variable by name. It does not print the token value. `check` validates credentials and actually loads configured plugins so an incompatible ABI is caught before serving.
+Agent edits preserve unrelated fields and keep exact-byte backups. Revert refuses to overwrite later user edits unless explicitly forced. Account controls operate on the actual private compatibility-host store. Community packages must be deliberately enabled; trusted native libraries run inside the daemon process.
 
-## Optional native plugins
+Privacy runs before model-group classification. JSON and fragmented SSE responses restore masked values. If a required privacy worker is unavailable, requests fail closed before upstream generation. Group modes include order, smart, rotate, usage, pace, weight and drain; turn affinity is bounded. Explicit upstream 429/503 responses may select another member before downstream headers are committed, with at most four total attempts. An already-started stream or an ambiguous network failure is never replayed.
 
-```ini
-[plugin aliases]
-path = /usr/lib/zcalld/plugins/libzcalld_aliases.so
-config = fast=coding
+## Services
 
-[plugin policy]
-path = /usr/lib/zcalld/plugins/libzcalld_policy.so
-config = allow=coding
-```
-
-The aliases plugin changes `fast` into the `coding` route. The policy plugin then permits `coding` and rejects other names. Multiline plugin configuration uses `config_file = ./policy.conf`.
-
-Each worker creates its own zplugin instances. Trusted libraries are loaded only from configured paths and remain pinned until process exit. Disabled plugins are not loaded. The versioned SDK offers routing, request transformation and observation hooks using caller-owned buffers; [PLUGINS.md](docs/PLUGINS.md) describes the ABI and a real dynamic-loading example.
-
-## systemd
-
-Use the packaged user service after configuring the CLI. If your configuration
-names credential variables, put their values in `~/.config/zcalld/credentials`
-(or `$XDG_CONFIG_HOME/zcalld/credentials`) as `NAME=value` assignments and protect
-that file with mode 0600. The user unit reads this file; it does not inherit
-exports from an interactive terminal. CLI commands such as `check` and `env`
-need the same variables in their own shell environment. See the
-[credential setup example](docs/RELEASING.md#systemd-operation).
-
-Stop any foreground `zcalld serve` using the same port, then start the service:
+Linux user service, after configuration:
 
 ```sh
 systemctl --user daemon-reload
@@ -142,49 +109,26 @@ systemctl --user enable --now zcalld.service
 journalctl --user -u zcalld.service
 ```
 
-For a machine-wide service, edit `/etc/zcalld/config.conf`. Put required environment variables in `/etc/zcalld/credentials`, restrict that file to the administrator, then start the service:
+The Linux system service runs as the dedicated `zcalld` user and reads `/var/lib/zcalld/config.conf`. Initialize that private state directory before starting it; `/etc/zcalld/config.conf` is a template. Both units use readiness notification, private socket permissions and a 60-second stop budget so an in-progress credential rotation can finish writing.
+
+On macOS, `zcalld service start` manages a per-user launchd agent. On Windows it manages a per-user scheduled task. `service status` queries the actual platform manager and checks gateway health. Unix sockets are used where supported; Windows clients use loopback TCP.
+
+## Build, submodules and release
 
 ```sh
-sudo systemctl enable --now zcalld.service
-sudo systemctl status zcalld.service
-```
-
-Both units use `Type=notify`; readiness is sent after the listener and all workers initialize. SIGTERM stops admission and cancels outstanding upstream transfers. The system unit uses a dynamic unprivileged identity and filesystem restrictions. Configuration and plugin upgrades take effect with `systemctl restart`.
-
-## Resource model
-
-The defaults are 4 workers and 16 queued sockets. One active generation occupies a worker; excess accepted connections receive HTTP 503 when the queue is full. The daemon creates no model subprocesses and no thread per request. Upstream TLS and HTTP live in the shared system libcurl.
-
-Headers are limited to 16 KiB; request bodies default to 4 MiB and responses to 16 MiB. Both body limits can be configured up to 16 MiB. Input, conversion and plugin workspaces have explicit caps. Cross-protocol SSE has a 64 KiB framing/payload limit and 256 KiB aggregate/pending regions. [The benchmark script](https://github.com/LIghtJUNction/zcalld/blob/main/scripts/benchmark.py) measures the actual daemon and uses a deterministic loopback upstream.
-
-Pricing, subscriptions and payment decisions belong to the upstream service. The client has no hardcoded prices, plans, license checks or paid routing gates.
-
-See [measured performance](docs/PERFORMANCE.md) for three runs with and without native plugins, including raw results and limits.
-
-## Build and release
-
-Use Rust 1.100.0, Python 3.11+, Make, and libcurl development headers. On Arch, install `rust`, `curl`, `base-devel`, `python` and `shellcheck`; on Debian/Ubuntu install the Rust toolchain plus `libcurl4-openssl-dev`, `pkg-config`, `build-essential`, `python3` and `shellcheck`.
-
-```sh
+git clone --recurse-submodules https://github.com/LIghtJUNction/zcalld.git
+cd zcalld
 make check
 make package
-```
-
-`make check` runs formatting, Clippy, Rust tests, real gateway integration and release-transaction regression tests. The tests use local mock upstreams and consume no provider credits. Day-to-day push and PR events do not trigger remote CI; the same checks run for formal release builds.
-
-For a version bump and release:
-
-```sh
 make bump BUMP=patch
 make release
-# Or let the workflow make the version commit and release:
-gh workflow run bump.yml -f bump=patch
+# Or: gh workflow run bump.yml -f bump=patch
 ```
 
-The workflow updates workspace/package versions, SDK dependency pins, lockfile and changelog; builds native x86_64/aarch64 archives; publishes a GitHub release and checksums; then regenerates and pushes both AUR package recipes. [RELEASING.md](docs/RELEASING.md) explains dry runs, exact-tag validation and recovery.
+Use Rust 1.100.0, Python 3.11+, a native compiler and libcurl development libraries. Project Z libraries are actual Cargo patches pointing to pinned git submodules. The optional GUI and compatibility source repositories are also submodules; they keep independent releases.
 
-## Scope
+Day-to-day checks run locally. Formal release workflows validate five native targets, publish versioned archives plus SHA256SUMS, and update source/binary AUR recipes. Source archives recursively include the exact tracked submodule commits; private and untracked development files are excluded. The bump command updates workspace versions, dependency pins, lockfile and changelog as one recoverable operation.
 
-The local-gateway role is inspired by [Magpie](https://github.com/yetone/magpie). zcalld 0.1 provides explicit routes, native plugins and protocol conversion. OAuth account discovery, agent configuration editing, persistent usage storage, quota-aware failover and graphical management are not included in this release.
+[RELEASING.md](docs/RELEASING.md) describes publishing and recovery. [PLUGINS.md](docs/PLUGINS.md) describes the SDK. [PERFORMANCE.md](docs/PERFORMANCE.md) contains measured daemon baselines, with versions and workload limitations. GUI renderer and native-platform evidence live in its own repository. No client pricing table, subscription tier or paid feature gate is built into these projects.
 
-MIT licensed. The protocol and plugin libraries are developed independently in Project Z.
+MIT licensed. Magpie compatibility code retains upstream notices in the optional compatibility repository.

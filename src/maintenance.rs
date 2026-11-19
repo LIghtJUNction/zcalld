@@ -373,6 +373,23 @@ fn groups(context: &Context, args: &[String]) -> Result<(), String> {
     };
     let action = args.first().map(String::as_str).unwrap_or("list");
     if action == "list" {
+        let deciders = state
+            .get("deciders")
+            .as_array()
+            .iter()
+            .map(|d| {
+                object([
+                    ("id", d.get("id").clone()),
+                    ("url", d.get("url").clone()),
+                    ("protocol", d.get("protocol").clone()),
+                    (
+                        "credential_configured",
+                        d.get("key").as_str().is_some_and(|v| !v.is_empty()).into(),
+                    ),
+                ])
+            })
+            .collect();
+        state.set("deciders", Value::Array(deciders));
         return control::emit(state);
     }
     let name = args
@@ -713,8 +730,18 @@ fn usage(context: &Context, args: &[String]) -> Result<(), String> {
                 if v.get("status").as_u64().is_some_and(|v| v >= 400) {
                     failed += 1;
                 }
-                input += v.get("input_tokens").as_u64().unwrap_or(0);
-                output += v.get("output_tokens").as_u64().unwrap_or(0);
+                input = input.saturating_add(
+                    v.get("input_tokens")
+                        .as_u64()
+                        .or_else(|| v.get("in").as_u64())
+                        .unwrap_or(0),
+                );
+                output = output.saturating_add(
+                    v.get("output_tokens")
+                        .as_u64()
+                        .or_else(|| v.get("out").as_u64())
+                        .unwrap_or(0),
+                );
             }
         }
     }
