@@ -151,15 +151,36 @@ overwriting a modified configuration.
 
 ## systemd operation
 
-For a user service:
+For a user service, run `zcalld init` and edit the generated configuration.
+If it uses `token_env` or `api_key_env`, create
+`${XDG_CONFIG_HOME:-$HOME/.config}/zcalld/credentials` with mode 0600.
+Use plain, shell-compatible assignments for the variables named in your config:
 
 ```sh
-zcalld init
+ZCALLD_TOKEN='your-local-gateway-token'
+CLOUD_API_KEY='your-provider-key'
+```
+
+The packaged user unit reads this file through `EnvironmentFile`. A user
+service does not inherit exports from the terminal that starts it. The CLI
+loads configuration and validates required variables too, so for an interactive
+check load your own trusted, shell-compatible file into that shell:
+
+```sh
+chmod 600 "${XDG_CONFIG_HOME:-$HOME/.config}/zcalld/credentials"
+set -a
+. "${XDG_CONFIG_HOME:-$HOME/.config}/zcalld/credentials"
+set +a
 zcalld check
 systemctl --user daemon-reload
 systemctl --user enable --now zcalld.service
 journalctl --user -u zcalld.service
 ```
+
+For a local upstream without credentials, the credential-file steps are
+unnecessary. Stop any foreground `zcalld serve` on the same address and port
+before enabling the service. When using a custom `XDG_CONFIG_HOME`, ensure the
+user service manager has the same setting as the CLI.
 
 For a system service, edit `/etc/zcalld/config.conf` and put any required
 provider environment variables in `/etc/zcalld/credentials`. Protect that

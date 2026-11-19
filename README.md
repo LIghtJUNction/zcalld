@@ -14,6 +14,14 @@ yay -S zcalld
 yay -S zcalld-bin
 ```
 
+Without an AUR helper, use the published package repository:
+
+```sh
+git clone https://aur.archlinux.org/zcalld-bin.git
+cd zcalld-bin
+makepkg -si
+```
+
 Native x86_64 and aarch64 archives are available in [Releases](https://github.com/LIghtJUNction/zcalld/releases). They contain an `install.sh`, the executable, optional plugins, systemd units, configuration, man page and license. The runtime uses the distribution's libcurl and CA certificates.
 
 ## Start
@@ -118,9 +126,18 @@ Each worker creates its own zplugin instances. Trusted libraries are loaded only
 
 ## systemd
 
-Use the packaged user service after configuring the CLI:
+Use the packaged user service after configuring the CLI. If your configuration
+names credential variables, put their values in `~/.config/zcalld/credentials`
+(or `$XDG_CONFIG_HOME/zcalld/credentials`) as `NAME=value` assignments and protect
+that file with mode 0600. The user unit reads this file; it does not inherit
+exports from an interactive terminal. CLI commands such as `check` and `env`
+need the same variables in their own shell environment. See the
+[credential setup example](docs/RELEASING.md#systemd-operation).
+
+Stop any foreground `zcalld serve` using the same port, then start the service:
 
 ```sh
+systemctl --user daemon-reload
 systemctl --user enable --now zcalld.service
 journalctl --user -u zcalld.service
 ```
