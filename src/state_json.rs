@@ -145,6 +145,10 @@ fn owned(value: json::Value<'_, '_>) -> Value {
 }
 
 pub fn parse(input: &[u8]) -> Result<Value, String> {
+    parse_with_limit(input, MAX_INPUT)
+}
+
+pub fn parse_with_limit(input: &[u8], max_input: usize) -> Result<Value, String> {
     let mut count = 256usize;
     loop {
         let mut tokens = vec![Token::EMPTY; count];
@@ -152,7 +156,7 @@ pub fn parse(input: &[u8]) -> Result<Value, String> {
             input,
             &mut tokens,
             Limits {
-                max_input: MAX_INPUT,
+                max_input,
                 ..Limits::default()
             },
         ) {

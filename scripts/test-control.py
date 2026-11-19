@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -47,7 +48,8 @@ class ControlTests(unittest.TestCase):
         self.cli("providers", "add", "fixture-new", "--base-url", "https://example.invalid/v1",
                  "--api-key-stdin", "--model", "m", input=secret)
         credentials = self.directory / "credentials"
-        self.assertEqual(credentials.stat().st_mode & 0o777, 0o600)
+        if os.name == "posix":
+            self.assertEqual(credentials.stat().st_mode & 0o777, 0o600)
         listed = self.cli("providers", "list")
         self.assertNotIn(secret, json.dumps(listed))
         old_credentials, old_config = credentials.read_bytes(), self.config.read_bytes()
@@ -83,7 +85,7 @@ class ControlTests(unittest.TestCase):
         self.assertEqual(path.read_text(), original)
 
     def test_editor_catalog_preserves_other_provider_and_comment(self):
-        path = self.home / ".config/Code/User/chatLanguageModels.json"
+        path = self.home / ("Library/Application Support/Code/User/chatLanguageModels.json" if sys.platform == "darwin" else ".config/Code/User/chatLanguageModels.json")
         path.parent.mkdir(parents=True)
         path.write_text('[\n// keep this group\n{"name":"custom","models":[]},\n]\n')
         self.cli("agents", "apply", "vscode", "--route", "fixture/model")
@@ -133,6 +135,37 @@ class ControlTests(unittest.TestCase):
         self.assertEqual(data["mcpServers"]["existing"]["command"], "true")
         self.assertEqual(data["mcpServers"]["fixture"]["env"]["KEEP"], "secret")
         self.assertNotIn("secret", json.dumps(self.cli("library", "list")))
+
+
+    def test_group_creates_selectable_route_and_preserves_rules(self):
+        self.cli("groups", "set", "group/work", "--members", "fixture/model", "--mode", "rotate")
+        route = next(r for r in self.cli("routes", "list")["routes"] if r["name"] == "group/work")
+        self.assertEqual(route["provider"], "fixture")
+        path = self.directory / "routing.json"
+        state = json.loads(path.read_text())
+        state["groups"][0]["original"] = {"affinity": "turn", "rules": [{"when": "compact", "useEffort": "low"}]}
+        path.write_text(json.dumps(state))
+        self.cli("groups", "set", "group/work", "--members", "fixture/model", "--mode", "order")
+        self.assertEqual(json.loads(path.read_text())["groups"][0]["original"], state["groups"][0]["original"])
+        before = self.config.read_bytes(), path.read_bytes()
+        self.cli("groups", "set", "group/work", "--members", "group/work", ok=False)
+        self.assertEqual((self.config.read_bytes(), path.read_bytes()), before)
+        self.cli("groups", "remove", "group/work")
+        self.assertNotIn("group/work", [r["name"] for r in self.cli("routes", "list")["routes"]])
+
+    def test_profile_without_credentials_clears_stale_private_state(self):
+        self.cli("profiles", "save", "empty")
+        credentials = self.directory / "credentials"
+        credentials.write_text('ZCALLD_UNUSED_KEY="fixture-private"\n')
+        privacy = self.directory / "privacy/settings.json"
+        privacy.parent.mkdir()
+        privacy.write_text('{"redactWords":["fixture-private"]}')
+        self.cli("profiles", "save", "with-secret")
+        self.cli("profiles", "use", "empty")
+        self.assertFalse(credentials.exists())
+        self.assertFalse(privacy.exists())
+        self.cli("profiles", "save", "with-secret")
+        self.assertFalse((self.directory / "profiles/with-secret/credentials").exists())
 
     def test_migration_dry_run_does_not_change_originals(self):
         source = self.home / ".config/magpie"

@@ -13,7 +13,7 @@ use std::{
 };
 use zcalld_plugin_api::{
     ContextPlugin, ContextPluginExport, GatewayPlugin, GatewayPluginExport, ResponsePlugin,
-    ResponsePluginExport, protocol,
+    ResponsePluginExport, RetryPlugin, RetryPluginExport, protocol,
 };
 use zplugin::{Error, Result};
 
@@ -81,6 +81,7 @@ struct Turn {
     model: String,
     effort: String,
     intent: String,
+    apply_effort: bool,
     at: u64,
 }
 #[derive(Default)]
@@ -113,6 +114,9 @@ struct RequestState {
     output_tokens: u64,
     response_tail: Vec<u8>,
     stream: bool,
+    preferred: Vec<String>,
+    excluded: Vec<String>,
+    apply_effort: bool,
     _context: Value,
 }
 thread_local! {static REQUESTS:RefCell<BTreeMap<String,Weak<RefCell<RequestState>>>>=const { RefCell::new(BTreeMap::new()) };}
@@ -942,7 +946,7 @@ impl GatewayPlugin for Router {
             (s.model.clone(), s.session.clone(), s.agent.clone())
         };
         let model = if model.is_empty() {
-            invalid(json::parse(input))?
+            invalid(json::parse_with_limit(input, 16 * 1024 * 1024))?
                 .get("model")
                 .as_str()
                 .unwrap_or("")
@@ -962,7 +966,7 @@ impl GatewayPlugin for Router {
         if output.len() < input.len().saturating_add(2048) {
             return Err(Error::BufferTooSmall);
         }
-        let mut request = invalid(json::parse(input))?;
+        let mut request = invalid(json::parse_with_limit(input, 16 * 1024 * 1024))?;
         let text = user_text(&request);
         let session_key = digest::sha256(session.as_bytes());
         let turn_key = digest::sha256(format!("{session}\0{text}").as_bytes());
@@ -1002,7 +1006,10 @@ impl GatewayPlugin for Router {
         let mut excluded = Vec::new();
         let mut effort = String::new();
         let mut intent = String::new();
+        let mut apply_from_turn = None;
+        let mut rule_override = false;
         if let Some(turn) = held {
+            apply_from_turn = Some(turn.apply_effort);
             preferred.push(turn.model);
             effort = turn.effort;
             intent = turn.intent;
@@ -1039,6 +1046,7 @@ impl GatewayPlugin for Router {
                         let rule_effort = string(rule, "useEffort");
                         if !rule_effort.is_empty() {
                             effort = rule_effort;
+                            rule_override = true;
                         }
                     }
                 }
@@ -1050,6 +1058,12 @@ impl GatewayPlugin for Router {
                 effort = group_effort;
             }
         }
+        let original_effort = requested_effort(&request);
+        let apply = apply_from_turn.unwrap_or(
+            original.get("effort").as_str() != Some("auto")
+                || level(&original_effort) > 0
+                || rule_override,
+        );
         let selected = {
             let mut pools = shared.lock().map_err(|_| Error::PluginStatus(8))?;
             let pool = pools.entry(model.clone()).or_default();
@@ -1062,15 +1076,12 @@ impl GatewayPlugin for Router {
                 model: selected.clone(),
                 effort: effort.clone(),
                 intent: intent.clone(),
+                apply_effort: apply,
                 at: now(),
             });
             selected
         };
-        let original_effort = requested_effort(&request);
-        if original.get("effort").as_str() != Some("auto")
-            || level(&original_effort) > 0
-            || !preferred.is_empty()
-        {
+        if apply {
             apply_effort(&mut request, protocol, &effort, group, &selected);
         }
         {
@@ -1080,6 +1091,9 @@ impl GatewayPlugin for Router {
             state.effort = effort;
             state.intent = intent;
             state.turn_key = turn_key;
+            state.preferred = preferred;
+            state.excluded = excluded;
+            state.apply_effort = apply;
         }
         // Gemini selects its model in the request path; route() carries that choice.
         if protocol != protocol::GEMINI_GENERATE_CONTENT {
@@ -1153,6 +1167,99 @@ impl GatewayPlugin for Router {
     }
 }
 
+impl RetryPlugin for Router {
+    fn configure(&mut self, config: &str) -> Result<()> {
+        self.configure_path(config)
+    }
+
+    fn retry(&mut self, status: u32, previous_model: &str, output: &mut [u8]) -> Result<u64> {
+        if status != 429 && status != 503 {
+            return Ok(0);
+        }
+        let request = self.current()?.clone();
+        let state = request.borrow();
+        if state.group.is_empty() || state.selected != previous_model {
+            return Ok(0);
+        }
+        let Some(group) = self
+            .settings
+            .get("groups")
+            .as_array()
+            .iter()
+            .find(|g| g.get("name").as_str() == Some(&state.group))
+        else {
+            return Ok(0);
+        };
+        // Model names are bounded by validation. Decide only after the host can
+        // receive any possible choice, so an ABI buffer replay is side-effect free.
+        if output.len() < 512 {
+            return Err(Error::BufferTooSmall);
+        }
+        let shared = self.shared.as_ref().ok_or(Error::PluginStatus(8))?;
+        let mut pools = shared.lock().map_err(|_| Error::PluginStatus(8))?;
+        let pool = pools.entry(state.group.clone()).or_default();
+        let mut excluded = state.excluded.clone();
+        excluded.push(previous_model.into());
+        let Some(selected) = choose(group, pool, &state.preferred, &excluded) else {
+            return Ok(0);
+        };
+        pool.stats.entry(selected.clone()).or_default().requests += 1;
+        if let Some(turn) = pool
+            .turns
+            .iter_mut()
+            .rev()
+            .find(|turn| turn.key == state.turn_key)
+        {
+            turn.model = selected.clone();
+        }
+        output[..selected.len()].copy_from_slice(selected.as_bytes());
+        drop(state);
+        let mut state = request.borrow_mut();
+        state.selected = selected.clone();
+        state.excluded = excluded;
+        state.input_tokens = 0;
+        state.output_tokens = 0;
+        state.response_tail.clear();
+        Ok(selected.len() as u64)
+    }
+
+    fn request(&mut self, protocol: u32, input: &[u8], output: &mut [u8]) -> Result<u64> {
+        let state = self.current()?.borrow();
+        if state.selected.is_empty() {
+            return Ok(0);
+        }
+        if output.len() < input.len().saturating_add(2048) {
+            return Err(Error::BufferTooSmall);
+        }
+        let mut request = invalid(json::parse_with_limit(input, 16 * 1024 * 1024))?;
+        if let Some(group) = self
+            .settings
+            .get("groups")
+            .as_array()
+            .iter()
+            .find(|g| g.get("name").as_str() == Some(&state.group))
+            && state.apply_effort
+        {
+            apply_effort(
+                &mut request,
+                protocol,
+                &state.effort,
+                group,
+                &state.selected,
+            );
+        }
+        if protocol != protocol::GEMINI_GENERATE_CONTENT {
+            request.set("model", state.selected.clone().into());
+        }
+        let body = request.stringify();
+        if body.len() > output.len() {
+            return Err(Error::BufferTooSmall);
+        }
+        output[..body.len()].copy_from_slice(body.as_bytes());
+        Ok(body.len() as u64)
+    }
+}
+
 fn extract_usage(value: &Value, state: &mut RequestState) {
     let usage = if !matches!(value.get("usage"), Value::Null) {
         value.get("usage")
@@ -1223,7 +1330,7 @@ impl ResponsePlugin for Router {
 fn create() -> Result<Router> {
     Ok(Router::default())
 }
-zplugin::export_interfaces!(version=(zcalld_plugin_api::version_component(env!("CARGO_PKG_VERSION_MAJOR")),zcalld_plugin_api::version_component(env!("CARGO_PKG_VERSION_MINOR")),zcalld_plugin_api::version_component(env!("CARGO_PKG_VERSION_PATCH"))),unload=pinned; GatewayPluginExport<Router> => create, ContextPluginExport<Router> => create, ResponsePluginExport<Router> => create,);
+zplugin::export_interfaces!(version=(zcalld_plugin_api::version_component(env!("CARGO_PKG_VERSION_MAJOR")),zcalld_plugin_api::version_component(env!("CARGO_PKG_VERSION_MINOR")),zcalld_plugin_api::version_component(env!("CARGO_PKG_VERSION_PATCH"))),unload=pinned; GatewayPluginExport<Router> => create, ContextPluginExport<Router> => create, ResponsePluginExport<Router> => create, RetryPluginExport<Router> => create,);
 
 #[cfg(test)]
 mod tests {

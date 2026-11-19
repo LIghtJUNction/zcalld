@@ -168,7 +168,11 @@ fn update(context: &Context, args: &[String]) -> Result<(), String> {
         })
         .ok_or("binary missing from SHA256SUMS")?;
     let parent = exe.parent().ok_or("executable has no parent directory")?;
-    let temporary = parent.join(format!(".zcalld-update-{}", std::process::id()));
+    let temporary = parent.join(format!(
+        ".zcalld-update-{}{}",
+        std::process::id(),
+        if cfg!(windows) { ".exe" } else { "" }
+    ));
     if temporary.exists() {
         return Err("an update staging file already exists; inspect it before retrying".into());
     }
@@ -229,21 +233,7 @@ fn update(context: &Context, args: &[String]) -> Result<(), String> {
         fs::rename(&temporary, &exe).map_err(|e| e.to_string())?;
         #[cfg(windows)]
         {
-            let stage = context.directory.join("pending-update.json");
-            json::atomic_write(
-                &stage,
-                object([
-                    ("download", temporary.to_string_lossy().into_owned().into()),
-                    ("destination", exe.to_string_lossy().into_owned().into()),
-                ])
-                .stringify()
-                .as_bytes(),
-            )?;
-            return Err(format!(
-                "Windows cannot replace a running executable; verified update staged at {}. Stop the service and move it over {}",
-                temporary.display(),
-                exe.display()
-            ));
+            return crate::windows_update::queue(context, &temporary, &exe, &expected, latest);
         }
         #[cfg(not(windows))]
         {
@@ -269,34 +259,118 @@ fn update(context: &Context, args: &[String]) -> Result<(), String> {
 
 fn accounts(context: &Context, args: &[String]) -> Result<(), String> {
     let action = args.first().map(String::as_str).unwrap_or("list");
-    let path = context.directory.join("accounts.json");
-    let mut state =
-        json::read(&path).unwrap_or_else(|_| object([("accounts", Value::Array(Vec::new()))]));
-    match action {
-        "list"=>{let accounts=state.get("accounts").as_array().iter().enumerate().map(|(i,a)|object([("index",i.into()),("provider",a.get("provider").clone()),("label",a.get("label").clone()),("enabled",a.get("enabled").as_bool().unwrap_or(true).into()),("has_credentials",(!matches!(a.get("auth"),Value::Null)).into())])).collect();control::emit(object([("accounts",Value::Array(accounts))]))},
-        "import"=>{let source=control::option(args,"--file")?.ok_or("accounts import requires a private --file")?;let provider=control::option(args,"--provider")?.ok_or("--provider required")?;if !control::safe_id(provider){return Err("invalid provider ID".into());}let auth=json::read(Path::new(source))?;let label=control::option(args,"--label")?.unwrap_or(provider);let entry=object([("provider",provider.into()),("label",label.into()),("auth",auth),("enabled",true.into())]);let mut accounts=state.get("accounts").as_array().to_vec();accounts.push(entry);state.set("accounts",Value::Array(accounts));control::backup(context,std::slice::from_ref(&path),"accounts")?;json::atomic_write(&path,state.stringify().as_bytes())?;control::emit(object([("ok",true.into()),("provider",provider.into())]))},
-        "enable"|"disable"|"remove"=>{let index=args.get(1).ok_or("account index required")?.parse::<usize>().map_err(|_|"invalid account index")?;let mut values=state.get("accounts").as_array().to_vec();if index>=values.len(){return Err("account index out of range".into());}
-        if action=="remove"{values.remove(index);}else{values[index].set("enabled",(action=="enable").into());}state.set("accounts",Value::Array(values));control::backup(context,std::slice::from_ref(&path),"accounts")?;json::atomic_write(&path,state.stringify().as_bytes())?;control::emit(object([("ok",true.into())]))},
-        "session"=>{let mut command=std::process::Command::new(plugin_helper());command.args(["--root",&context.directory.join("extensions").to_string_lossy(),"session"]);let status=command.status().map_err(|e|e.to_string())?;if status.success(){Ok(())}else{Err("account session failed".into())}},
-        _=>Err("accounts expects list, import, enable, disable, remove or session; use a plugin session for OAuth authorization and callback".into()),
+    if ![
+        "list", "import", "use", "enable", "disable", "remove", "session",
+    ]
+    .contains(&action)
+    {
+        return Err(
+            "accounts expects list, import, use, enable, disable, remove or session".into(),
+        );
     }
-}
-pub fn plugin_helper() -> String {
-    std::env::var("ZCALLD_PLUGINCTL").unwrap_or_else(|_| {
-        if Path::new("extensions/compat/bin/zcalld-pluginctl").is_file() {
-            "extensions/compat/bin/zcalld-pluginctl".into()
-        } else if Path::new("/usr/libexec/zcalld/zcalld-pluginctl").is_file() {
-            "/usr/libexec/zcalld/zcalld-pluginctl".into()
+    let helper = crate::extensions::helper()?;
+    let root = context.directory.join("extensions");
+    if action == "session" {
+        let status = std::process::Command::new(&helper)
+            .args(["--root", &root.to_string_lossy(), "accounts", "session"])
+            .status()
+            .map_err(|e| e.to_string())?;
+        return if status.success() {
+            Ok(())
         } else {
-            "zcalld-pluginctl".into()
+            Err("account session failed".into())
+        };
+    }
+    let local_provider = control::option(args, "--local-provider")?;
+    let mut text = if action == "use" {
+        Some(control::config_text(context)?)
+    } else {
+        None
+    };
+    if let Some(name) = local_provider
+        && !control::sections(
+            text.as_deref()
+                .ok_or("--local-provider is only valid with accounts use")?,
+        )
+        .iter()
+        .any(|(section, _)| section == &format!("provider {name}"))
+    {
+        return Err("unknown local provider".into());
+    }
+    let mut command = vec![
+        "--root".into(),
+        root.to_string_lossy().into_owned(),
+        "accounts".into(),
+    ];
+    if args.is_empty() {
+        command.push("list".into());
+    }
+    let mut skip = false;
+    for arg in args {
+        if skip {
+            skip = false;
+            continue;
         }
-    })
+        if arg == "--local-provider" {
+            skip = true;
+            continue;
+        }
+        command.push(arg.clone());
+    }
+    let (code, out, _) = control::command(
+        &helper.to_string_lossy(),
+        &command,
+        None,
+        Duration::from_secs(30),
+    )?;
+    if code != 0 {
+        return Err("account operation was rejected by the compatibility helper; no credentials are included in this error".into());
+    }
+    let mut result = json::parse(out.as_bytes())?;
+    if action == "use" {
+        let selected = result.get("selection");
+        let provider = selected
+            .get("provider")
+            .as_str()
+            .ok_or("account selection has no provider")?;
+        let account = selected
+            .get("account")
+            .as_str()
+            .ok_or("account selection has no account")?;
+        let mut content = text.take().unwrap();
+        let mut changed = 0u64;
+        for (section, values) in control::sections(&content) {
+            let Some(name) = section.strip_prefix("provider ") else {
+                continue;
+            };
+            if local_provider.is_some_and(|wanted| wanted != name) {
+                continue;
+            }
+            if values.get("plugin").is_some_and(|id| id == provider) {
+                content = control::ini_set(&content, &section, "plugin_account", account)?;
+                changed += 1;
+            }
+        }
+        if changed > 0 {
+            control::save_config(context, &content, "account-selection")?;
+        }
+        result.set("updated_providers", changed.into());
+        result.set("restart_required", (changed > 0).into());
+    }
+    control::emit(result)
+}
+
+pub fn plugin_helper() -> Result<String, String> {
+    Ok(crate::extensions::helper()?.to_string_lossy().into_owned())
 }
 
 fn groups(context: &Context, args: &[String]) -> Result<(), String> {
     let path = context.directory.join("routing.json");
-    let mut state =
-        json::read(&path).unwrap_or_else(|_| object([("groups", Value::Array(Vec::new()))]));
+    let mut state = if path.exists() {
+        json::read(&path)?
+    } else {
+        object([("groups", Value::Array(Vec::new()))])
+    };
     let action = args.first().map(String::as_str).unwrap_or("list");
     if action == "list" {
         return control::emit(state);
@@ -306,6 +380,12 @@ fn groups(context: &Context, args: &[String]) -> Result<(), String> {
         .filter(|v| control::valid_name(v))
         .ok_or("group name required")?;
     let mut entries = state.get("groups").as_array().to_vec();
+    let previous = entries
+        .iter()
+        .find(|v| v.get("name").as_str() == Some(name))
+        .cloned();
+    let mut text = control::config_text(context)?;
+    let section = format!("route {name}");
     match action {
         "set" => {
             let mode = control::option(args, "--mode")?.unwrap_or("order");
@@ -316,35 +396,90 @@ fn groups(context: &Context, args: &[String]) -> Result<(), String> {
             {
                 return Err("unsupported routing mode".into());
             }
-            let members = control::option(args, "--members")?
+            let names = control::option(args, "--members")?
                 .ok_or("--members requires comma-separated configured routes")?;
             let configured = crate::config::Config::load(&context.path)?;
-            let members: Vec<Value> = members
-                .split(',')
-                .map(|m| {
-                    if !configured.routes.iter().any(|r| r.name == m) {
-                        return Err(format!("unknown route {m}"));
-                    }
-                    Ok(object([("model", m.into()), ("weight", 1u64.into())]))
-                })
-                .collect::<Result<_, _>>()?;
-            if members.is_empty() {
-                return Err("group needs at least one route".into());
+            if previous.is_none() && configured.routes.iter().any(|r| r.name == *name) {
+                return Err("a non-group route already uses this name".into());
             }
-            let next = object([
-                ("name", name.clone().into()),
-                ("mode", mode.into()),
-                ("members", Value::Array(members)),
-            ]);
+            let catalog = json::parse(configured.models_json.as_bytes())?;
+            let mut members = Vec::new();
+            let mut seen = std::collections::BTreeSet::new();
+            let mut first = None;
+            for model in names.split(',').map(str::trim) {
+                if model == name
+                    || entries
+                        .iter()
+                        .any(|g| g.get("name").as_str() == Some(model))
+                {
+                    return Err(
+                        "group members must be direct routes; nested groups are not supported"
+                            .into(),
+                    );
+                }
+                let route = configured
+                    .routes
+                    .iter()
+                    .find(|r| r.name == model)
+                    .ok_or_else(|| format!("unknown route {model}"))?;
+                if !seen.insert(model) {
+                    return Err("group members must be unique".into());
+                }
+                if first.is_none() {
+                    first = Some(route);
+                }
+                let old = previous
+                    .as_ref()
+                    .map(|v| v.get("members").as_array())
+                    .unwrap_or(&[]);
+                let mut member = old
+                    .iter()
+                    .find(|m| m.get("model").as_str() == Some(model))
+                    .cloned()
+                    .unwrap_or_else(|| object([("model", model.into()), ("weight", 1u64.into())]));
+                if let Some(metadata) = catalog
+                    .get("data")
+                    .as_array()
+                    .iter()
+                    .find(|m| m.get("id").as_str() == Some(model))
+                {
+                    member.set("reasoning_levels", metadata.get("reasoning_levels").clone());
+                    member.set("context_window", metadata.get("context_window").clone());
+                }
+                members.push(member);
+            }
+            let first = first.ok_or("group needs at least one route")?;
+            let mut next = previous.unwrap_or_else(|| object([("name", name.clone().into())]));
+            next.set("mode", mode.into());
+            next.set("members", Value::Array(members));
             entries.retain(|v| v.get("name").as_str() != Some(name));
             entries.push(next);
+            text = control::ini_set(
+                &text,
+                &section,
+                "provider",
+                &configured.providers[first.provider].name,
+            )?;
+            text = control::ini_set(&text, &section, "model", &first.model)?;
         }
-        "remove" => entries.retain(|v| v.get("name").as_str() != Some(name)),
+        "remove" => {
+            if previous.is_none() {
+                return Err("unknown group".into());
+            }
+            entries.retain(|v| v.get("name").as_str() != Some(name));
+            text = control::ini_remove(&text, &section);
+        }
         _ => return Err("groups expects list, set or remove".into()),
     }
     state.set("groups", Value::Array(entries));
-    control::backup(context, std::slice::from_ref(&path), "routing")?;
-    json::atomic_write(&path, state.stringify().as_bytes())?;
+    control::replace_files(
+        context,
+        &[
+            (path, Some(state.stringify().into_bytes())),
+            (context.path.clone(), Some(text.into_bytes())),
+        ],
+        "routing",
+    )?;
     control::emit(object([
         ("ok", true.into()),
         ("restart_required", true.into()),

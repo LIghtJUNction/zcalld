@@ -275,6 +275,52 @@ pub fn save_config(context: &Context, text: &str, label: &str) -> Result<(), Str
     json::atomic_write(&context.path, text.as_bytes())
 }
 
+/// Replace private configuration files together, restoring prior bytes on failure.
+pub fn replace_files(
+    context: &Context,
+    updates: &[(PathBuf, Option<Vec<u8>>)],
+    label: &str,
+) -> Result<(), String> {
+    let original = updates
+        .iter()
+        .map(|(path, _)| match fs::read(path) {
+            Ok(bytes) => Ok(Some(bytes)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e.to_string()),
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let paths = updates.iter().map(|(p, _)| p.clone()).collect::<Vec<_>>();
+    let saved = backup(context, &paths, label)?;
+    let write = |path: &Path, bytes: &Option<Vec<u8>>| -> Result<(), String> {
+        match bytes {
+            Some(bytes) => json::atomic_write(path, bytes),
+            None => match fs::remove_file(path) {
+                Ok(()) => Ok(()),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                Err(e) => Err(e.to_string()),
+            },
+        }
+    };
+    for (index, (path, value)) in updates.iter().enumerate() {
+        if let Err(error) = write(path, value) {
+            let mut restored = true;
+            for n in (0..index).rev() {
+                restored &= write(&updates[n].0, &original[n]).is_ok();
+            }
+            return Err(format!(
+                "{error}; rollback {}; backup {}",
+                if restored {
+                    "completed"
+                } else {
+                    "requires recovery"
+                },
+                saved.display()
+            ));
+        }
+    }
+    Ok(())
+}
+
 pub fn command(
     program: &str,
     args: &[String],
@@ -342,9 +388,40 @@ fn service_state() -> String {
         .map(|(_, o, _)| o.trim().into())
         .unwrap_or_else(|_| "unavailable".into())
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(target_os = "macos")]
     {
-        "managed-by-platform".into()
+        let Ok((0, uid, _)) = command("id", &["-u".into()], None, Duration::from_secs(2)) else {
+            return "unavailable".into();
+        };
+        match command(
+            "launchctl",
+            &[
+                "print".into(),
+                format!("gui/{}/io.project-z.zcalld", uid.trim()),
+            ],
+            None,
+            Duration::from_secs(3),
+        ) {
+            Ok((0, out, _)) if out.lines().any(|line| line.trim() == "state = running") => {
+                "active".into()
+            }
+            Ok((0, _, _)) => "inactive".into(),
+            Ok(_) => "not-registered".into(),
+            Err(_) => "unavailable".into(),
+        }
+    }
+    #[cfg(windows)]
+    {
+        match command("powershell.exe", &["-NoProfile".into(), "-NonInteractive".into(), "-Command".into(),
+            "$t=Get-ScheduledTask -TaskName 'ProjectZ-zcalld' -ErrorAction SilentlyContinue; if ($null -eq $t) {'not-registered'} elseif ($t.State -eq 'Running') {'active'} else {'inactive'}".into()],
+            None, Duration::from_secs(5)) {
+            Ok((0, output, _)) => output.trim().into(),
+            _ => "unavailable".into(),
+        }
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+    {
+        "unsupported".into()
     }
 }
 pub fn status(context: &Context) -> Value {
@@ -744,47 +821,54 @@ fn profiles(context: &Context, args: &[String]) -> Result<(), String> {
         .ok_or("safe profile name required")?;
     let target = base.join(name);
     match action {
-        "save" => {
-            json::atomic_write(
-                &target.join("config.conf"),
-                config_text(context)?.as_bytes(),
+        "save" | "use" => {
+            let saving = action == "save";
+            let config_source = if saving {
+                context.path.clone()
+            } else {
+                target.join("config.conf")
+            };
+            let content = read_text(&config_source)?;
+            let mut updates = Vec::new();
+            for item in ["credentials", "privacy/settings.json"] {
+                let source = if saving {
+                    context.directory.join(item)
+                } else {
+                    target.join(item)
+                };
+                let destination = if saving {
+                    target.join(item)
+                } else {
+                    context.directory.join(item)
+                };
+                let bytes = match fs::read(source) {
+                    Ok(bytes) => Some(bytes),
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+                    Err(e) => return Err(e.to_string()),
+                };
+                updates.push((destination, bytes));
+            }
+            updates.push((
+                if saving {
+                    target.join("config.conf")
+                } else {
+                    context.path.clone()
+                },
+                Some(content.into_bytes()),
+            ));
+            replace_files(
+                context,
+                &updates,
+                if saving {
+                    "profile-save"
+                } else {
+                    "profile-switch"
+                },
             )?;
-            for item in ["credentials", "privacy/settings.json"] {
-                let source = context.directory.join(item);
-                if source.is_file() {
-                    json::atomic_write(
-                        &target.join(item),
-                        &fs::read(source).map_err(|e| e.to_string())?,
-                    )?;
-                }
-            }
             emit(object([
                 ("ok", true.into()),
                 ("profile", name.clone().into()),
-            ]))
-        }
-        "use" => {
-            let content = read_text(&target.join("config.conf"))?;
-            let paths = vec![
-                context.path.clone(),
-                context.directory.join("credentials"),
-                context.directory.join("privacy/settings.json"),
-            ];
-            backup(context, &paths, "profile-switch")?;
-            json::atomic_write(&context.path, content.as_bytes())?;
-            for item in ["credentials", "privacy/settings.json"] {
-                let source = target.join(item);
-                if source.is_file() {
-                    json::atomic_write(
-                        &context.directory.join(item),
-                        &fs::read(source).map_err(|e| e.to_string())?,
-                    )?;
-                }
-            }
-            emit(object([
-                ("ok", true.into()),
-                ("profile", name.clone().into()),
-                ("restart_required", true.into()),
+                ("restart_required", (!saving).into()),
             ]))
         }
         _ => Err("profiles expects list, save or use".into()),

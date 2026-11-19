@@ -15,6 +15,8 @@ mod server;
 mod state_json;
 mod system;
 mod transport;
+#[cfg(windows)]
+mod windows_update;
 
 use std::{
     io::{Read, Write},
@@ -22,25 +24,49 @@ use std::{
     process::ExitCode,
 };
 
-const HELP: &str = "zcalld — compact native AI gateway\n\n\
-Usage: zcalld <command> [--config PATH] [--json]\n\n\
-Commands:\n\
-  init                 Create a starter config without overwriting files\n\
-  serve                Run the gateway in the foreground (systemd friendly)\n\
-  check                Validate config, credentials and plugin ABI\n\
-  models               List configured public model names\n\
-  providers            List configured upstreams without credentials\n\
-  plugins              List explicitly enabled native plugins\n\
-  env [openai|anthropic|gemini]  Print shell client environment exports\n\
-  health               Query the configured gateway's health endpoint\n\
-  version              Show the version\n\n\
-Options:\n\
-  -c, --config PATH    Override ZCALLD_CONFIG / XDG configuration path\n\
-  --json               Machine-readable list/check output\n\
-  -h, --help           Show this help\n\
-  -V, --version        Show the version\n\n\
-Config: $ZCALLD_CONFIG, otherwise $XDG_CONFIG_HOME/zcalld/config.conf\n\
-        or $HOME/.config/zcalld/config.conf\n";
+const HELP: &str = r#"zcalld — compact native AI gateway
+
+Usage: zcalld <command> [--config PATH] [--json]
+
+Gateway:
+  init                     Create a starter configuration
+  serve                    Foreground daemon; systemd/launchd friendly
+  check | health | status  Validate configuration or inspect the live gateway
+  models                   Show public models and retained capability metadata
+  env [openai|anthropic|gemini]
+  service start|stop|restart|enable|disable|status [--system]
+
+Configuration:
+  providers list|add|edit|remove|test|models
+  routes list|set|remove
+  groups list|set|remove
+  agents list|apply|revert|catalog
+  privacy show|set off|secrets|personal
+  plugins list|inspect|install|enable|disable|remove|update|config|providers
+  accounts list|import|use|enable|disable|remove|session
+  profiles list|save|use
+  library list|import|export|add-mcp|apply
+  usage summary|export
+
+Migration and updates:
+  migrate magpie [--source PATH] [--catalog FILE] [--apply]
+  migrate status|verify
+  update check|apply
+  version
+
+Options:
+  -c, --config PATH   Override ZCALLD_CONFIG and the platform configuration path
+  --json             Machine-readable output; management commands always use JSON
+  -h, --help         Show this help
+  -V, --version      Show the version
+
+Native configuration defaults:
+  Linux:   $XDG_CONFIG_HOME/zcalld or $HOME/.config/zcalld
+  macOS:   $HOME/Library/Application Support/zcalld
+  Windows: %APPDATA%/zcalld
+Local CLI connections prefer the private Unix socket when configured.
+Provider secrets use --api-key-stdin, never command-line arguments.
+"#;
 
 fn main() -> ExitCode {
     match run() {
@@ -58,6 +84,18 @@ fn main() -> ExitCode {
 
 fn run() -> Result<(), String> {
     let management_args: Vec<String> = std::env::args().skip(1).collect();
+    if management_args.iter().any(|a| a == "--help" || a == "-h") {
+        print!("{HELP}");
+        return Ok(());
+    }
+    #[cfg(windows)]
+    if management_args
+        .first()
+        .is_some_and(|a| a == "__finish-update")
+    {
+        let path = management_args.get(1).ok_or("missing update state")?;
+        return windows_update::finish(std::path::Path::new(path));
+    }
     if let Some(result) = control::run(&management_args) {
         return result;
     }
@@ -131,7 +169,14 @@ fn run() -> Result<(), String> {
         let starter = starter.replace("[server]", "[server]\nunix_socket = auto");
         file.write_all(starter.as_bytes())
             .map_err(|e| e.to_string())?;
-        println!("Created {}", path.display());
+        if json {
+            println!(
+                "{{\"ok\":true,\"path\":{}}}",
+                http::quote(&path.to_string_lossy())
+            );
+        } else {
+            println!("Created {}", path.display());
+        }
         return Ok(());
     }
     let config = config::Config::load(&path)?;

@@ -613,7 +613,7 @@ fn import(context: &Context, args: &[String]) -> Result<(), String> {
         files += count;
         bytes += size;
     }
-    let helper = crate::maintenance::plugin_helper();
+    let helper = crate::maintenance::plugin_helper()?;
     let mut command = vec![
         "--root".into(),
         context
@@ -655,6 +655,15 @@ fn import(context: &Context, args: &[String]) -> Result<(), String> {
         json::parse(out.as_bytes())?
     };
     if !command.is_empty() {
+        if let Some(path) = control::option(args, "--oauth-clients")? {
+            let clients = json::read(Path::new(path))?;
+            json::atomic_write(
+                &context
+                    .directory
+                    .join("extensions/builtin-oauth-clients.json"),
+                clients.stringify().as_bytes(),
+            )?;
+        }
         let (code, _, _) = control::command(
             &helper,
             &[
