@@ -1,0 +1,37 @@
+[workspace]
+members = [".", "crates/zcalld-plugin-api", "plugins/aliases", "plugins/policy"]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.100"
+license = "MIT"
+repository = "https://github.com/LIghtJUNction/zcalld"
+
+[package]
+name = "zcalld"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "A compact Linux AI gateway built on zcall with native zplugin extensions"
+readme = "README.md"
+keywords = ["ai", "gateway", "linux", "systemd", "plugins"]
+categories = ["command-line-utilities", "network-programming"]
+include = ["src/**", "examples/config.conf", "README.md", "LICENSE", "Cargo.toml", "Cargo.lock"]
+
+[dependencies]
+zcall = { version = "=0.3.0", default-features = false }
+zconv = { version = "=0.4.0", default-features = false }
+zplugin = { version = "=0.3.0", features = ["std"] }
+zcalld-plugin-api = { version = "=0.1.0", path = "crates/zcalld-plugin-api" }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+
+[profile.dev]
+debug = 1

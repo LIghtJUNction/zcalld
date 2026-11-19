@@ -1,0 +1,17 @@
+[package]
+name = "zcalld-plugin-aliases"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+description = "Explicit model aliases for zcalld"
+
+[lib]
+name = "zcalld_aliases"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+zcalld-plugin-api = { path = "../../crates/zcalld-plugin-api", version = "=0.1.0" }
+zplugin = { version = "=0.3.0", default-features = false, features = ["std", "macros"] }

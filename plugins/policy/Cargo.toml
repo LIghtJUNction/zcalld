@@ -1,0 +1,17 @@
+[package]
+name = "zcalld-plugin-policy"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+description = "Model allowlist and request limits for zcalld"
+
+[lib]
+name = "zcalld_policy"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+zcalld-plugin-api = { path = "../../crates/zcalld-plugin-api", version = "=0.1.0" }
+zplugin = { version = "=0.3.0", default-features = false, features = ["std", "macros"] }

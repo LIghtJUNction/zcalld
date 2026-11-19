@@ -1,0 +1,9 @@
+/target/
+/dist/
+*.log
+.env
+credentials
+/packaging/aur/*/src/
+/packaging/aur/*/pkg/
+*.pkg.tar.*
+/_release/

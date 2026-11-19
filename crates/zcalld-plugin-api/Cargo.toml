@@ -1,0 +1,15 @@
+[package]
+name = "zcalld-plugin-api"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Versioned native plugin interface for the zcalld AI gateway"
+readme = "README.md"
+
+[dependencies]
+zplugin = { version = "=0.3.0", default-features = false, features = ["macros"] }
+
+[dev-dependencies]
+zplugin = { version = "=0.3.0", default-features = false, features = ["std"] }
