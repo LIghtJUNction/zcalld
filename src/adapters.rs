@@ -39,6 +39,7 @@ fn agents(context: &Context) -> Vec<Agent> {
     } else {
         x.join("Code/User/settings.json")
     };
+    let editor_user = code.parent().unwrap();
     vec![
         Agent {
             id: "claude",
@@ -103,7 +104,13 @@ fn agents(context: &Context) -> Vec<Agent> {
         Agent {
             id: "zed",
             binary: "zed",
-            files: vec![x.join("zed/settings.json")],
+            files: vec![if cfg!(target_os = "macos") {
+                h.join(".config/zed/settings.json")
+            } else if cfg!(target_os = "windows") {
+                x.join("Zed/settings.json")
+            } else {
+                x.join("zed/settings.json")
+            }],
             format: "zed",
         },
         Agent {
@@ -137,28 +144,143 @@ fn agents(context: &Context) -> Vec<Agent> {
         Agent {
             id: "cline",
             binary: "cline",
-            files: vec![x.join(
-                "Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json",
-            )],
+            files: vec![
+                editor_user
+                    .join("globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json"),
+            ],
             format: "detect",
         },
         Agent {
             id: "roo",
             binary: "roo",
-            files: vec![x.join(
-                "Code/User/globalStorage/rooveterinaryinc.roo-cline/settings/mcp_settings.json",
-            )],
+            files: vec![
+                editor_user
+                    .join("globalStorage/rooveterinaryinc.roo-cline/settings/mcp_settings.json"),
+            ],
             format: "detect",
         },
         Agent {
             id: "kilo",
             binary: "kilo",
             files: vec![
-                x.join("Code/User/globalStorage/kilocode.kilo-code/settings/mcp_settings.json"),
+                editor_user.join("globalStorage/kilocode.kilo-code/settings/mcp_settings.json"),
             ],
             format: "detect",
         },
     ]
+}
+
+fn installation_candidates(
+    platform: &str,
+    name: &str,
+    binary: &str,
+    home: &Path,
+    roaming: &Path,
+    local: &Path,
+    system_roots: &[PathBuf],
+) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if platform == "macos" {
+        let bundles: &[(&str, &str)] = match name {
+            "zed" => &[
+                ("Zed.app", "Contents/MacOS/zed"),
+                ("Zed Preview.app", "Contents/MacOS/zed"),
+            ],
+            "vscode" => &[("Visual Studio Code.app", "Contents/Resources/app/bin/code")],
+            "cursor" => &[("Cursor.app", "Contents/Resources/app/bin/cursor")],
+            _ => &[],
+        };
+        for base in std::iter::once(home.join("Applications")).chain(system_roots.iter().cloned()) {
+            for (bundle, executable) in bundles {
+                paths.push(base.join(bundle).join(executable));
+            }
+        }
+        for base in [
+            home.join(".local/bin"),
+            home.join(".bun/bin"),
+            home.join(".opencode/bin"),
+            home.join(".npm-global/bin"),
+            PathBuf::from("/opt/homebrew/bin"),
+            PathBuf::from("/usr/local/bin"),
+        ] {
+            paths.push(base.join(binary));
+        }
+    } else if platform == "windows" {
+        let installs: &[&str] = match name {
+            "zed" => &[
+                "Zed/Zed.exe",
+                "Zed/bin/zed.exe",
+                "Zed Preview/Zed.exe",
+                "Zed Preview/bin/zed.exe",
+            ],
+            "vscode" => &["Microsoft VS Code/Code.exe"],
+            "cursor" => &["cursor/Cursor.exe", "Cursor/Cursor.exe"],
+            _ => &[],
+        };
+        for base in std::iter::once(local.join("Programs")).chain(system_roots.iter().cloned()) {
+            for relative in installs {
+                paths.push(base.join(relative));
+            }
+        }
+        for base in [
+            roaming.join("npm"),
+            home.join(".local/bin"),
+            home.join(".bun/bin"),
+            home.join(".opencode/bin"),
+            home.join("scoop/shims"),
+            local.join("Microsoft/WinGet/Links"),
+        ] {
+            for extension in ["exe", "cmd", "bat"] {
+                paths.push(base.join(format!("{binary}.{extension}")));
+            }
+        }
+    }
+    paths
+}
+
+fn is_executable(path: &Path) -> bool {
+    let Ok(metadata) = fs::metadata(path) else {
+        return false;
+    };
+    if !metadata.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if metadata.permissions().mode() & 0o111 == 0 {
+            return false;
+        }
+    }
+    true
+}
+
+fn agent_executable(context: &Context, agent: &Agent) -> Option<PathBuf> {
+    executable(agent.binary).or_else(|| {
+        let local = env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| context.home.join("AppData/Local"));
+        let roots = if cfg!(target_os = "macos") {
+            vec![PathBuf::from("/Applications")]
+        } else {
+            ["ProgramFiles", "ProgramFiles(x86)"]
+                .into_iter()
+                .filter_map(env::var_os)
+                .map(PathBuf::from)
+                .collect()
+        };
+        installation_candidates(
+            env::consts::OS,
+            agent.id,
+            agent.binary,
+            &context.home,
+            &config_home(context),
+            &local,
+            &roots,
+        )
+        .into_iter()
+        .find(|p| is_executable(p))
+    })
 }
 
 pub fn executable(name: &str) -> Option<PathBuf> {
@@ -205,7 +327,7 @@ fn list(context: &Context) -> Result<(), String> {
     let applied = json::read(&context.directory.join("agents/applied.json")).unwrap_or_default();
     let mut list = Vec::new();
     for agent in agents(context) {
-        let binary = executable(agent.binary);
+        let binary = agent_executable(context, &agent);
         let observed = agent.files.iter().any(|p| p.is_file());
         let configured = agent
             .files
@@ -285,6 +407,9 @@ fn patch(text: &str, path: &[&str], value: impl Into<Value>) -> Result<String, S
 /// TOML edits deliberately touch only a single-line scalar. Ambiguous or multiline
 /// existing values fail before any file is changed; users' tables stay byte-for-byte.
 pub fn toml_set(text: &str, table: &str, key: &str, value: &str) -> Result<String, String> {
+    toml_set_literal(text, table, key, &crate::http::quote(value))
+}
+fn toml_set_literal(text: &str, table: &str, key: &str, value: &str) -> Result<String, String> {
     if key.is_empty() || key.chars().any(|c| c.is_control() || "=\"'[]".contains(c)) {
         return Err("invalid TOML key".into());
     }
@@ -306,21 +431,21 @@ pub fn toml_set(text: &str, table: &str, key: &str, value: &str) -> Result<Strin
         }
         if current == table {
             if let Some((k, v)) = line.split_once('=')
-                && k.trim() == key {
-                    if found.is_some()
-                        || (v.trim_start().starts_with("\"\"\"")
-                            || v.trim_start().starts_with("'''"))
-                    {
-                        return Err("ambiguous or multiline TOML value; no files changed".into());
-                    }
-                    found = Some(i);
+                && k.trim() == key
+            {
+                if found.is_some()
+                    || (v.trim_start().starts_with("\"\"\"") || v.trim_start().starts_with("'''"))
+                {
+                    return Err("ambiguous or multiline TOML value; no files changed".into());
                 }
+                found = Some(i);
+            }
             if insertion.is_some() {
                 insertion = Some(i + 1);
             }
         }
     }
-    let new = format!("{key} = {}", crate::http::quote(value));
+    let new = format!("{key} = {value}");
     if let Some(i) = found {
         let comment = toml_comment(lines[i].split_once('=').unwrap().1);
         lines[i] = format!("{new}{comment}");
@@ -396,6 +521,580 @@ fn yaml_scalar(text: &str, key: &str, value: &str) -> Result<String, String> {
     Ok(lines.join("\n") + "\n")
 }
 
+/// Zed keys use the complete API URL and the "Bearer" account. These spellings
+/// match upstream Zed d5615304 (gpui_apple/keychain, gpui_linux/platform and
+/// gpui_windows/util); no credential is placed in command arguments or logs.
+trait CredentialStore {
+    fn read(&self, key: &str) -> Result<Option<Vec<u8>>, String>;
+    fn write(&self, key: &str, secret: &[u8]) -> Result<(), String>;
+    fn remove(&self, key: &str) -> Result<(), String>;
+}
+
+struct SystemCredentialStore {
+    #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+    command: PathBuf,
+    #[cfg(target_os = "macos")]
+    app: PathBuf,
+}
+impl SystemCredentialStore {
+    fn new(context: &Context) -> Result<Self, String> {
+        #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+        {
+            let _ = context;
+            let command = executable("secret-tool").ok_or(
+                "Zed requires secret-tool (libsecret) and an unlocked Secret Service; no agent configuration was changed",
+            )?;
+            Ok(Self { command })
+        }
+        #[cfg(target_os = "macos")]
+        {
+            let agent = agents(context).into_iter().find(|a| a.id == "zed").unwrap();
+            let binary = agent_executable(context, &agent)
+                .and_then(|p| fs::canonicalize(p).ok())
+                .ok_or("cannot locate the installed Zed app to authorize its Keychain access")?;
+            let app = binary
+                .ancestors()
+                .find(|p| p.extension().is_some_and(|v| v == "app"))
+                .ok_or("Zed executable is not inside an installed app bundle")?
+                .to_path_buf();
+            Ok(Self { app })
+        }
+        #[cfg(target_os = "windows")]
+        {
+            let _ = context;
+            Ok(Self {})
+        }
+        #[cfg(not(any(
+            target_os = "linux",
+            target_os = "freebsd",
+            target_os = "macos",
+            target_os = "windows"
+        )))]
+        {
+            let _ = context;
+            Err("Zed system credential storage is unsupported on this platform".into())
+        }
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "freebsd", target_os = "macos"))]
+fn credential_command(
+    program: &Path,
+    args: &[&str],
+    input: Option<&[u8]>,
+) -> Result<std::process::Output, String> {
+    use std::{
+        io::{Read, Write},
+        process::{Command, Stdio},
+        time::{Duration, Instant},
+    };
+    let mut child = Command::new(program)
+        .args(args)
+        .stdin(if input.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|_| "cannot start the system credential utility".to_string())?;
+    fn collect(mut stream: impl Read) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        let _ = stream.by_ref().take(65537).read_to_end(&mut bytes);
+        let _ = std::io::copy(&mut stream, &mut std::io::sink());
+        bytes
+    }
+    let stdout = child.stdout.take().unwrap();
+    let stderr = child.stderr.take().unwrap();
+    let out = std::thread::spawn(move || collect(stdout));
+    let err = std::thread::spawn(move || collect(stderr));
+    if let Some(input) = input {
+        let written = child.stdin.take().unwrap().write_all(input);
+        if written.is_err() {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = out.join();
+            let _ = err.join();
+            return Err("system credential utility rejected its private input".into());
+        }
+    }
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(10)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = out.join();
+                let _ = err.join();
+                return Err("system credential store did not respond within 30 seconds; unlock the store and retry".into());
+            }
+        }
+    };
+    let stdout = out.join().map_err(|_| "credential output reader failed")?;
+    let stderr = err.join().map_err(|_| "credential error reader failed")?;
+    if stdout.len() > 65536 || stderr.len() > 65536 {
+        return Err("system credential utility returned excessive output".into());
+    }
+    Ok(std::process::Output {
+        status,
+        stdout,
+        stderr,
+    })
+}
+
+#[cfg(any(target_os = "linux", target_os = "freebsd", target_os = "macos"))]
+fn credential_bytes(mut bytes: Vec<u8>) -> Result<Vec<u8>, String> {
+    if bytes.last() == Some(&b'\n') {
+        bytes.pop();
+    }
+    if bytes.len() > 2560 || bytes.contains(&0) || bytes.contains(&b'\n') || bytes.contains(&b'\r')
+    {
+        return Err("Zed credential is not a bounded single-line API key".into());
+    }
+    Ok(bytes)
+}
+
+#[cfg(any(target_os = "linux", target_os = "freebsd"))]
+impl CredentialStore for SystemCredentialStore {
+    fn read(&self, key: &str) -> Result<Option<Vec<u8>>, String> {
+        let out = credential_command(
+            &self.command,
+            &["lookup", "url", key, "username", "Bearer"],
+            None,
+        )?;
+        if out.status.success() {
+            return credential_bytes(out.stdout).map(Some);
+        }
+        if out.status.code() == Some(1) && out.stderr.is_empty() {
+            return Ok(None);
+        }
+        Err("Zed Secret Service lookup failed; unlock the system credential store and retry".into())
+    }
+    fn write(&self, key: &str, secret: &[u8]) -> Result<(), String> {
+        let out = credential_command(
+            &self.command,
+            &[
+                "store",
+                "--label=zed-github-account",
+                "url",
+                key,
+                "username",
+                "Bearer",
+            ],
+            Some(secret),
+        )?;
+        if out.status.success() {
+            Ok(())
+        } else {
+            Err("Zed Secret Service write failed; no successful apply was recorded".into())
+        }
+    }
+    fn remove(&self, key: &str) -> Result<(), String> {
+        let out = credential_command(
+            &self.command,
+            &["clear", "url", key, "username", "Bearer"],
+            None,
+        )?;
+        if out.status.success() || (out.status.code() == Some(1) && out.stderr.is_empty()) {
+            Ok(())
+        } else {
+            Err("Zed Secret Service removal failed".into())
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn security_word(value: &str) -> Result<String, String> {
+    if value.chars().any(char::is_control) {
+        return Err("Keychain command value contains a control character".into());
+    }
+    Ok(format!(
+        "\"{}\"",
+        value.replace('\\', "\\\\").replace('"', "\\\"")
+    ))
+}
+#[cfg(target_os = "macos")]
+impl CredentialStore for SystemCredentialStore {
+    fn read(&self, key: &str) -> Result<Option<Vec<u8>>, String> {
+        let out = credential_command(
+            Path::new("/usr/bin/security"),
+            &["find-internet-password", "-s", key, "-a", "Bearer", "-w"],
+            None,
+        )?;
+        if out.status.success() {
+            return credential_bytes(out.stdout).map(Some);
+        }
+        if out.status.code() == Some(44) {
+            return Ok(None);
+        } // errSecItemNotFound
+        Err("Zed Keychain lookup failed; unlock or authorize the login Keychain and retry".into())
+    }
+    fn write(&self, key: &str, secret: &[u8]) -> Result<(), String> {
+        let secret = std::str::from_utf8(secret).map_err(|_| "Zed API key is not UTF-8")?;
+        // Interactive security input keeps the secret out of the process command line.
+        // Read-back verification below catches an interactive subcommand failure.
+        let script = format!(
+            "add-internet-password -U -T {} -T \"/usr/bin/security\" -s {} -a \"Bearer\" -w {}\n",
+            security_word(&self.app.to_string_lossy())?,
+            security_word(key)?,
+            security_word(secret)?,
+        );
+        if script.len() >= 4096 {
+            return Err("Zed Keychain command exceeds the platform input limit".into());
+        }
+        let out = credential_command(
+            Path::new("/usr/bin/security"),
+            &["-i"],
+            Some(script.as_bytes()),
+        )?;
+        if !out.status.success() || self.read(key)?.as_deref() != Some(secret.as_bytes()) {
+            return Err(
+                "Zed Keychain write could not be verified; authorize Keychain access and retry"
+                    .into(),
+            );
+        }
+        Ok(())
+    }
+    fn remove(&self, key: &str) -> Result<(), String> {
+        let out = credential_command(
+            Path::new("/usr/bin/security"),
+            &["delete-internet-password", "-s", key, "-a", "Bearer"],
+            None,
+        )?;
+        if out.status.success() || out.status.code() == Some(44) {
+            Ok(())
+        } else {
+            Err("Zed Keychain removal failed".into())
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+mod windows_credentials {
+    use std::{ffi::c_void, ptr};
+    #[repr(C)]
+    struct Credential {
+        flags: u32,
+        kind: u32,
+        target: *mut u16,
+        comment: *mut u16,
+        written: [u32; 2],
+        size: u32,
+        blob: *mut u8,
+        persist: u32,
+        count: u32,
+        attributes: *mut c_void,
+        alias: *mut u16,
+        username: *mut u16,
+    }
+    #[link(name = "advapi32")]
+    unsafe extern "system" {
+        fn CredReadW(
+            target: *const u16,
+            kind: u32,
+            flags: u32,
+            result: *mut *mut Credential,
+        ) -> i32;
+        fn CredWriteW(credential: *const Credential, flags: u32) -> i32;
+        fn CredDeleteW(target: *const u16, kind: u32, flags: u32) -> i32;
+        fn CredFree(buffer: *mut c_void);
+    }
+    fn wide(text: &str) -> Result<Vec<u16>, String> {
+        if text.contains('\0') {
+            return Err("invalid credential target".into());
+        }
+        Ok(text.encode_utf16().chain([0]).collect())
+    }
+    fn error(action: &str) -> String {
+        format!(
+            "Windows Credential Manager {action} failed (OS error {})",
+            std::io::Error::last_os_error()
+                .raw_os_error()
+                .unwrap_or_default()
+        )
+    }
+    pub fn read(key: &str) -> Result<Option<Vec<u8>>, String> {
+        let target = wide(&format!("zed:url={key}"))?;
+        let mut raw = ptr::null_mut();
+        // SAFETY: target is NUL terminated and the output pointer is valid.
+        if unsafe { CredReadW(target.as_ptr(), 1, 0, &mut raw) } == 0 {
+            if std::io::Error::last_os_error().raw_os_error() == Some(1168) {
+                return Ok(None);
+            }
+            return Err(error("lookup"));
+        }
+        if raw.is_null() {
+            return Err("Windows Credential Manager returned an empty result".into());
+        }
+        // SAFETY: successful CredReadW owns this allocation until CredFree.
+        let result = unsafe {
+            let value = &*raw;
+            let username = wide("Bearer")?;
+            let expected = username.as_slice();
+            let valid_user = !value.username.is_null()
+                && expected
+                    .iter()
+                    .enumerate()
+                    .all(|(i, unit)| *value.username.add(i) == *unit);
+            if !valid_user {
+                Err("existing Zed credential uses another account; it was preserved".into())
+            } else if value.size > 2560 || (value.size > 0 && value.blob.is_null()) {
+                Err("Windows Credential Manager returned an invalid API key".into())
+            } else if value.size == 0 {
+                Ok(Some(Vec::new()))
+            } else {
+                Ok(Some(
+                    std::slice::from_raw_parts(value.blob, value.size as usize).to_vec(),
+                ))
+            }
+        };
+        // SAFETY: raw came from CredReadW and is released exactly once.
+        unsafe { CredFree(raw.cast()) };
+        result
+    }
+    pub fn write(key: &str, secret: &[u8]) -> Result<(), String> {
+        if secret.len() > 2560 {
+            return Err("API key exceeds Windows Credential Manager's limit".into());
+        }
+        let mut target = wide(&format!("zed:url={key}"))?;
+        let mut user = wide("Bearer")?;
+        let value = Credential {
+            flags: 0,
+            kind: 1,
+            target: target.as_mut_ptr(),
+            comment: ptr::null_mut(),
+            written: [0; 2],
+            size: secret.len() as u32,
+            blob: secret.as_ptr().cast_mut(),
+            persist: 2,
+            count: 0,
+            attributes: ptr::null_mut(),
+            alias: ptr::null_mut(),
+            username: user.as_mut_ptr(),
+        };
+        // SAFETY: all referenced buffers remain valid during the synchronous OS call.
+        if unsafe { CredWriteW(&value, 0) } == 0 {
+            Err(error("write"))
+        } else {
+            Ok(())
+        }
+    }
+    pub fn remove(key: &str) -> Result<(), String> {
+        let target = wide(&format!("zed:url={key}"))?;
+        // SAFETY: target is NUL terminated for the duration of the call.
+        if unsafe { CredDeleteW(target.as_ptr(), 1, 0) } != 0
+            || std::io::Error::last_os_error().raw_os_error() == Some(1168)
+        {
+            Ok(())
+        } else {
+            Err(error("removal"))
+        }
+    }
+}
+#[cfg(target_os = "windows")]
+impl CredentialStore for SystemCredentialStore {
+    fn read(&self, key: &str) -> Result<Option<Vec<u8>>, String> {
+        windows_credentials::read(key)
+    }
+    fn write(&self, key: &str, secret: &[u8]) -> Result<(), String> {
+        windows_credentials::write(key, secret)
+    }
+    fn remove(&self, key: &str) -> Result<(), String> {
+        windows_credentials::remove(key)
+    }
+}
+#[cfg(not(any(
+    target_os = "linux",
+    target_os = "freebsd",
+    target_os = "macos",
+    target_os = "windows"
+)))]
+impl CredentialStore for SystemCredentialStore {
+    fn read(&self, _: &str) -> Result<Option<Vec<u8>>, String> {
+        Err("unsupported system credential store".into())
+    }
+    fn write(&self, _: &str, _: &[u8]) -> Result<(), String> {
+        Err("unsupported system credential store".into())
+    }
+    fn remove(&self, _: &str) -> Result<(), String> {
+        Err("unsupported system credential store".into())
+    }
+}
+
+fn verify_credential(store: &dyn CredentialStore, key: &str, secret: &[u8]) -> Result<(), String> {
+    store.write(key, secret)?;
+    if store.read(key)?.as_deref() != Some(secret) {
+        return Err("system credential write did not read back correctly".into());
+    }
+    Ok(())
+}
+fn credential_record(
+    store: &dyn CredentialStore,
+    saved: &Path,
+    key: &str,
+    secret: &[u8],
+) -> Result<Value, String> {
+    if secret.is_empty() || secret.len() > 2560 || secret.iter().any(|b| b.is_ascii_control()) {
+        return Err("Zed requires a nonempty, bounded API key".into());
+    }
+    let previous = store.read(key)?;
+    let id = saved
+        .file_name()
+        .ok_or("invalid agent backup directory")?
+        .to_string_lossy();
+    let old = format!("zcalld:agent-backup:{id}:previous");
+    let expected = format!("zcalld:agent-backup:{id}:applied");
+    let prepare = (|| {
+        verify_credential(store, &expected, secret)?;
+        if let Some(previous) = &previous {
+            verify_credential(store, &old, previous)?;
+        }
+        Ok::<_, String>(())
+    })();
+    if let Err(error) = prepare {
+        let _ = store.remove(&old);
+        let _ = store.remove(&expected);
+        return Err(error);
+    }
+    Ok(object([
+        ("url", key.into()),
+        ("previous", old.into()),
+        ("applied", expected.into()),
+        ("had_previous", previous.is_some().into()),
+    ]))
+}
+fn restore_credential(
+    store: &dyn CredentialStore,
+    record: &Value,
+    check: bool,
+) -> Result<(), String> {
+    let key = record
+        .get("url")
+        .as_str()
+        .ok_or("invalid credential backup")?;
+    let old = record
+        .get("previous")
+        .as_str()
+        .ok_or("invalid credential backup")?;
+    let applied = record
+        .get("applied")
+        .as_str()
+        .ok_or("invalid credential backup")?;
+    if check {
+        let expected = store
+            .read(applied)?
+            .ok_or("applied credential checkpoint is missing; backup retained")?;
+        if store.read(key)?.as_deref() != Some(expected.as_slice()) {
+            return Err(
+                "Zed credential changed after apply; review it before reverting, or use --force"
+                    .into(),
+            );
+        }
+    }
+    if record.get("had_previous").as_bool() == Some(true) {
+        let previous = store
+            .read(old)?
+            .ok_or("previous credential checkpoint is missing; backup retained")?;
+        verify_credential(store, key, &previous)?;
+    } else {
+        store.remove(key)?;
+        if store.read(key)?.is_some() {
+            return Err("Zed credential removal could not be verified".into());
+        }
+    }
+    Ok(())
+}
+fn clear_credential_checkpoint(store: &dyn CredentialStore, record: &Value) -> Result<(), String> {
+    for key in ["previous", "applied"] {
+        if let Some(value) = record.get(key).as_str() {
+            store.remove(value)?;
+        }
+    }
+    Ok(())
+}
+
+fn commit_agent_change(
+    context: &Context,
+    name: &str,
+    route: &str,
+    changes: &[(PathBuf, String)],
+    credential: Option<(&dyn CredentialStore, &str, &[u8])>,
+) -> Result<PathBuf, String> {
+    let paths: Vec<_> = changes.iter().map(|(p, _)| p.clone()).collect();
+    let saved = control::backup(context, &paths, &format!("agent-{name}"))?;
+    let applied = context.directory.join("agents/applied.json");
+    let previous_state = if applied.exists() {
+        Some(fs::read(&applied).map_err(|e| e.to_string())?)
+    } else {
+        None
+    };
+    let mut state = previous_state
+        .as_deref()
+        .map(json::parse)
+        .transpose()?
+        .unwrap_or_default();
+    state.set(
+        name,
+        object([
+            ("route", route.into()),
+            ("backup", saved.to_string_lossy().into_owned().into()),
+        ]),
+    );
+    let mut record = json::read(&saved.join("manifest.json"))?;
+    for (i, (_, text)) in changes.iter().enumerate() {
+        json::atomic_write(&saved.join(format!("{i}.applied")), text.as_bytes())?;
+    }
+    record.set("route", route.into());
+    if let Some((store, key, secret)) = credential {
+        record.set("credential", credential_record(store, &saved, key, secret)?);
+    }
+    if let Err(error) =
+        json::atomic_write(&saved.join("manifest.json"), record.stringify().as_bytes())
+    {
+        if let Some((store, _, _)) = credential {
+            let _ = clear_credential_checkpoint(store, record.get("credential"));
+        }
+        return Err(error);
+    }
+    let change = (|| {
+        if let Some((store, key, secret)) = credential {
+            verify_credential(store, key, secret)?;
+        }
+        for (path, text) in changes {
+            json::atomic_write(path, text.as_bytes())?;
+        }
+        json::atomic_write(&applied, state.stringify().as_bytes())
+    })();
+    if let Err(error) = change {
+        let store = credential.map(|(store, _, _)| store);
+        let restored = restore_manifest(&saved, false, store);
+        let state_restored = if let Some(previous) = &previous_state {
+            json::atomic_write(&applied, previous)
+        } else if applied.exists() {
+            fs::remove_file(&applied).map_err(|e| e.to_string())
+        } else {
+            Ok(())
+        };
+        if let Err(state_error) = state_restored {
+            return Err(format!(
+                "{error}; applied-state rollback requires recovery: {state_error}; backup {}",
+                saved.display()
+            ));
+        }
+        return Err(match restored {
+            Ok(()) => format!("{error}; previous agent configuration and credential restored"),
+            Err(restore) => format!(
+                "{error}; rollback requires recovery: {restore}; backup {}",
+                saved.display()
+            ),
+        });
+    }
+    Ok(saved)
+}
+
 fn apply(context: &Context, args: &[String]) -> Result<(), String> {
     let name = args.get(1).ok_or("agent name required")?;
     let config = config::Config::load(&context.path)?;
@@ -410,6 +1109,7 @@ fn apply(context: &Context, args: &[String]) -> Result<(), String> {
     let v1 = format!("{url}/v1");
     let token = control::gateway_token(context)?;
     let mut changes = Vec::new();
+    let mut credential_key = None;
     if let Some(agent) = agents(context).into_iter().find(|a| a.id == name) {
         let first = &agent.files[0];
         let text = read_or(
@@ -433,11 +1133,17 @@ fn apply(context: &Context, args: &[String]) -> Result<(), String> {
                 let s = toml_set(&s, "model_providers.zcalld", "name", "zcalld")?;
                 let s = toml_set(&s, "model_providers.zcalld", "base_url", &v1)?;
                 let s = toml_set(&s, "model_providers.zcalld", "wire_api", "responses")?;
-                toml_set(
+                let s = toml_set(
                     &s,
                     "model_providers.zcalld",
                     "experimental_bearer_token",
                     &token,
+                )?;
+                toml_set_literal(
+                    &s,
+                    "model_providers.zcalld",
+                    "requires_openai_auth",
+                    "false",
                 )?
             }
             "gemini" | "qwen" => {
@@ -564,6 +1270,7 @@ fn apply(context: &Context, args: &[String]) -> Result<(), String> {
                 yaml_scalar(&s, "OPENAI_API_KEY", &token)?
             }
             "zed" => {
+                credential_key = Some(v1.clone());
                 let available = Value::Array(
                     config
                         .routes
@@ -665,40 +1372,30 @@ fn apply(context: &Context, args: &[String]) -> Result<(), String> {
             return Err("community agent has no configuration bindings".into());
         }
     }
-    let paths: Vec<_> = changes.iter().map(|(p, _)| p.clone()).collect();
-    let saved = control::backup(context, &paths, &format!("agent-{name}"))?;
-    for (path, text) in &changes {
-        if let Err(error) = json::atomic_write(path, text.as_bytes()) {
-            restore_manifest(&saved, false)?;
-            return Err(error);
-        }
-    }
-    let mut record = json::read(&saved.join("manifest.json"))?;
-    for (i, (_, text)) in changes.iter().enumerate() {
-        json::atomic_write(&saved.join(format!("{i}.applied")), text.as_bytes())?;
-    }
-    record.set("route", route.clone().into());
-    json::atomic_write(&saved.join("manifest.json"), record.stringify().as_bytes())?;
-    let applied = context.directory.join("agents/applied.json");
-    let mut state = json::read(&applied).unwrap_or_default();
-    state.set(
-        name,
-        object([
-            ("route", route.clone().into()),
-            ("backup", saved.to_string_lossy().into_owned().into()),
-        ]),
-    );
-    json::atomic_write(&applied, state.stringify().as_bytes())?;
+    let store = if credential_key.is_some() {
+        Some(SystemCredentialStore::new(context)?)
+    } else {
+        None
+    };
+    let credential = store
+        .as_ref()
+        .zip(credential_key.as_deref())
+        .map(|(store, key)| (store as &dyn CredentialStore, key, token.as_bytes()));
+    let saved = commit_agent_change(context, name, &route, &changes, credential)?;
     control::emit(object([
         ("ok", true.into()),
         ("agent", name.clone().into()),
         ("route", route.into()),
-        ("files", paths.len().into()),
+        ("files", changes.len().into()),
         ("backup", saved.to_string_lossy().into_owned().into()),
     ]))
 }
 
-fn restore_manifest(directory: &Path, check: bool) -> Result<(), String> {
+fn restore_manifest(
+    directory: &Path,
+    check: bool,
+    store: Option<&dyn CredentialStore>,
+) -> Result<(), String> {
     let manifest = json::read(&directory.join("manifest.json"))?;
     if check {
         for (i, record) in manifest.get("files").as_array().iter().enumerate() {
@@ -710,6 +1407,14 @@ fn restore_manifest(directory: &Path, check: bool) -> Result<(), String> {
             }
         }
     }
+    let credential = manifest.get("credential");
+    if credential.get("url").as_str().is_some() {
+        restore_credential(
+            store.ok_or("Zed credential store is required to restore this change")?,
+            credential,
+            check,
+        )?;
+    }
     for record in manifest.get("files").as_array() {
         let path = Path::new(record.get("path").as_str().ok_or("invalid backup path")?);
         if record.get("existed").as_bool() == Some(true) {
@@ -719,6 +1424,9 @@ fn restore_manifest(directory: &Path, check: bool) -> Result<(), String> {
         } else if path.exists() {
             fs::remove_file(path).map_err(|e| e.to_string())?;
         }
+    }
+    if credential.get("url").as_str().is_some() {
+        clear_credential_checkpoint(store.unwrap(), credential)?;
     }
     Ok(())
 }
@@ -735,7 +1443,17 @@ fn revert(context: &Context, args: &[String]) -> Result<(), String> {
         .as_str()
         .ok_or("agent has no managed change to revert")?
         .to_string();
-    restore_manifest(Path::new(&backup), !control::flag(args, "--force"))?;
+    let manifest = json::read(&Path::new(&backup).join("manifest.json"))?;
+    let store = if manifest.get("credential").get("url").as_str().is_some() {
+        Some(SystemCredentialStore::new(context)?)
+    } else {
+        None
+    };
+    restore_manifest(
+        Path::new(&backup),
+        !control::flag(args, "--force"),
+        store.as_ref().map(|s| s as &dyn CredentialStore),
+    )?;
     state.remove(name);
     json::atomic_write(&path, state.stringify().as_bytes())?;
     control::emit(object([
@@ -844,5 +1562,312 @@ mod tests {
     #[test]
     fn yaml_does_not_flatten_mappings() {
         assert!(yaml_scalar("models:\n  a: b\n", "models", "x").is_err());
+    }
+
+    fn fixture() -> (Context, PathBuf) {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let path = env::temp_dir().join(format!(
+            "zcalld-adapter-test-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&path).unwrap();
+        let context = Context {
+            home: path.join("home"),
+            directory: path.join("state"),
+            path: path.join("state/zcalld.conf"),
+        };
+        (context, path)
+    }
+    struct MemoryCredentials {
+        values: std::cell::RefCell<BTreeMap<String, Vec<u8>>>,
+        unavailable: bool,
+        fail_live_once: std::cell::Cell<bool>,
+    }
+    impl MemoryCredentials {
+        fn ready() -> Self {
+            Self {
+                values: Default::default(),
+                unavailable: false,
+                fail_live_once: std::cell::Cell::new(false),
+            }
+        }
+    }
+    impl CredentialStore for MemoryCredentials {
+        fn read(&self, key: &str) -> Result<Option<Vec<u8>>, String> {
+            if self.unavailable {
+                return Err("test store unavailable".into());
+            }
+            Ok(self.values.borrow().get(key).cloned())
+        }
+        fn write(&self, key: &str, secret: &[u8]) -> Result<(), String> {
+            if self.unavailable {
+                return Err("test store unavailable".into());
+            }
+            self.values.borrow_mut().insert(key.into(), secret.to_vec());
+            if key.starts_with("http:") && self.fail_live_once.replace(false) {
+                return Err("test write failed after committing".into());
+            }
+            Ok(())
+        }
+        fn remove(&self, key: &str) -> Result<(), String> {
+            self.values.borrow_mut().remove(key);
+            Ok(())
+        }
+    }
+    #[test]
+    fn mac_bundles_and_windows_installations_are_independent_of_path() {
+        let (_, root) = fixture();
+        let home = root.join("home");
+        let apps = root.join("Applications");
+        let roaming = home.join("AppData/Roaming");
+        let local = home.join("AppData/Local");
+        let system = root.join("Program Files");
+        let mac = installation_candidates(
+            "macos",
+            "zed",
+            "zed",
+            &home,
+            &roaming,
+            &local,
+            std::slice::from_ref(&apps),
+        );
+        let actual = apps.join("Zed Preview.app/Contents/MacOS/zed");
+        assert!(mac.contains(&actual));
+        assert!(
+            !mac.iter()
+                .any(|p| p.extension().is_some_and(|v| v == "app"))
+        );
+        let windows = installation_candidates(
+            "windows",
+            "vscode",
+            "code",
+            &home,
+            &roaming,
+            &local,
+            std::slice::from_ref(&system),
+        );
+        assert!(windows.contains(&local.join("Programs/Microsoft VS Code/Code.exe")));
+        assert!(windows.contains(&system.join("Microsoft VS Code/Code.exe")));
+        let cli =
+            installation_candidates("windows", "claude", "claude", &home, &roaming, &local, &[]);
+        assert!(cli.contains(&home.join(".local/bin/claude.exe")));
+        assert!(cli.contains(&roaming.join("npm/claude.cmd")));
+        // A leftover app directory is insufficient evidence of an installed executable.
+        fs::create_dir_all(actual.parent().unwrap()).unwrap();
+        assert!(!is_executable(&actual));
+        fs::write(&actual, b"fixture").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&actual, fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        assert!(is_executable(&actual));
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn codex_explicit_gateway_disables_openai_login_with_boolean() {
+        let text =
+            "[model_providers.zcalld]\nrequires_openai_auth = true # preserve\n[other]\nkeep=1\n";
+        let updated = toml_set_literal(
+            text,
+            "model_providers.zcalld",
+            "requires_openai_auth",
+            "false",
+        )
+        .unwrap();
+        assert!(updated.contains("requires_openai_auth = false # preserve"));
+        assert!(!updated.contains("\"false\""));
+        assert!(updated.contains("[other]\nkeep=1"));
+    }
+    #[test]
+    fn zed_credentials_are_verified_and_reverted_without_plaintext_backups() {
+        let (context, root) = fixture();
+        let settings = root.join("settings.json");
+        fs::write(&settings, b"{\"original\":true}\n").unwrap();
+        let store = MemoryCredentials::ready();
+        let key = "http://localhost:1234/v1";
+        store.write(key, b"old-fixture-key").unwrap();
+        let changes = vec![(settings.clone(), "{\"managed\":true}\n".into())];
+        let saved = commit_agent_change(
+            &context,
+            "zed",
+            "test-route",
+            &changes,
+            Some((&store, key, b"new-fixture-key")),
+        )
+        .unwrap();
+        assert_eq!(
+            store.read(key).unwrap().as_deref(),
+            Some(b"new-fixture-key".as_slice())
+        );
+        let manifest = fs::read_to_string(saved.join("manifest.json")).unwrap();
+        assert!(!manifest.contains("fixture-key"));
+        assert!(manifest.contains("credential"));
+        restore_manifest(&saved, true, Some(&store)).unwrap();
+        assert_eq!(
+            fs::read_to_string(settings).unwrap(),
+            "{\"original\":true}\n"
+        );
+        assert_eq!(
+            store.read(key).unwrap().as_deref(),
+            Some(b"old-fixture-key".as_slice())
+        );
+        assert_eq!(store.values.borrow().len(), 1);
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn zed_unavailable_keychain_does_not_change_settings() {
+        let (context, root) = fixture();
+        let settings = root.join("settings.json");
+        fs::write(&settings, b"original").unwrap();
+        let store = MemoryCredentials {
+            unavailable: true,
+            ..MemoryCredentials::ready()
+        };
+        let result = commit_agent_change(
+            &context,
+            "zed",
+            "route",
+            &[(settings.clone(), "updated".into())],
+            Some((&store, "http://localhost/v1", b"fixture")),
+        );
+        assert!(result.unwrap_err().contains("unavailable"));
+        assert_eq!(fs::read_to_string(settings).unwrap(), "original");
+        assert!(!context.directory.join("agents/applied.json").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn zed_failed_store_write_restores_previous_credential_and_files() {
+        let (context, root) = fixture();
+        let settings = root.join("settings.json");
+        fs::write(&settings, b"original").unwrap();
+        let store = MemoryCredentials::ready();
+        let key = "http://localhost/v1";
+        store.write(key, b"previous-fixture").unwrap();
+        store.fail_live_once.set(true);
+        let result = commit_agent_change(
+            &context,
+            "zed",
+            "route",
+            &[(settings.clone(), "updated".into())],
+            Some((&store, key, b"new-fixture")),
+        );
+        assert!(result.unwrap_err().contains("restored"));
+        assert_eq!(fs::read_to_string(settings).unwrap(), "original");
+        assert_eq!(
+            store.read(key).unwrap().as_deref(),
+            Some(b"previous-fixture".as_slice())
+        );
+        assert!(!context.directory.join("agents/applied.json").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn zed_revert_refuses_a_credential_changed_after_apply() {
+        let (context, root) = fixture();
+        let settings = root.join("settings.json");
+        fs::write(&settings, b"original").unwrap();
+        let store = MemoryCredentials::ready();
+        let key = "http://localhost/v1";
+        let saved = commit_agent_change(
+            &context,
+            "zed",
+            "route",
+            &[(settings.clone(), "updated".into())],
+            Some((&store, key, b"fixture")),
+        )
+        .unwrap();
+        store.write(key, b"user-changed-fixture").unwrap();
+        assert!(
+            restore_manifest(&saved, true, Some(&store))
+                .unwrap_err()
+                .contains("changed after apply")
+        );
+        assert_eq!(fs::read_to_string(settings).unwrap(), "updated");
+        assert_eq!(
+            store.read(key).unwrap().as_deref(),
+            Some(b"user-changed-fixture".as_slice())
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn zed_configuration_write_failure_restores_key_and_previous_file() {
+        let (context, root) = fixture();
+        let settings = root.join("settings.json");
+        fs::write(&settings, b"original").unwrap();
+        let blocked = root.join("blocked");
+        fs::write(&blocked, b"not a directory").unwrap();
+        let store = MemoryCredentials::ready();
+        let key = "http://localhost/v1";
+        store.write(key, b"previous-fixture").unwrap();
+        let changes = [
+            (settings.clone(), "updated".into()),
+            (blocked.join("settings.json"), "updated".into()),
+        ];
+        let error = commit_agent_change(
+            &context,
+            "zed",
+            "route",
+            &changes,
+            Some((&store, key, b"new-fixture")),
+        )
+        .unwrap_err();
+        assert!(error.contains("restored"), "{error}");
+        assert_eq!(fs::read_to_string(settings).unwrap(), "original");
+        assert_eq!(
+            store.read(key).unwrap().as_deref(),
+            Some(b"previous-fixture".as_slice())
+        );
+        assert!(!context.directory.join("agents/applied.json").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+    #[test]
+    fn secret_service_utility_receives_correct_attributes_and_private_stdin() {
+        use std::os::unix::fs::PermissionsExt;
+        let (_, root) = fixture();
+        let command = root.join("secret-tool-fixture");
+        let script = r#"#!/bin/sh
+printf '%s\n' "$@" >> "$0.args"
+case "$1" in
+store)
+    test "$2" = "--label=zed-github-account" || exit 2
+    test "$3" = "url" || exit 2
+    test "$5" = "username" || exit 2
+    test "$6" = "Bearer" || exit 2
+    IFS= read -r value || :
+    printf '%s\n' "$value" > "$0.value"
+    ;;
+lookup)
+    test -f "$0.value" || exit 1
+    cat "$0.value"
+    ;;
+clear) rm -f "$0.value" ;;
+*) exit 2 ;;
+esac
+"#;
+        fs::write(&command, script).unwrap();
+        fs::set_permissions(&command, fs::Permissions::from_mode(0o700)).unwrap();
+        let store = SystemCredentialStore {
+            command: command.clone(),
+        };
+        let key = "http://localhost:9876/v1";
+        assert!(store.read(key).unwrap().is_none());
+        verify_credential(&store, key, b"private-fixture-key").unwrap();
+        let argv = fs::read_to_string(command.with_extension("args")).unwrap();
+        assert!(argv.contains("zed-github-account"));
+        assert!(!argv.contains("private-fixture-key"));
+        store.remove(key).unwrap();
+        assert!(store.read(key).unwrap().is_none());
+        fs::write(
+            &command,
+            "#!/bin/sh\nprintf 'private-fixture-key' >&2\nexit 2\n",
+        )
+        .unwrap();
+        assert!(!store.read(key).unwrap_err().contains("private-fixture-key"));
+        fs::remove_dir_all(root).unwrap();
     }
 }
