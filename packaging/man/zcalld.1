@@ -1,25 +1,37 @@
 .TH ZCALLD 1 "November 2026" "zcalld" "User Commands"
 .SH NAME
-zcalld \- compact Linux AI gateway with native plugins
+zcalld \- compact native AI gateway with optional plugins
 .SH SYNOPSIS
 .B zcalld
 .I command
 .RI [ options ]
 .SH DESCRIPTION
 .B zcalld
-serves a local HTTP gateway for AI clients. The zcall library handles model
-protocols. System libcurl provides HTTP and TLS transport. Optional native
-plugins are loaded through zplugin.
+serves a local AI gateway on Linux, macOS and Windows.
+The zcall library handles model protocols. System libcurl provides HTTP and TLS
+transport. Optional native plugins are loaded through zplugin and its shared
+zsys platform loader.
+.PP
+Linux and macOS can expose both a private Unix socket and a compatible TCP
+listener. Local management clients prefer the configured Unix socket.
+The optional zcall-gui application is a separate process and package.
 .SH COMMANDS
+.TP
+.B init
+Create a starter configuration without replacing an existing file.
 .TP
 .B serve
 Run the gateway in the foreground. Under systemd, report readiness after startup.
 .TP
 .B check
-Validate configuration without making an upstream model request.
+Validate configuration and load configured native plugins without asking a
+remote model to generate a response.
+.TP
+.BR health " | " status
+Inspect the live local gateway or the installed service and configuration.
 .TP
 .B models
-Print configured model routes.
+Print public model routes and retained capability metadata.
 .TP
 .B env
 Print client environment settings. An optional argument selects
@@ -28,49 +40,148 @@ Print client environment settings. An optional argument selects
 or
 .BR gemini .
 .TP
-.B plugins
-Inspect configured plugins.
+.B providers
+List, add, edit or remove provider configuration; inspect models or test a
+provider. Plugin account tests identify when only local configuration was
+validated. They do not report an unperformed remote request as successful.
 .TP
-.B init
-Write an example configuration.
+.BR routes " | " groups
+List, set or remove model routes and model groups.
+.TP
+.B agents
+Discover supported installed agents, inspect the adapter catalog, apply gateway
+configuration or revert an owned change.
+.TP
+.B privacy
+Show saved privacy settings or select
+.BR off ,
+.BR secrets ,
+or
+.BR personal .
+First activation can require starting or restarting the daemon to load its
+plugin binding. Saved settings and verified runtime state are reported separately.
+.TP
+.B plugins
+Inspect native or community plugins; install, enable, disable, remove, update
+or configure community packages through the optional compatibility helper.
+Newly installed community packages remain disabled until explicitly enabled.
+.TP
+.B accounts
+List, import, select, enable, disable or remove provider accounts, or inspect
+session metadata through the compatibility helper.
+.TP
+.B profiles
+List, save or select configuration profiles.
+.TP
+.B library
+Manage MCP servers, instruction sets and skill directories. Top-level operations
+include list, import, export, targets, apply and revert. The
+.BR mcp ,
+.B instructions
+and
+.B skills
+subcommands provide their own configuration operations. Use
+.B \-\-agent
+to select a target and
+.B \-\-dry-run
+to inspect an application plan. Owned changes can be reverted; unrelated
+configuration and independently edited files are preserved.
+.TP
+.B usage
+Summarize or export the local usage ledger, including imported Magpie rows.
+.TP
+.B migrate
+Inspect or import Magpie configuration with
+.BR "migrate magpie" .
+The default operation is a preview. Use
+.B \-\-apply
+to create a private copy in a fresh destination.
+Importing configuration does not stop Magpie or take over its port.
+.TP
+.B service
+Start, stop, restart, enable, disable or inspect the platform service.
+On Linux, the default is the current user's systemd unit;
+.B \-\-system
+selects the system unit.
+.TP
+.B update
+Check for or apply an official update. Package-managed installations must use
+their package manager; the portable updater does not overwrite package-owned
+binaries.
 .SH OPTIONS
 .TP
-.BI "\-\-config " path
-Use the specified configuration file. The default is
-.B $XDG_CONFIG_HOME/zcalld/config.conf
-or
-.BR $HOME/.config/zcalld/config.conf .
+.BI "\-c, \-\-config " path
+Use the specified configuration file, overriding
+.B ZCALLD_CONFIG
+and the platform default.
+.TP
+.B \-\-json
+Request machine-readable output. Management commands already use JSON.
+.TP
+.B \-\-api-key-stdin
+Read a provider credential from standard input for supported provider operations.
+Do not put credentials in shell arguments or history.
 .TP
 .B \-\-help
-Print command help.
+Print the command overview.
 .TP
 .B \-\-version
 Print the installed version.
 .SH FILES
 .TP
-.B /etc/zcalld/config.conf
-System service configuration. Package upgrades preserve local changes.
-.TP
-.B /etc/zcalld/credentials
-Optional systemd environment file containing provider credentials.
+.B ~/.config/zcalld/config.conf
+Default Linux user configuration when XDG_CONFIG_HOME is unset.
 .TP
 .B ~/.config/zcalld/credentials
-Optional user service environment file.
+Private provider credentials next to the user configuration.
+The file uses literal NAME=value entries without shell expansion and must have
+mode 0600.
+.TP
+.B /etc/zcalld/config.conf
+Packaged system-configuration template. Package upgrades preserve local changes.
+.TP
+.B /var/lib/zcalld/config.conf
+Active configuration for the packaged system service.
+.TP
+.B /var/lib/zcalld/credentials
+Optional private credentials next to the system service configuration.
 .TP
 .B /usr/lib/zcalld/plugins/
-Packaged optional native plugins. Installed plugins are loaded only when configured.
+Packaged optional native plugins. A plugin is loaded only when configured.
+.TP
+.B /usr/libexec/zcalld/
+Optional compatibility executables for community accounts and privacy processing.
 .SH SERVICE
 Use one service scope for a given listening address and port.
+The user unit reads the user's configuration and is suitable for desktop agents.
 .PP
 .B systemctl --user enable --now zcalld.service
 .PP
+The system unit runs as the static unprivileged zcalld user and reads
+/var/lib/zcalld/config.conf. Its state directory must contain a reviewed,
+service-owned configuration before starting. It deliberately cannot read a
+desktop user's home directory. Use
 .B sudo systemctl enable --now zcalld.service
+only after preparing that state.
 .PP
-The system service uses a dynamic unprivileged account and reads configuration
-from /etc/zcalld. The user service reads the user's default configuration path.
+Both units allow the main process to drain compatibility workers during shutdown.
+The Magpie cutover utility creates an additional reversible user-service
+override and an independent private recovery script.
+.SH CONFIGURATION DEFAULTS
+Linux uses $XDG_CONFIG_HOME/zcalld or $HOME/.config/zcalld.
+macOS uses $HOME/Library/Application Support/zcalld.
+Windows uses %APPDATA%/zcalld.
+The configuration file is named config.conf.
 .SH SECURITY
-Keep upstream keys in environment variables. Native plugins are trusted code
-and execute with the service's privileges. Configure only trusted shared libraries.
+Keep caller authentication separate from provider credentials.
+Unix sockets use private ownership and permissions.
+Native plugins are trusted code and execute with the service's privileges.
+Install only reviewed community packages and native libraries.
+Migration backups and recovery journals may contain credentials and must remain
+private.
 .SH SEE ALSO
 .BR systemctl (1),
 .BR systemd.service (5)
+.PP
+Project and detailed configuration documentation:
+https://github.com/LIghtJUNction/zcalld

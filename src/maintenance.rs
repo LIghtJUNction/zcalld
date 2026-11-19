@@ -3,7 +3,7 @@ use crate::{
     control::{self, Context},
     state_json::{self as json, Value, object},
 };
-use std::{collections::BTreeMap, fs, path::Path, time::Duration};
+use std::{fs, time::Duration};
 
 pub fn run(context: &Context, args: &[String]) -> Result<(), String> {
     match args.first().map(String::as_str) {
@@ -555,147 +555,10 @@ fn routes(context: &Context, args: &[String]) -> Result<(), String> {
     ]))
 }
 
+#[path = "library.rs"]
+mod agent_library;
 fn library(context: &Context, args: &[String]) -> Result<(), String> {
-    let path = context.directory.join("library.json");
-    let mut state = json::read(&path).unwrap_or_else(|_| {
-        object([
-            ("mcp", Value::Array(Vec::new())),
-            ("skills", Value::Array(Vec::new())),
-            ("instructions", Value::Object(BTreeMap::new())),
-        ])
-    });
-    match args.first().map(String::as_str).unwrap_or("list") {
-        "list" => {
-            let mcp = state
-                .get("mcp")
-                .as_array()
-                .iter()
-                .map(|v| {
-                    object([
-                        ("name", v.get("name").clone()),
-                        ("transport", v.get("transport").clone()),
-                        (
-                            "enabled",
-                            (!v.get("disabled").as_bool().unwrap_or(false)).into(),
-                        ),
-                    ])
-                })
-                .collect();
-            control::emit(object([
-                ("mcp", Value::Array(mcp)),
-                ("skills", state.get("skills").as_array().len().into()),
-                (
-                    "instructions",
-                    state
-                        .get("instructions")
-                        .as_object()
-                        .map_or(0, |v| v.len())
-                        .into(),
-                ),
-            ]))
-        }
-        "import" => {
-            let input = control::option(args, "--file")?.ok_or("library import requires --file")?;
-            let imported = json::read(Path::new(input))?;
-            if !matches!(imported, Value::Object(_)) {
-                return Err("library JSON must be an object".into());
-            }
-            control::backup(context, std::slice::from_ref(&path), "library")?;
-            json::atomic_write(&path, imported.stringify().as_bytes())?;
-            control::emit(object([("ok", true.into())]))
-        }
-        "export" => {
-            let target = control::option(args, "--file")?
-                .ok_or("library export requires a private --file")?;
-            json::atomic_write(Path::new(target), state.stringify().as_bytes())?;
-            control::emit(object([("ok", true.into())]))
-        }
-        "add-mcp" => {
-            let input = control::option(args, "--file")?.ok_or("add-mcp requires --file")?;
-            let entry = json::read(Path::new(input))?;
-            let name = entry
-                .get("name")
-                .as_str()
-                .filter(|v| control::safe_id(v))
-                .ok_or("MCP entry needs a safe name")?;
-            let mut entries = state.get("mcp").as_array().to_vec();
-            entries.retain(|v| v.get("name").as_str() != Some(name));
-            entries.push(entry);
-            state.set("mcp", Value::Array(entries));
-            control::backup(context, std::slice::from_ref(&path), "library")?;
-            json::atomic_write(&path, state.stringify().as_bytes())?;
-            control::emit(object([("ok", true.into())]))
-        }
-        "apply" => apply_mcp(context, &state, args),
-        _ => Err("library expects list, import, export, add-mcp or apply --agent NAME".into()),
-    }
-}
-fn apply_mcp(context: &Context, state: &Value, args: &[String]) -> Result<(), String> {
-    let agent = control::option(args, "--agent")?.ok_or("--agent required")?;
-    let (path, key) = match agent {
-        "claude" => (context.home.join(".claude.json"), "mcpServers"),
-        "gemini" => (context.home.join(".gemini/settings.json"), "mcpServers"),
-        "qwen" => (context.home.join(".qwen/settings.json"), "mcpServers"),
-        "opencode" => (context.home.join(".config/opencode/opencode.json"), "mcp"),
-        "vscode" => (
-            context.home.join(if cfg!(target_os = "macos") {
-                "Library/Application Support/Code/User/mcp.json"
-            } else {
-                ".config/Code/User/mcp.json"
-            }),
-            "servers",
-        ),
-        _ => return Err(
-            "this agent needs a community MCP adapter; existing Magpie MCP files remain untouched"
-                .into(),
-        ),
-    };
-    let mut text = if path.exists() {
-        control::read_text(&path)?
-    } else {
-        "{}\n".into()
-    };
-    let mut count = 0usize;
-    for entry in state.get("mcp").as_array() {
-        if entry.get("disabled").as_bool() == Some(true) {
-            continue;
-        }
-        let name = entry
-            .get("name")
-            .as_str()
-            .filter(|n| control::safe_id(n))
-            .ok_or("invalid MCP name")?;
-        let mut item = entry.clone();
-        for key in ["name", "agents", "icon", "disabled"] {
-            item.remove(key);
-        }
-        if agent == "opencode" {
-            let remote = item.get("url").as_str().is_some();
-            item.set("type", if remote { "remote" } else { "local" }.into());
-            if !remote {
-                let mut command = vec![item.get("command").clone()];
-                command.extend_from_slice(item.get("args").as_array());
-                item.set("command", Value::Array(command));
-                item.remove("args");
-            }
-            if let Some(env) = item.remove("env") {
-                item.set("environment", env);
-            }
-            item.remove("transport");
-            item.set("enabled", true.into());
-        } else {
-            item.remove("transport");
-        }
-        text = json::patch_json(&text, &[key, name], &item)?;
-        count += 1;
-    }
-    control::backup(context, std::slice::from_ref(&path), "mcp-apply")?;
-    json::atomic_write(&path, text.as_bytes())?;
-    control::emit(object([
-        ("ok", true.into()),
-        ("agent", agent.into()),
-        ("servers", count.into()),
-    ]))
+    agent_library::run(context, args)
 }
 
 fn usage(context: &Context, args: &[String]) -> Result<(), String> {

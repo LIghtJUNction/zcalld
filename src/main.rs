@@ -45,7 +45,8 @@ Configuration:
   plugins list|inspect|install|enable|disable|remove|update|config|providers
   accounts list|import|use|enable|disable|remove|session
   profiles list|save|use
-  library list|import|export|add-mcp|apply
+  library list|import|export|targets|apply|revert
+  library mcp|instructions|skills <action> [--agent ID] [--dry-run]
   usage summary|export
 
 Migration and updates:
