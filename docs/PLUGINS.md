@@ -190,6 +190,7 @@ state and never make native proxies `Send` or `Sync`.
 | `dev.zcalld.context` | Receives bounded request metadata. `phase=request` precedes request hooks; `phase=route` contains the filtered request after those hooks. HTTP credentials and cookies are excluded. |
 | `dev.zcalld.response` | Begins after final upstream headers, then transforms chunks after protocol conversion. A zero result holds output; it does not mean passthrough. The final flush is delivered once. |
 | `dev.zcalld.provider` | Returns an owned provider-stream resource for explicitly selected community providers. The resource retains its native library and cancels unfinished work when dropped. |
+| `dev.zcalld.retry` | Offers a next public route and an optional patch to an already filtered body. The server independently limits retry eligibility; zero declines. |
 
 Request hooks run in configuration order before route selection. Managed
 community hooks are followed by privacy and then group routing. The gateway

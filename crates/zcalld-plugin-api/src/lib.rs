@@ -135,3 +135,26 @@ pub trait ContextPlugin {
     fn configure(&mut self, config: &str) -> Result<(), zplugin::Error>;
     fn context(&mut self, metadata: &str) -> Result<(), zplugin::Error>;
 }
+
+/// Optional routing retry after a complete retryable upstream error head.
+/// The host decides whether a request is eligible; transport failures are never
+/// permission to replay. A BufferTooSmall retry must not advance selection or
+/// repeat external decisions. Bodies have already passed privacy filtering.
+#[zplugin::interface(id = "dev.zcalld.retry", version = 1)]
+pub trait RetryPlugin {
+    fn configure(&mut self, config: &str) -> zplugin::Result<()>;
+    /// Return a public route name, or zero to decline this retry.
+    fn retry(
+        &mut self,
+        status: u32,
+        previous_model: &str,
+        output: &mut [u8],
+    ) -> zplugin::Result<u64>;
+    /// Return a replacement filtered body, or zero to keep the input.
+    fn request(
+        &mut self,
+        protocol: u32,
+        filtered_body: &[u8],
+        output: &mut [u8],
+    ) -> zplugin::Result<u64>;
+}

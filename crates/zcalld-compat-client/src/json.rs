@@ -6,8 +6,9 @@ use zconv::json::{self, Kind, Limits, Token};
 const MAX_INPUT: usize = 32 * 1024 * 1024;
 static NULL: Value = Value::Null;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum Value {
+    #[default]
     Null,
     Bool(bool),
     Number(String),
@@ -16,11 +17,6 @@ pub enum Value {
     Object(BTreeMap<String, Value>),
 }
 
-impl Default for Value {
-    fn default() -> Self {
-        Self::Null
-    }
-}
 impl From<&str> for Value {
     fn from(v: &str) -> Self {
         Self::String(v.into())

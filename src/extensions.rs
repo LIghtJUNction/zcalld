@@ -22,7 +22,7 @@ pub fn root(config_path: &Path) -> Result<PathBuf, String> {
     };
     Ok(parent.join("extensions"))
 }
-fn helper() -> Result<PathBuf, String> {
+pub(crate) fn helper() -> Result<PathBuf, String> {
     if let Some(path) = std::env::var_os("ZCALLD_PLUGINCTL") {
         let p = PathBuf::from(path);
         if p.is_absolute() && p.is_file() {

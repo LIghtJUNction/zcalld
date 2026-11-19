@@ -130,12 +130,11 @@ impl Host {
                         let _ = std::io::copy(&mut reader, &mut std::io::sink());
                         break;
                     };
-                    if let Some(id) = value.get("id").as_u64() {
-                        if let Ok(calls) = calls.lock() {
-                            if let Some(tx) = calls.get(&id) {
-                                let _ = tx.send(value);
-                            }
-                        }
+                    if let Some(id) = value.get("id").as_u64()
+                        && let Ok(calls) = calls.lock()
+                        && let Some(tx) = calls.get(&id)
+                    {
+                        let _ = tx.send(value);
                     }
                 }
                 alive.store(false, Ordering::Release);
@@ -198,7 +197,7 @@ impl Host {
     pub fn rpc(&self, request: Value) -> Result<Value, String> {
         let mut call = self.start(request)?;
         loop {
-            let value = call.next()?;
+            let value = call.recv()?;
             if !matches!(value.get("error"), Value::Null) {
                 return Err("compatibility worker rejected the operation".into());
             }
@@ -220,7 +219,7 @@ impl Call {
             Err(_) => Err("compatibility worker ended".into()),
         }
     }
-    pub fn next(&mut self) -> Result<Value, String> {
+    pub fn recv(&mut self) -> Result<Value, String> {
         self.receiver
             .recv_timeout(Duration::from_secs(300))
             .map_err(|_| "compatibility worker timed out or ended".into())

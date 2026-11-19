@@ -76,13 +76,11 @@ impl Community {
             .as_str()
             .ok_or(Error::InvalidArgument)?;
         let registry = read(registry_path)?;
-        let mut hasher = DefaultHasher::new();
-        registry.stringify().hash(&mut hasher);
-        let generation = hasher.finish();
-        if let Some((g, h)) = &self.host {
-            if *g == generation {
-                return Ok(h.clone());
-            }
+        let generation = host_generation(&registry);
+        if let Some((g, h)) = &self.host
+            && *g == generation
+        {
+            return Ok(h.clone());
         }
         let _lock = INIT.lock().map_err(fail)?;
         let key = format!("community:{registry_path}:{generation}");
@@ -293,12 +291,81 @@ impl GatewayPlugin for Community {
         Ok(())
     }
 }
+// Account metadata changes do not restart a host that may be rotating a token.
+fn host_generation(registry: &Value) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    for key in [
+        "plugins",
+        "config",
+        "prefer",
+        "provider_options",
+        "models_dev_path",
+    ] {
+        key.hash(&mut hasher);
+        registry.get(key).stringify().hash(&mut hasher);
+    }
+    hasher.finish()
+}
+fn select_account(registry: &Value, params: &mut Value) -> Result<()> {
+    let provider = params
+        .get("provider")
+        .as_str()
+        .ok_or(Error::InvalidArgument)?
+        .to_owned();
+    let explicit = params.get("account").as_str().filter(|s| !s.is_empty());
+    let default = registry
+        .get("account_defaults")
+        .get(&provider)
+        .as_str()
+        .filter(|s| !s.is_empty());
+    let mut selected = explicit.or(default).map(str::to_owned);
+    let belongs = |id: &str| {
+        id == provider
+            || id
+                .strip_prefix(provider.as_str())
+                .is_some_and(|rest| rest.starts_with('#'))
+    };
+    if selected.is_none()
+        && let Some(accounts) = registry.get("accounts").as_object()
+    {
+        let mut any = false;
+        for (id, meta) in accounts {
+            if belongs(id) {
+                any = true;
+                if meta.get("enabled").as_bool() == Some(true) {
+                    selected = Some(id.clone());
+                    break;
+                }
+            }
+        }
+        if any && selected.is_none() {
+            return Err(Error::PluginStatus(6));
+        }
+    }
+    if let Some(id) = selected {
+        if !belongs(&id) {
+            return Err(Error::InvalidArgument);
+        }
+        if registry.get("accounts").get(&id).get("enabled").as_bool() == Some(false) {
+            return Err(Error::PluginStatus(6));
+        }
+        params.set("account", id.into());
+    }
+    Ok(())
+}
 impl ProviderPlugin for Community {
     fn configure(&mut self, c: &str) -> Result<()> {
         self.configure_host(c)
     }
     fn fetch(&mut self, request: &[u8]) -> Result<OwnedResource> {
         let mut params = json::parse(request).map_err(|_| Error::InvalidArgument)?;
+        let registry = read(
+            self.config
+                .get("registry")
+                .as_str()
+                .ok_or(Error::InvalidArgument)?,
+        )?;
+        select_account(&registry, &mut params)?;
         let body = params.get("body").as_str().ok_or(Error::InvalidArgument)?;
         let encoded = encode(body.as_bytes());
         params.set("body", encoded.into());
@@ -515,24 +582,25 @@ fn session(body: &Value) -> String {
         body.get("conversation_id"),
         body.get("metadata").get("session_id"),
     ] {
-        if let Some(v) = value.as_str() {
-            if !v.is_empty() && v.len() <= 4096 {
-                return v.into();
-            }
+        if let Some(v) = value.as_str()
+            && !v.is_empty()
+            && v.len() <= 4096
+        {
+            return v.into();
         }
     }
     if let Some(user) = body.get("metadata").get("user_id").as_str() {
-        if let Ok(v) = json::parse(user.as_bytes()) {
-            if let Some(s) = v.get("session_id").as_str() {
-                if s.len() <= 4096 {
-                    return s.into();
-                }
-            }
+        if let Ok(v) = json::parse(user.as_bytes())
+            && let Some(s) = v.get("session_id").as_str()
+            && s.len() <= 4096
+        {
+            return s.into();
         }
-        if let Some((_, s)) = user.rsplit_once("_session_") {
-            if !s.is_empty() && s.len() <= 128 {
-                return s.into();
-            }
+        if let Some((_, s)) = user.rsplit_once("_session_")
+            && !s.is_empty()
+            && s.len() <= 128
+        {
+            return s.into();
         }
     }
     String::new()
@@ -582,10 +650,10 @@ fn aggregate_sse(bytes: &[u8], protocol: &str) -> Value {
             }
             data.push_str(part.strip_prefix(' ').unwrap_or(part));
         } else if line.is_empty() && !data.is_empty() {
-            if data.trim() != "[DONE]" {
-                if let Ok(event) = json::parse(data.as_bytes()) {
-                    absorb(&mut reply, &event, protocol);
-                }
+            if data.trim() != "[DONE]"
+                && let Ok(event) = json::parse(data.as_bytes())
+            {
+                absorb(&mut reply, &event, protocol);
             }
             data.clear();
         }
@@ -645,12 +713,10 @@ fn absorb(reply: &mut Value, event: &Value, protocol: &str) {
                     reply,
                     "content",
                     event.get("index").as_u64().unwrap_or(0) as usize,
-                ) {
-                    if let Some(Value::String(value)) = block.remove("__partial_json") {
-                        if let Ok(input) = json::parse(value.as_bytes()) {
-                            block.set("input", input);
-                        }
-                    }
+                ) && let Some(Value::String(value)) = block.remove("__partial_json")
+                    && let Ok(input) = json::parse(value.as_bytes())
+                {
+                    block.set("input", input);
                 }
             }
             _ => {}
@@ -695,15 +761,13 @@ fn absorb(reply: &mut Value, event: &Value, protocol: &str) {
                     }
                     let parts = content.get_mut("parts").unwrap().as_array_mut().unwrap();
                     for part in candidate.get("content").get("parts").as_array() {
-                        if let Some(text) = part.get("text").as_str() {
-                            if let Some(last) = parts.last_mut() {
-                                if last.get("text").as_str().is_some()
-                                    && last.get("thought") == part.get("thought")
-                                {
-                                    append_string(last, "text", text);
-                                    continue;
-                                }
-                            }
+                        if let Some(text) = part.get("text").as_str()
+                            && let Some(last) = parts.last_mut()
+                            && last.get("text").as_str().is_some()
+                            && last.get("thought") == part.get("thought")
+                        {
+                            append_string(last, "text", text);
+                            continue;
                         }
                         parts.push(part.clone());
                     }
@@ -777,6 +841,29 @@ fn absorb(reply: &mut Value, event: &Value, protocol: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn account_selection_checks_runtime_metadata_without_restarting_auth() {
+        let registry = json::parse(br#"{"plugins":[],"accounts":{"mock#one":{"enabled":false},"mock#two":{"enabled":true}},"account_defaults":{"mock":"mock#two"}}"#).unwrap();
+        let mut request = object([("provider", "mock".into())]);
+        select_account(&registry, &mut request).unwrap();
+        assert_eq!(request.get("account").as_str(), Some("mock#two"));
+        request.set("account", "mock#one".into());
+        assert!(matches!(
+            select_account(&registry, &mut request),
+            Err(Error::PluginStatus(6))
+        ));
+        let mut other = registry.clone();
+        other.set("accounts", Value::Null);
+        other.set("account_defaults", Value::Null);
+        assert_eq!(host_generation(&registry), host_generation(&other));
+    }
+    #[test]
+    fn legacy_providers_keep_their_own_account_selection() {
+        let registry = object([]);
+        let mut request = object([("provider", "legacy".into())]);
+        select_account(&registry, &mut request).unwrap();
+        assert!(matches!(request.get("account"), Value::Null));
+    }
     #[test]
     fn chat_reply_keeps_text_tools_and_usage() {
         let data=b"data: {\"id\":\"x\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hel\"}}]}\n\ndata: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"lo\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2}}\n\ndata: [DONE]\n\n";
