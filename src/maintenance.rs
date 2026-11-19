@@ -233,7 +233,7 @@ fn update(context: &Context, args: &[String]) -> Result<(), String> {
         fs::rename(&temporary, &exe).map_err(|e| e.to_string())?;
         #[cfg(windows)]
         {
-            return crate::windows_update::queue(context, &temporary, &exe, &expected, latest);
+            crate::windows_update::queue(context, &temporary, &exe, &expected, latest)
         }
         #[cfg(not(windows))]
         {

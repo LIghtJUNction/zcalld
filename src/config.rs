@@ -719,7 +719,7 @@ fn socket_path(value: &str, directory: &Path) -> Result<Option<PathBuf>, String>
         if value == "auto" {
             return Ok(None);
         }
-        return Err("Unix socket listeners are unavailable on this platform; use listen".into());
+        Err("Unix socket listeners are unavailable on this platform; use listen".into())
     }
     #[cfg(unix)]
     {

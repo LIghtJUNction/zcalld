@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Exercise actual CLI edits against isolated homes, never the developer's agents."""
 import json
+import http.server
+import threading
 import os
 from pathlib import Path
 import subprocess
@@ -117,7 +119,12 @@ class ControlTests(unittest.TestCase):
         self.assertEqual(kept["redactWords"], ["private-word"])
         self.assertEqual(kept["futureField"], {"kept": True})
         self.assertEqual(key.read_bytes(), bytes(range(32)))
-        self.assertTrue(self.cli("privacy", "set", "personal")["enabled"])
+        before = path.read_bytes(), key.read_bytes()
+        self.env["ZCALLD_PRIVACY_WORKER"] = str(self.home / "missing-privacy-worker")
+        self.cli("privacy", "set", "personal", ok=False)
+        self.assertEqual((path.read_bytes(), key.read_bytes()), before)
+        self.assertFalse((directory / "plugin.json").exists())
+        self.assertFalse(self.cli("privacy", "show")["configured"])
 
     def test_custom_agent_refuses_path_escape(self):
         definition = self.home / "adapter.json"
@@ -178,6 +185,32 @@ class ControlTests(unittest.TestCase):
         listed = self.cli("groups", "list")
         self.assertNotIn("fixture-secret", json.dumps(listed))
         self.assertTrue(listed["deciders"][0]["credential_configured"])
+
+
+    def test_provider_discovery_accepts_complete_generation_endpoint(self):
+        seen = []
+        class Upstream(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *args): pass
+            def do_GET(self):
+                seen.append(self.path)
+                body = b'{"data":[{"id":"discovered"}]}'
+                self.send_response(200 if self.path == "/v1/models" else 404)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+        upstream = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Upstream)
+        thread = threading.Thread(target=upstream.serve_forever, daemon=True)
+        thread.start()
+        try:
+            self.cli("providers", "edit", "fixture", "--base-url",
+                     f"http://127.0.0.1:{upstream.server_port}/v1/chat/completions")
+            result = self.cli("providers", "models", "fixture")
+            self.assertEqual(result["catalog"]["data"][0]["id"], "discovered")
+            self.assertEqual(seen, ["/v1/models"])
+        finally:
+            upstream.shutdown()
+            upstream.server_close()
+            thread.join(timeout=2)
 
     def test_migration_dry_run_does_not_change_originals(self):
         source = self.home / ".config/magpie"

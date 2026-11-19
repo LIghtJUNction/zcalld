@@ -664,7 +664,94 @@ fn providers(context: &Context, args: &[String]) -> Result<(), String> {
                 .iter()
                 .find(|p| &p.name == name)
                 .ok_or("unknown provider")?;
-            let url = format!("{}/models", p.base_url.trim_end_matches('/'));
+            if let Some(plugin) = &p.plugin {
+                let provider_index = c
+                    .providers
+                    .iter()
+                    .position(|item| item.name == p.name)
+                    .unwrap();
+                let catalog = json::parse(c.models_json.as_bytes())?;
+                let rows = catalog
+                    .get("data")
+                    .as_array()
+                    .iter()
+                    .filter(|row| {
+                        row.get("id").as_str().is_some_and(|id| {
+                            c.routes
+                                .iter()
+                                .any(|route| route.provider == provider_index && route.name == id)
+                        })
+                    })
+                    .cloned()
+                    .collect();
+                if action == "models" {
+                    return emit(object([
+                        ("name", name.clone().into()),
+                        ("source", "configured_catalog".into()),
+                        (
+                            "catalog",
+                            object([("object", "list".into()), ("data", Value::Array(rows))]),
+                        ),
+                    ]));
+                }
+                let _loaded = crate::plugins::Plugins::load(&c.plugins)?;
+                let helper = crate::extensions::helper()?;
+                let root = crate::extensions::root(&context.path)?;
+                if !root.join("host.json").is_file() {
+                    return Err("community provider runtime is not configured".into());
+                }
+                let (code, out, _) = command(
+                    &helper.to_string_lossy(),
+                    &[
+                        "--root".into(),
+                        root.to_string_lossy().into_owned(),
+                        "accounts".into(),
+                        "list".into(),
+                        "--json".into(),
+                    ],
+                    None,
+                    Duration::from_secs(10),
+                )?;
+                if code != 0 {
+                    return Err("cannot validate the private provider account store".into());
+                }
+                let accounts = json::parse(out.as_bytes())?;
+                let account_configured =
+                    accounts.get("accounts").as_array().iter().any(|account| {
+                        account.get("provider").as_str() == Some(plugin)
+                            && account.get("enabled").as_bool() == Some(true)
+                            && p.plugin_account
+                                .as_deref()
+                                .is_none_or(|id| account.get("id").as_str() == Some(id))
+                    });
+                return emit(object([
+                    ("ok", true.into()), ("name", name.clone().into()), ("mode", "local_validation".into()),
+                    ("probe_performed", false.into()), ("reachable", Value::Null),
+                    ("account_configured", account_configured.into()),
+                    ("message", "Local plugin configuration is valid. Network access and generation were not tested.".into()),
+                ]));
+            }
+            let mut base = p.base_url.trim_end_matches('/').to_string();
+            for suffix in [
+                "/chat/completions",
+                "/responses",
+                "/messages",
+                "/completions",
+                "/interactions",
+            ] {
+                if let Some(prefix) = base.strip_suffix(suffix) {
+                    base = prefix.to_owned();
+                    break;
+                }
+            }
+            if let Some((prefix, _)) = base.split_once("/models/") {
+                base = prefix.to_owned();
+            }
+            let url = if base.ends_with("/models") {
+                base
+            } else {
+                format!("{base}/models")
+            };
             let mut arguments = vec![
                 "--silent".into(),
                 "--show-error".into(),
@@ -688,6 +775,20 @@ fn providers(context: &Context, args: &[String]) -> Result<(), String> {
                         http::quote(&format!("{header}: {prefix}{key}"))
                     ));
                 }
+            }
+            for (header, value) in &p.headers {
+                secret_config.push_str(&format!(
+                    "header = {}\n",
+                    http::quote(&format!("{header}: {value}"))
+                ));
+            }
+            if crate::protocol::protocol_name(p.protocol) == "anthropic"
+                && !p
+                    .headers
+                    .iter()
+                    .any(|(name, _)| name.eq_ignore_ascii_case("anthropic-version"))
+            {
+                secret_config.push_str("header = \"anthropic-version: 2023-06-01\"\n");
             }
             arguments.extend([
                 "--write-out".into(),
@@ -731,12 +832,13 @@ fn providers(context: &Context, args: &[String]) -> Result<(), String> {
 }
 
 fn privacy(context: &Context, args: &[String]) -> Result<(), String> {
-    let path = context.directory.join("privacy/settings.json");
+    let path = crate::extensions::privacy_settings_path(&context.path)?;
     let mut settings = if path.exists() {
         json::read(&path)?
     } else {
         Value::Object(BTreeMap::new())
     };
+    let mut restart_required = Value::Null;
     match args.first().map(String::as_str).unwrap_or("show") {
         "show" => {}
         "set" => {
@@ -745,26 +847,37 @@ fn privacy(context: &Context, args: &[String]) -> Result<(), String> {
                 .map(String::as_str)
                 .ok_or("privacy mode required: off, secrets, personal")?;
             match mode {
-                "off" => settings.set("zcalldEnabled", false.into()),
+                "off" => {
+                    settings.set("zcalldEnabled", false.into());
+                    backup(context, std::slice::from_ref(&path), "privacy")?;
+                    json::atomic_write(&path, settings.stringify().as_bytes())?;
+                    restart_required = false.into();
+                }
                 "secrets" | "personal" => {
                     settings.set("zcalldEnabled", true.into());
                     settings.set("redact", true.into());
                     settings.set("redactPersonal", (mode == "personal").into());
+                    restart_required =
+                        crate::extensions::enable_privacy(&context.path, &settings)?.into();
                 }
                 _ => return Err("privacy mode must be off, secrets or personal".into()),
             }
-            backup(context, std::slice::from_ref(&path), "privacy")?;
-            json::atomic_write(&path, settings.stringify().as_bytes())?;
         }
         _ => return Err("privacy expects show or set".into()),
     }
-    let enabled = settings.get("zcalldEnabled").as_bool().unwrap_or(true)
+    let requested = settings.get("zcalldEnabled").as_bool().unwrap_or(true)
         && (settings.get("redact").as_bool().unwrap_or(false)
             || settings.get("redactPersonal").as_bool().unwrap_or(false)
             || !settings.get("redactWords").as_array().is_empty());
+    let configured = crate::extensions::privacy_configured(&context.path)?;
+    let enabled = requested && configured;
     let personal = settings.get("redactPersonal").as_bool().unwrap_or(false);
     emit(object([
         ("enabled", enabled.into()),
+        ("requested_enabled", requested.into()),
+        ("configured", configured.into()),
+        ("restart_required", restart_required),
+        ("runtime_state", "not_checked".into()),
         (
             "mode",
             if !enabled {
@@ -779,11 +892,18 @@ fn privacy(context: &Context, args: &[String]) -> Result<(), String> {
         ("personal", personal.into()),
         (
             "model_auto",
-            settings
-                .get("redactModelAuto")
-                .as_bool()
-                .unwrap_or(false)
-                .into(),
+            (!settings.get("redactModelOff").as_bool().unwrap_or(false)
+                && settings
+                    .get("redactModelAuto")
+                    .as_bool()
+                    .unwrap_or_else(|| {
+                        settings
+                            .get("redactModelName")
+                            .as_str()
+                            .unwrap_or_default()
+                            .is_empty()
+                    }))
+            .into(),
         ),
         (
             "words_any_case",
