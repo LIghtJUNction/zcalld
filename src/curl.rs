@@ -249,7 +249,7 @@ extern "C" fn read_callback(
     unsafe {
         std::ptr::copy_nonoverlapping(
             transfer.body.as_ptr().add(transfer.uploaded),
-            data as *mut u8,
+            data.cast::<u8>(),
             count,
         );
     }
@@ -287,7 +287,7 @@ fn callback(
     // SAFETY: libcurl supplies an initialized slice and the exclusive live
     // Transfer pointer registered immediately before synchronous perform.
     let transfer = unsafe { &mut *(context as *mut Transfer<'_>) };
-    let bytes = unsafe { std::slice::from_raw_parts(data as *const u8, length) };
+    let bytes = unsafe { std::slice::from_raw_parts(data.cast_const().cast::<u8>(), length) };
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         if header {
             transfer.sink.header(bytes)
