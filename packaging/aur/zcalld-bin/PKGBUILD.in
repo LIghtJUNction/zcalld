@@ -20,4 +20,5 @@ sha256sums_aarch64=('@AARCH64_SHA256@')
 package() {
   cd "zcalld-$pkgver-$CARCH-unknown-linux-gnu"
   DESTDIR="$pkgdir" PREFIX=/usr ./install.sh
+  mv "$pkgdir/usr/share/licenses/zcalld" "$pkgdir/usr/share/licenses/$pkgname"
 }
