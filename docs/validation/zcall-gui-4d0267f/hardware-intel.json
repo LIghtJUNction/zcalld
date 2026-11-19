@@ -1,0 +1,39 @@
+{
+  "commit": "90cedb0ecaaf7297a6f1d5ce135217db2a74416f",
+  "zui_commit": "5e37fcfb791eec9ac523fc19373e95d0a513112f",
+  "scope": "Actual user Xwayland; isolated config and home; read-only core CLI; no host input or service mutations",
+  "binary_bytes": 717008,
+  "binary_sha256": "fbbf26ae9f1e01a5d510a888466a6b6f99dc6c23bb336182ae0aaf637f75f0be",
+  "renderer_log": "zcall-gui 0.1.0; renderer: Mesa Intel(R) UHD Graphics (ADL-S GT1)\nPresented frames: 6\n",
+  "memory_initial": {
+    "rss_kib": 61968,
+    "pss_kib": 51581,
+    "private_kib": 47788,
+    "shared_kib": 14180,
+    "anonymous_kib": 13128,
+    "swap_kib": 0
+  },
+  "memory_after_idle": {
+    "rss_kib": 61968,
+    "pss_kib": 50871,
+    "private_kib": 46476,
+    "shared_kib": 15492,
+    "anonymous_kib": 13128,
+    "swap_kib": 0
+  },
+  "idle_seconds": 4.001010378997307,
+  "idle_cpu_ticks": 0,
+  "clock_ticks_per_second": 100,
+  "idle_one_core_percent": 0.0,
+  "window_geometry": {
+    "WINDOW": "4194306",
+    "X": "1263",
+    "Y": "60",
+    "WIDTH": "1224",
+    "HEIGHT": "1526",
+    "SCREEN": "0"
+  },
+  "window_properties": "WM_CLASS(STRING) = \"zcall-gui\", \"Zcall-gui\"\nWM_NORMAL_HINTS(WM_SIZE_HINTS):\n\t\tprogram specified minimum size: 1080 by 740\n_NET_WM_NAME(UTF8_STRING) = \"zcall-gui — 本地 AI 网关\"\n",
+  "screenshot_error": null,
+  "memory_scope": "CPU process mappings from smaps_rollup; GPU allocations and driver-owned memory are not fully measured"
+}

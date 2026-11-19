@@ -1,0 +1,44 @@
+{
+  "run_id": 44636510212,
+  "source_commit": "90cedb0ecaaf7297a6f1d5ce135217db2a74416f",
+  "zui_commit": "5e37fcfb791eec9ac523fc19373e95d0a513112f",
+  "url": "https://github.com/LIghtJUNction/zcall-gui/actions/runs/44636510212",
+  "jobs": [
+    {
+      "id": 135956416406,
+      "name": "native / build (windows-2025, x86_64-pc-windows-msvc)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/LIghtJUNction/zcall-gui/actions/runs/44636510212/job/135956416406"
+    },
+    {
+      "id": 135956416853,
+      "name": "native / build (macos-15, aarch64-apple-darwin)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/LIghtJUNction/zcall-gui/actions/runs/44636510212/job/135956416853"
+    },
+    {
+      "id": 135956416946,
+      "name": "native / build (ubuntu-24.04, x86_64-unknown-linux-gnu)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/LIghtJUNction/zcall-gui/actions/runs/44636510212/job/135956416946"
+    },
+    {
+      "id": 135956416988,
+      "name": "native / build (macos-15-intel, x86_64-apple-darwin)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/LIghtJUNction/zcall-gui/actions/runs/44636510212/job/135956416988"
+    },
+    {
+      "id": 135956416989,
+      "name": "native / build (ubuntu-24.04-arm, aarch64-unknown-linux-gnu)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/LIghtJUNction/zcall-gui/actions/runs/44636510212/job/135956416989"
+    }
+  ],
+  "scope": "Five native targets passed on the preceding UI commit. The final 4d0267f adds one runtime-state regression and wording/state interpretation; its formal release still requires the native release gate."
+}

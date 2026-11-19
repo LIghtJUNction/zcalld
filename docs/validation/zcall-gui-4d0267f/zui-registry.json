@@ -1,0 +1,11 @@
+{
+  "name": "zui-native",
+  "version": "0.1.0",
+  "url": "https://static.crates.io/crates/zui-native/zui-native-0.1.0.crate",
+  "bytes": 25403,
+  "sha256": "8a246bc2b25c2f67f4a767fb3c10fdf42cf77107735f0cbf2bb07931f57c84f6",
+  "vcs_commit": "5e37fcfb791eec9ac523fc19373e95d0a513112f",
+  "archive_entries": 20,
+  "publisher": "Project Z coordinator",
+  "verification": "Integration maintainer directly downloaded the registry archive, checked SHA256, and read .cargo_vcs_info.json; ssmcp exec job 12fc25d8595380a4e7070cb00c40fd2f-43b returned exit 0."
+}
