@@ -1,0 +1,2 @@
+zcall-gui W: Dependency included, but may not be needed ('zcalld')
+zcall-gui W: Dependency included, but may not be needed ('curl')

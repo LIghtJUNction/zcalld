@@ -1,0 +1,17 @@
+{
+  "scope": "Private Xvfb; inert CLI fixture; one privacy set, one localized service restart, three state refreshes. No host service changes. The later 4d0267f adds the reopen/runtime-unknown unit regression.",
+  "privacy_set": 1,
+  "service_restart": 1,
+  "refreshes": 3,
+  "screenshots": [
+    "privacy-pending.png",
+    "privacy-after-restart.png"
+  ],
+  "renderer": "zcall-gui 0.1.0; renderer: llvmpipe (LLVM 23.1.1, 256 bits)\nPresented frames: 20\n",
+  "source_commit": "90cedb0ecaaf7297a6f1d5ce135217db2a74416f",
+  "original_screenshots": [
+    "pending.png",
+    "service-dialog.png",
+    "applied.png"
+  ]
+}
