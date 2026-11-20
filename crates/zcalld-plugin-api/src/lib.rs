@@ -240,3 +240,42 @@ pub trait EventPlugin {
     fn emit(&mut self, kind: u32, event: &str) -> zplugin::Result<u32>;
     fn status(&mut self, output: &mut [u8]) -> zplugin::Result<u64>;
 }
+
+/// Optional recovery of a fully rejected request after all configured retry
+/// candidates are exhausted. No transport failure, response already delivered,
+/// caller cancellation, or retry-budget exhaustion authorizes recovery.
+///
+/// accepts returns 1 for the single recovery executor, or 0 for a route
+/// observer. begin receives only host-built metadata (bounded explicit
+/// provider/account candidates and a remaining deadline), never caller headers,
+/// credentials, prompts, or an arbitrary URL. The returned resource is
+/// dev.zcalld.recovery-result v1: operation 1 polls bounded JSON
+/// {"recovered":false} or {"recovered":true,"candidate":N}; PluginStatus(3)
+/// means pending. BufferTooSmall must replay the same result. Drop cancels work.
+///
+/// After proven recovery the host calls resume with the exact recovered public
+/// route and the already filtered request. It may adjust routing-only fields;
+/// zero preserves the input. General middleware is never replayed, and resume
+/// must not repeat a recovery side effect when an output buffer is enlarged.
+#[zplugin::interface(id = "dev.zcalld.recovery", version = 1)]
+pub trait RecoveryPlugin {
+    fn configure(&mut self, config: &str) -> zplugin::Result<()>;
+    fn accepts(&mut self) -> zplugin::Result<u32>;
+    fn begin(&mut self, metadata: &[u8]) -> zplugin::Result<zplugin::OwnedResource>;
+    fn resume(
+        &mut self,
+        protocol: u32,
+        model: &str,
+        filtered_body: &[u8],
+        output: &mut [u8],
+    ) -> zplugin::Result<u64>;
+}
+
+pub mod recovery {
+    pub const RESOURCE_ID: &str = "dev.zcalld.recovery-result";
+    pub const RESOURCE_VERSION: u32 = 1;
+    pub const POLL: u32 = 1;
+    pub const MAX_ATTEMPTS: usize = 32;
+    pub const MAX_METADATA_BYTES: usize = 32 * 1024;
+    pub const MAX_RESULT_BYTES: usize = 256;
+}

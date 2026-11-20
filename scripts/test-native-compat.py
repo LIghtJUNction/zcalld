@@ -59,10 +59,13 @@ subprocess.run([sys.executable, str(root / "scripts/test-desktop-host.py"), *com
 bun = shutil.which("bun")
 if bun is None:
     raise SystemExit("native generation cancellation acceptance requires Bun")
+subprocess.run([sys.executable, str(root / "scripts/test-weekly-maintenance.py"),
+                "--binary", str(binary), "--community-plugin", str(community),
+                "--pluginctl", str(pluginctl), "--bun", bun], cwd=root, check=True)
 subprocess.run([sys.executable, str(root / "scripts/test-generation-cancellation.py"),
                 "--binary", str(binary), "--community-plugin", str(community),
                 "--bun", bun,
                 "--community-host", str(root / "extensions/compat/community/vendor/host.js"),
                 "--community-pi", str(root / "extensions/compat/community/vendor/pi.js")],
                cwd=root, check=True)
-print("Native compatibility accepted: privacy, routing, MCP, Codex metadata/credit policy, generation cancellation and desktop lifecycle over real Rust/Go/Bun IPC")
+print("Native compatibility accepted: privacy, routing, MCP, Codex metadata/credit policy, generation cancellation, weekly maintenance and desktop lifecycle over real Rust/Go/Bun IPC")

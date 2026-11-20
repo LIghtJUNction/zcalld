@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.0 — 2026-11-20
+
+- Install and update complete native bundles through a verified private prefix, with per-file manifests, a durable recovery journal, runtime leases and complete rollback. Package-managed installations keep using their package manager.
+- Add explicit first-use configuration and Linux user-service registration for private installs. Preserve existing files, reject conflicting service definitions, and keep installation, configuration and service startup as separate confirmed actions.
+- Recover eligible explicit-account routes after bounded, fully received upstream refusals. Healthy fallbacks run first; a proven weekly reset allows one final request within the original deadline. Prompts and credentials never enter recovery metadata, and cancellation drains owned workers.
+- Pin compatibility 0.2 with native quota reads, safe builtin upgrades, inherited warmup/reset policies, persistent maintenance ledgers and fresh quota checks after a confirmed reset. Optional maintenance remains off until configured or imported.
+- Add optional native completion, quota and privacy notifications with conversation-safe filtering and keep-awake lifecycle handling. Preserve model-group references in provider and route edits.
+- Run recovery, maintenance, full-archive installer and service-registration acceptance with isolated local fixtures. Retain five native release targets, checksums, source archives and AUR publishing in the formal release workflow.
+
 ## 0.3.1 — 2026-11-20
 
 - test: exercise the real Codex ChatGPT path and quota parsing

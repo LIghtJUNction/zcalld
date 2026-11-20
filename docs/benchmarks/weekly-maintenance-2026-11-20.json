@@ -1,0 +1,123 @@
+{
+  "schema_version": 1,
+  "recorded_at_utc": "2026-11-20T13:49:29Z",
+  "scope": "Isolated native gateway -> one-shot Go maintenance worker -> bundled Bun provider host",
+  "result": {
+    "status": "passed",
+    "tests": 6,
+    "skipped": 0,
+    "duration_seconds": 1.955,
+    "real_provider_requests": 0,
+    "real_credentials_used": false,
+    "synthetic_auth_bytes_preserved": true
+  },
+  "fixture": {
+    "path": "scripts/test-weekly-maintenance.py",
+    "sha256": "9c77e5ff307801fba850d6b562efccae99a83c677ce9cf0edc3cfc48d8ff2aee",
+    "network_guard": "Every Bun process must pass PRELOAD_OK before the gateway starts. Fixed official paths return in-process synthetic responses; other fetches, sockets, TLS connections and WebSockets are blocked."
+  },
+  "cases": [
+    {
+      "name": "disabled_weekly_uses_only_the_generation_host",
+      "verified": [
+        "one generation host",
+        "one generation",
+        "no usage or reset POST"
+      ]
+    },
+    {
+      "name": "before_credits_resets_once_before_generation",
+      "verified": [
+        "one reset POST",
+        "reset request ID persisted before POST",
+        "one completed generation after reset"
+      ]
+    },
+    {
+      "name": "exhausted_no_credits_forces_fresh_usage_in_the_existing_host",
+      "verified": [
+        "full usage initially blocks generation",
+        "one confirmed reset",
+        "the same persistent generation host fetches fresh usage after reset",
+        "one completed generation"
+      ]
+    },
+    {
+      "name": "reset_does_not_bypass_unknown_fresh_no_credits_usage",
+      "verified": [
+        "one confirmed reset",
+        "unknown fresh usage returns 503",
+        "zero generation POSTs"
+      ]
+    },
+    {
+      "name": "no_card_never_reports_recovery_or_sends_generation",
+      "verified": [
+        "429 retained",
+        "zero reset POSTs",
+        "zero generation POSTs"
+      ]
+    },
+    {
+      "name": "client_disconnect_cancels_the_one_shot_worker_before_any_post",
+      "verified": [
+        "TCP reset reaches the Bun AbortSignal",
+        "zero reset and generation POSTs",
+        "owned processes drain"
+      ]
+    }
+  ],
+  "component_checkpoints": {
+    "core_recovery": "https://github.com/LIghtJUNction/zcalld/commit/6c446e27626970e119a737614feb5c3c4ce9b479",
+    "core_native_bridge_and_refresh_intent": "https://github.com/LIghtJUNction/zcalld/commit/892e4284bae49f1c96e3cdfff059a2dd8b49fd20",
+    "compatibility_worker": "https://github.com/LIghtJUNction/zcalld-compat/commit/c1c42288ac6b5f88deb01dc852a6636718be95b1",
+    "compatibility_cache_invalidation": "https://github.com/LIghtJUNction/zcalld-compat/commit/8112908358796c86e63556a1543b9ded4f80709e"
+  },
+  "artifacts": {
+    "compatibility_helper": {
+      "sha256": "2c8b6872b1e02561c8f0ede1881322ca2460999036d10b45809206257234146f",
+      "kind": "local integration build",
+      "official_release": false
+    }
+  },
+  "platform": {
+    "executed": "Linux x86_64",
+    "windows_macos": "The harness contains portable process, socket and path handling but those platforms were not executed for this receipt."
+  },
+  "cache_red_test": {
+    "source_revision": "0db0d1e2ce8604c55d285c1ea39923045a50f1d3",
+    "expected_status_after_fake_reset": 200,
+    "observed_status_before_fix": 429,
+    "clock": "fixed",
+    "network": "injected fake fetch"
+  },
+  "fixture_correction": {
+    "initial_run": {
+      "passed": 5,
+      "failed": 1
+    },
+    "cause": "A normal TCP FIN may be a valid write-half-close while the client still waits for a response. The first cancellation fixture did not send a reset.",
+    "change": "Use SO_LINGER(1,0) to generate a real TCP reset. Keep the original cancellation deadline, zero-POST and credential-preservation assertions."
+  },
+  "reproduction": {
+    "command": [
+      "python3",
+      "scripts/test-weekly-maintenance.py",
+      "--binary",
+      "<test-gateway>",
+      "--community-plugin",
+      "<test-community-plugin>",
+      "--pluginctl",
+      "<test-compatibility-helper>",
+      "--bun",
+      "<bun>"
+    ],
+    "optional_temp_root": "--temp-root <private-test-directory>"
+  },
+  "limits": [
+    "These are fake-account and fake-network contract tests, not live provider acceptance.",
+    "The component checkpoints describe the integration inputs; this receipt is not an official release attestation.",
+    "External-owner fixtures deliberately do not refresh credentials. Delayed credential-checkpoint and maintenance-lock ordering require the separate Host/worker tests.",
+    "No running user service, provider configuration or Codex configuration was changed."
+  ]
+}

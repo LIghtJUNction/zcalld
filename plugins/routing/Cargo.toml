@@ -11,7 +11,12 @@ description = "Optional request routing, decision providers and usage for zcalld
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-zcalld-plugin-api = { path = "../../crates/zcalld-plugin-api", version = "=0.3.1" }
+zcalld-plugin-api = { path = "../../crates/zcalld-plugin-api", version = "=0.4.0" }
 zplugin = { version = "=0.3.1", features = ["std"] }
 zconv = { version = "=0.4.0", default-features = false }
-zcalld-compat-client = { version = "=0.3.1", path = "../../crates/zcalld-compat-client" }
+zcalld-compat-client = { version = "=0.4.0", path = "../../crates/zcalld-compat-client" }
+
+[[example]]
+name = "recovery-fixture"
+path = "examples/recovery_fixture.rs"
+crate-type = ["cdylib"]

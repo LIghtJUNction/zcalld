@@ -1,4 +1,5 @@
 //! On-demand configuration and service control. Never loaded as a separate daemon.
+mod service_install;
 use crate::{
     config, http,
     state_json::{self as json, Value, object},
@@ -43,6 +44,14 @@ pub fn run(input: &[String]) -> Option<Result<(), String>> {
         index += 1;
     }
     let command = args.first().map(String::as_str).unwrap_or("");
+    if command == "install" {
+        if config_count != 0 || json_count > 1 {
+            return Some(Err(
+                "install does not accept --config or duplicate --json".into()
+            ));
+        }
+        return Some(crate::installer::run(&args[1..]));
+    }
     if command == "keys" && (config_count > 1 || json_count > 1 || invalid_config_value) {
         return Some(Err("duplicate or invalid global caller key option".into()));
     }
@@ -447,6 +456,8 @@ fn service_state() -> String {
 }
 pub fn status(context: &Context) -> Value {
     let state = service_state();
+    let (configuration_path, configuration_exists) = configuration_info(&context.path);
+    let (service_install_supported, service_installed) = service_install::information(context);
     match config::Config::load(&context.path) {
         Ok(c) => {
             let healthy = transport::connect(&c)
@@ -464,6 +475,13 @@ pub fn status(context: &Context) -> Value {
                 ("version", env!("CARGO_PKG_VERSION").into()),
                 ("healthy", healthy.into()),
                 ("configured", true.into()),
+                ("configuration_path", configuration_path.into()),
+                ("configuration_exists", configuration_exists.into()),
+                (
+                    "service_install_supported",
+                    service_install_supported.into(),
+                ),
+                ("service_installed", service_installed),
                 (
                     "listen",
                     c.listen.map(|a| a.to_string()).unwrap_or_default().into(),
@@ -484,12 +502,34 @@ pub fn status(context: &Context) -> Value {
             ("version", env!("CARGO_PKG_VERSION").into()),
             ("healthy", false.into()),
             ("configured", false.into()),
+            ("configuration_path", configuration_path.into()),
+            ("configuration_exists", configuration_exists.into()),
+            (
+                "service_install_supported",
+                service_install_supported.into(),
+            ),
+            ("service_installed", service_installed),
             ("listen", "".into()),
             ("socket", "".into()),
             ("service", state.into()),
             ("error", error.into()),
         ]),
     }
+}
+
+fn configuration_info(path: &Path) -> (String, bool) {
+    let absolute = std::path::absolute(path)
+        .ok()
+        .and_then(|path| path.to_str().map(str::to_owned))
+        .unwrap_or_default();
+    // A dangling symlink, unreadable node or non-directory parent is not
+    // permission to initialize over an existing user choice.
+    let exists = absolute.is_empty()
+        || !matches!(
+            fs::symlink_metadata(path),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound
+        );
+    (absolute, exists)
 }
 
 fn credential_ready(context: &Context, name: &str) -> bool {
@@ -1085,8 +1125,18 @@ fn service(context: &Context, args: &[String]) -> Result<(), String> {
     if action == "status" {
         return emit(status(context));
     }
+    if action == "install" {
+        if args.len() != 1 {
+            return Err(
+                "service install accepts only --config and --json; it is a per-user action".into(),
+            );
+        }
+        return emit(service_install::install(context)?);
+    }
     if !matches!(action, "start" | "stop" | "restart" | "enable" | "disable") {
-        return Err("service expects status, start, stop, restart, enable or disable".into());
+        return Err(
+            "service expects status, install, start, stop, restart, enable or disable".into(),
+        );
     }
     #[cfg(target_os = "linux")]
     {

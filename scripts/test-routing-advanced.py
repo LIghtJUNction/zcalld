@@ -45,8 +45,8 @@ class Advanced(unittest.TestCase):
 
     tearDown = base.Routing.tearDown
 
-    def environment(self):
-        environment = os.environ.copy()
+    def command_environment(self):
+        environment = self.environment.copy()
         environment.pop("NOTIFY_SOCKET", None)
         environment.update({"ZCALLD_PLUGINCTL": str(self.args.pluginctl),
                             "ZCALLD_PLUGIN_ROUTING_PLUGIN": str(self.args.routing_plugin)})
@@ -57,7 +57,7 @@ class Advanced(unittest.TestCase):
 
     def start(self):
         self.process = subprocess.Popen([str(self.args.binary), "serve", "--config", str(self.config)],
-                                        stdout=self.log, stderr=self.log, env=self.environment(),
+                                        stdout=self.log, stderr=self.log, env=self.command_environment(),
                                         cwd=self.root)
         deadline = time.monotonic() + 12
         while time.monotonic() < deadline:
@@ -85,7 +85,7 @@ class Advanced(unittest.TestCase):
     def cli(self, *arguments, ok=True):
         result = subprocess.run([str(self.args.binary), *arguments, "--config", str(self.config), "--json"],
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                env=self.environment(), timeout=30)
+                                env=self.command_environment(), timeout=30)
         if ok:
             self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace"))
             return json.loads(result.stdout)
