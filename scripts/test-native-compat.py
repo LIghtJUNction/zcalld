@@ -25,7 +25,7 @@ privacy_worker = (args.privacy_worker or Path(os.environ.get(
     "ZCALLD_TEST_PRIVACY_WORKER", str(root / "_release/native-compat" / ("zcalld-privacy" + executable_suffix))
 ))).resolve(strict=True)
 redact = (binary.parent / (library_prefix + "zcalld_redact" + library_suffix)).resolve(strict=True)
-routing = (binary.parent / (library_prefix + "zcalld_routing" + library_suffix)).resolve(strict=True)
+routing = (binary.parent / (library_prefix + "zcalld_plugin_routing" + library_suffix)).resolve(strict=True)
 community = (binary.parent / (library_prefix + "zcalld_community" + library_suffix)).resolve(strict=True)
 common = ["--binary", str(binary), "--redact-plugin", str(redact),
           "--privacy-worker", str(privacy_worker)]
