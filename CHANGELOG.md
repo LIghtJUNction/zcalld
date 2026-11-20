@@ -5,7 +5,7 @@
 - Detect Windows TCP resets during optional recovery without consuming request bytes or mistaking a write half-close for cancellation.
 - Add native loopback regressions for resets and half-close/data preservation; retain the existing recovery scenarios and time budgets.
 - Allow the complete Windows release checks to run as a commit-pinned candidate before tagging. Formal releases still require all five native targets.
-- Synchronize the synthetic Windows sign-in failure with the test observer before cleanup, preserving strict child-exit assertions and production helper behavior.
+- Synchronize the synthetic Windows sign-in failure with the test observer before cleanup using a byte-exact acknowledgement, preserving strict child-exit assertions and production helper behavior.
 - Retain the failed 0.4.3 validation tag. It did not publish release assets because the Windows recovery cancellation check failed.
 
 ## 0.4.3 — 2026-11-20
