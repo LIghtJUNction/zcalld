@@ -52,6 +52,7 @@ pub fn run(input: &[String]) -> Option<Result<(), String>> {
             | "service"
             | "agents"
             | "privacy"
+            | "desktop"
             | "profiles"
             | "migrate"
             | "update"
@@ -85,6 +86,7 @@ pub fn run(input: &[String]) -> Option<Result<(), String>> {
             "service" => service(&context, &args[1..]),
             "agents" => crate::adapters::run(&context, &args[1..]),
             "privacy" => privacy(&context, &args[1..]),
+            "desktop" => crate::desktop::run(&context, &args[1..]),
             "profiles" => profiles(&context, &args[1..]),
             "plugins" => crate::extensions::run(&args[1..], &context.path),
             "migrate" => crate::migration::run(&context, &args[1..]),

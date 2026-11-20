@@ -5,7 +5,7 @@ LIBDIR := $(PREFIX)/lib
 DATADIR := $(PREFIX)/share
 BUMP ?= patch
 VERSION ?=
-PLUGINS := zcalld_aliases zcalld_policy zcalld_redact zcalld_community zcalld_plugin_routing
+PLUGINS := zcalld_aliases zcalld_policy zcalld_redact zcalld_community zcalld_plugin_routing zcalld_desktop
 
 .PHONY: build check check-native install package bump release
 build:
