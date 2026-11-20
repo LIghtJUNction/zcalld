@@ -9,6 +9,30 @@ import shutil
 import subprocess
 
 
+def batch_environment(comspec, batch, env):
+    """Run a trusted batch with cmd quoting, not MSVCRT argv quoting."""
+    # Popen(list) uses list2cmdline on Windows, escaping embedded quotes as \".
+    # cmd.exe does not use MSVCRT parsing. Give /s /c one explicitly quoted
+    # command string; /s removes the outer pair and preserves CALL's path pair.
+    if any(c in str(comspec) + str(batch) for c in '\r\n\0"&|<>^%'):
+        raise SystemExit("installed MSVC command path contains invalid characters")
+    command = f'"{comspec}" /d /u /s /c "call "{batch}" -no_logo -arch=x64 -host_arch=x64 >nul && set"'
+    configured = subprocess.run(command, executable=str(comspec), env=env,
+                                check=False, capture_output=True, timeout=30)
+    if configured.returncode:
+        # Never log stdout: on a late failure it may contain the full SET dump.
+        # Preserve bounded stderr so native CI can diagnose VsDevCmd failures.
+        raw = configured.stderr[:16384]
+        codec = "utf-16-le" if b"\0" in raw else "utf-8"
+        diagnostic = raw.decode(codec, errors="replace").strip()[:8192]
+        raise SystemExit(f"MSVC environment failed (exit {configured.returncode}): "
+                         + (diagnostic or "no stderr was produced"))
+    try:
+        return configured.stdout.decode("utf-16-le", errors="strict")
+    except UnicodeError as error:
+        raise SystemExit("MSVC environment returned invalid UTF-16 output") from error
+
+
 def msvc_environment():
     """Find the installed compiler; never install or download a toolchain."""
     env = {key.upper(): value for key, value in os.environ.items()}
@@ -26,10 +50,8 @@ def msvc_environment():
     comspec = env.get("COMSPEC", str(Path(env.get("SYSTEMROOT", r"C:\Windows")) / "System32" / "cmd.exe"))
     # VsDevCmd is the trusted installed batch entry point. /u makes SET output
     # UTF-16 regardless of the user's code page; never print that environment.
-    command = f'call "{paths[0]}" -no_logo -arch=x64 -host_arch=x64 >nul && set'
-    configured = subprocess.run([comspec, "/d", "/u", "/s", "/c", command], env=env,
-                                check=True, capture_output=True, encoding="utf-16-le", errors="strict", timeout=30)
-    for line in configured.stdout.splitlines():
+    configured = batch_environment(comspec, paths[0], env)
+    for line in configured.splitlines():
         key, sep, value = line.partition("=")
         if sep and key and not any(c in key for c in "\r\n\0"):
             env[key.upper()] = value
@@ -73,3 +95,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
