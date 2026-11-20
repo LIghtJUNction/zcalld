@@ -148,11 +148,23 @@ establish subscription availability.
 
 A one-second cache and shared concurrent lookup reduce duplicate usage reads.
 Cancelling one caller does not cancel another caller's shared lookup; cancelling
-the last waiter aborts that lookup. The cache is bounded and keyed by the actual
-official account identity. Fixed account-wide full-window response headers can
-tighten a cached hold; named header families do not establish a model mapping.
-Unrestricted accounts add no usage request. Metadata reads remain available
-independently of the generation guard. No background polling is added.
+the last waiter aborts that lookup. The cache is bounded to 64 credential
+identities. Its in-process key is a digest of the selected workspace and the
+resolved access token, so different members of one workspace cannot share quota
+state. Cache entries, pending lookups and observed response holds use that same key.
+
+Usage checking and generation use one resolved credential snapshot. Immediately
+before generation, the adapter rereads the current authentication and verifies
+that its workspace and token still match. A change during the check stops the
+request before generation; the next request checks the new credentials. Token
+renewal therefore invalidates the short quota cache without changing the stored
+account policy. No automatic retry or background token refresh is added.
+
+Fixed account-wide full-window response headers can tighten a cached hold; named
+header families do not establish a model mapping. Unrestricted accounts add no
+usage request. Metadata reads remain available independently of the generation
+guard. See the [credential-isolation validation](validation/codex-quota-identity-20261120.md)
+for the shared-workspace and credential-switch regressions.
 
 This is a client-side spending rule, not a server billing guarantee. Another
 client, or a single request that crosses the remaining window, can change

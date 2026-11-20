@@ -1,0 +1,213 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-11-20T18:57:35.222805+08:00",
+  "sources": {
+    "baseline_compat": "15e5e4960adb8028b2d099c1835eaa6a2faaa0c8",
+    "compat_parent": "7043aa157462fa445163849c3f3156a0f95b3904",
+    "compat_fix": "739ecef91bcec41d44b2388d7c346fe2bad934a1",
+    "core_validated_parent": "6aea363671a9eb6a210cdf88dff22f34d1c829f8",
+    "later_core_integration": "7ec8ecf8e83e57716158a7a393cda53546a1d15c",
+    "later_compat_pin": "812f8f4b6b3700d8fca371407e527b17c7bb55c5",
+    "later_pin_contains_fix": true
+  },
+  "reviewed_patch_sha256": "83003edae52889c30ded3b1138338f535a1db2fbfe2b020b0b642ce987f43498",
+  "baseline": {
+    "quota_passed": 15,
+    "quota_failed": 5,
+    "raw_output": "bun test v1.4.0-canary.1 (9657f3789)\n\ncommunity/builtin/tests/codex-credits.test.mjs:\n(pass) unrestricted accounts do not check usage and private policy never reaches fetch [25.17ms]\n(pass) restricted requests check the fixed official usage endpoint once per short cache [7.40ms]\n(pass) exhausted windows reject before generation even when credits are unlimited [1.28ms]\n(pass) full unknown-reset windows hold; unknown availability and stale resets never allow [0.12ms]\n(pass) missing, malformed, expired, over-limit and failed usage fail closed [3.49ms]\n(pass) expired cache and elapsed reset are rechecked without a poller or a generation retry [1.22ms]\n(pass) actual official account identities isolate quota caches [1.21ms]\n(pass) one cancelled waiter does not cancel another request sharing the quota check [0.41ms]\n(pass) the last cancelled waiter aborts its own flight and a later request can succeed [0.34ms]\n(pass) a quota read cannot authorize a different account after an in-flight account change [0.41ms]\n(pass) a policy changed during quota lookup is rejected immediately before POST [0.55ms]\n(pass) new account-wide exhausted headers win over an older in-flight available usage response [0.27ms]\n(pass) unknown named families and incomplete non-full headers cannot authorize or hold another model [0.21ms]\n(pass) metadata remains an explicit read-only operation outside the generation guard [0.53ms]\n(pass) malformed trusted policy is rejected before any fetch [0.15ms]\n279 |       posts.push(access); return generated()\n280 |     } })\n281 |     const first = await adapter.auth.loader(async () => a)\n282 |     const second = await adapter.auth.loader(async () => b)\n283 |     expect(await drain(await first.fetch(URL, request()))).toBe(200)\n284 |     expect(await drain(await second.fetch(URL, request()))).toBe(429)\n                                                                  ^\nerror: expect(received).toBe(expected)\n\nExpected: 429\nReceived: 200\n\n      at <anonymous> (<compat-worktree>/community/builtin/tests/codex-credits.test.mjs:284:61)\n(fail) different users in one workspace never share available quota, including opaque tokens [4.02ms]\n297 |   } })\n298 |   const first = guard.check(a, a.accountId)\n299 |   const second = guard.check(b, b.accountId)\n300 |   ready.resolve()\n301 |   const results = await Promise.all([first, second])\n302 |   expect(gets).toEqual([a.access, b.access])\n                     ^\nerror: expect(received).toEqual(expected)\n\n  [\n    \"fixture.eyJleHAiOjE5MDAwMDM2MDAsInJlbmV3YWwiOiIiLCJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOnsiY2hhdGdwdF9hY2NvdW50X2lkIjoiZml4dHVyZS13b3Jrc3BhY2UiLCJjaGF0Z3B0X3VzZXJfaWQiOiJ1c2VyLWEifX0.fixture\",\n-   \"fixture.eyJleHAiOjE5MDAwMDM2MDAsInJlbmV3YWwiOiIiLCJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOnsiY2hhdGdwdF9hY2NvdW50X2lkIjoiZml4dHVyZS13b3Jrc3BhY2UiLCJjaGF0Z3B0X3VzZXJfaWQiOiJ1c2VyLWIifX0.fixture\",\n  ]\n\n- Expected  - 1\n+ Received  + 0\n\n      at <anonymous> (<compat-worktree>/community/builtin/tests/codex-credits.test.mjs:302:16)\n(fail) different users in one workspace never share an in-flight quota lookup [0.40ms]\n320 |     return response\n321 |   } })\n322 |   const first = await adapter.auth.loader(async () => a)\n323 |   const second = await adapter.auth.loader(async () => b)\n324 |   expect(await drain(await first.fetch(URL, request()))).toBe(200)\n325 |   expect(await drain(await second.fetch(URL, request()))).toBe(200)\n                                                                ^\nerror: expect(received).toBe(expected)\n\nExpected: 200\nReceived: 429\n\n      at <anonymous> (<compat-worktree>/community/builtin/tests/codex-credits.test.mjs:325:59)\n(fail) exhausted response headers hold only the credential that produced them [0.75ms]\n341 |         return reply(usage(100))\n342 |       }\n343 |       posts++; return generated()\n344 |     } })\n345 |     const loader = await adapter.auth.loader(async () => current)\n346 |     await expect(loader.fetch(URL, request())).rejects.toThrow('subscription check')\n                                                             ^\nerror: expect(received).rejects.toThrow(expected)\n\nExpected promise that rejects\nReceived promise that resolved: Promise { <resolved> }\n\n      at <anonymous> (<compat-worktree>/community/builtin/tests/codex-credits.test.mjs:346:56)\n(fail) member or token changes during a quota read cannot authorize generation [0.72ms]\n373 |       if (!changed) {\n374 |         changed = true\n375 |         writeFileSync(file, encoded(b), { mode: 0o600 })\n376 |       }\n377 |     })\n378 |     await expect(loader.fetch(URL, request(trusted))).rejects.toThrow('subscription check')\n                                                                    ^\nerror: expect(received).rejects.toThrow(expected)\n\nExpected promise that rejects\nReceived promise that resolved: Promise { <resolved> }\n\n      at <anonymous> (<compat-worktree>/community/builtin/tests/codex-credits.test.mjs:378:63)\n(fail) quota lookup borrows the resolved external credential without reopening its source [3.48ms]\n\n 15 pass\n 5 fail\n 87 expect() calls\nRan 20 tests across 1 file. [198.00ms]\n"
+  },
+  "candidate": {
+    "quota_passed": 20,
+    "builtin_passed": 49,
+    "published_verification": {
+      "commit": "739ecef91bcec41d44b2388d7c346fe2bad934a1",
+      "worktree": "<compat-worktree>",
+      "clean": true,
+      "source_hashes_match_reviewed_patch": true,
+      "tests": {
+        "commit": "739ecef91bcec41d44b2388d7c346fe2bad934a1",
+        "command": [
+          "bun",
+          "test",
+          "community/builtin/tests"
+        ],
+        "cwd": "<compat-worktree>",
+        "exit_code": 0,
+        "log": "<evidence>/published-739ecef-builtin-suite.log"
+      },
+      "build": {
+        "commit": "739ecef91bcec41d44b2388d7c346fe2bad934a1",
+        "command": [
+          "make",
+          "build"
+        ],
+        "cwd": "<compat-worktree>",
+        "environment": {
+          "GOMAXPROCS": "2",
+          "GOPROXY": "off",
+          "GOCACHE": "/var/tmp/zcalld-credits-gocache-20261120"
+        },
+        "exit_code": 0,
+        "duration_seconds": 1.77,
+        "log": "<evidence>/published-739ecef-build.log"
+      },
+      "binaries": {
+        "zcalld-pluginctl": {
+          "path": "<compat-worktree>/bin/zcalld-pluginctl",
+          "bytes": 4862112,
+          "sha256": "4a19e5b6d28554b3d160062cd4f27f0da5afe4597c3b3d145a846e671bf1ba8b"
+        },
+        "zcalld-privacy": {
+          "path": "<compat-worktree>/bin/zcalld-privacy",
+          "bytes": 5849351,
+          "sha256": "810869ec6105308751a8cbf962d85c78b0d73bb23ccb80c1849e1f41b36cb365"
+        }
+      }
+    },
+    "raw_output": {
+      "candidate-credits.log": "bun test v1.4.0-canary.1 (9657f3789)\n\ncommunity/builtin/tests/codex-credits.test.mjs:\n(pass) unrestricted accounts do not check usage and private policy never reaches fetch [7.62ms]\n(pass) restricted requests check the fixed official usage endpoint once per short cache [4.47ms]\n(pass) exhausted windows reject before generation even when credits are unlimited [0.94ms]\n(pass) full unknown-reset windows hold; unknown availability and stale resets never allow [0.09ms]\n(pass) missing, malformed, expired, over-limit and failed usage fail closed [3.48ms]\n(pass) expired cache and elapsed reset are rechecked without a poller or a generation retry [1.57ms]\n(pass) actual official account identities isolate quota caches [1.60ms]\n(pass) one cancelled waiter does not cancel another request sharing the quota check [0.68ms]\n(pass) the last cancelled waiter aborts its own flight and a later request can succeed [0.53ms]\n(pass) a quota read cannot authorize a different account after an in-flight account change [0.78ms]\n(pass) a policy changed during quota lookup is rejected immediately before POST [0.74ms]\n(pass) new account-wide exhausted headers win over an older in-flight available usage response [0.48ms]\n(pass) unknown named families and incomplete non-full headers cannot authorize or hold another model [0.38ms]\n(pass) metadata remains an explicit read-only operation outside the generation guard [0.96ms]\n(pass) malformed trusted policy is rejected before any fetch [0.25ms]\n(pass) different users in one workspace never share available quota, including opaque tokens [2.60ms]\n(pass) different users in one workspace never share an in-flight quota lookup [0.62ms]\n(pass) exhausted response headers hold only the credential that produced them [1.92ms]\n(pass) member or token changes during a quota read cannot authorize generation [2.05ms]\n(pass) quota lookup borrows the resolved external credential without reopening its source [4.30ms]\n\n 20 pass\n 0 fail\n 110 expect() calls\nRan 20 tests across 1 file. [81.00ms]\n",
+      "published-739ecef-builtin-suite.log": "bun test v1.4.0-canary.1 (9657f3789)\n\ncommunity/builtin/tests/codex-compaction.test.mjs:\n(pass) native compaction controls retain opaque IDs and ciphertext without changing ordinary item normalization [1.74ms]\n\ncommunity/builtin/tests/codex-credits.test.mjs:\n(pass) unrestricted accounts do not check usage and private policy never reaches fetch [5.91ms]\n(pass) restricted requests check the fixed official usage endpoint once per short cache [5.88ms]\n(pass) exhausted windows reject before generation even when credits are unlimited [1.00ms]\n(pass) full unknown-reset windows hold; unknown availability and stale resets never allow [0.11ms]\n(pass) missing, malformed, expired, over-limit and failed usage fail closed [3.65ms]\n(pass) expired cache and elapsed reset are rechecked without a poller or a generation retry [1.58ms]\n(pass) actual official account identities isolate quota caches [1.51ms]\n(pass) one cancelled waiter does not cancel another request sharing the quota check [0.87ms]\n(pass) the last cancelled waiter aborts its own flight and a later request can succeed [0.86ms]\n(pass) a quota read cannot authorize a different account after an in-flight account change [0.87ms]\n(pass) a policy changed during quota lookup is rejected immediately before POST [0.78ms]\n(pass) new account-wide exhausted headers win over an older in-flight available usage response [0.49ms]\n(pass) unknown named families and incomplete non-full headers cannot authorize or hold another model [0.44ms]\n(pass) metadata remains an explicit read-only operation outside the generation guard [0.81ms]\n(pass) malformed trusted policy is rejected before any fetch [0.28ms]\n(pass) different users in one workspace never share available quota, including opaque tokens [2.76ms]\n(pass) different users in one workspace never share an in-flight quota lookup [0.71ms]\n(pass) exhausted response headers hold only the credential that produced them [1.70ms]\n(pass) member or token changes during a quota read cannot authorize generation [2.38ms]\n(pass) quota lookup borrows the resolved external credential without reopening its source [4.18ms]\n\ncommunity/builtin/tests/codex-metadata.test.mjs:\n(pass) four metadata operations are exact fixed-origin GETs without renewal [1.16ms]\n(pass) model mapping preserves official instructions/capabilities and advertises no unknown model [0.43ms]\n(pass) model upgrades use an advertised local alias and preserve upstream guidance [0.40ms]\n(pass) model upgrades require an unambiguous advertised target [1.36ms]\n(pass) metadata never fabricates missing instructions or malformed catalog [0.74ms]\n(pass) bootstrap and usage retain exact upstream JSON bytes and optional ETag [0.28ms]\n(pass) unsupported URL/operation/query never reaches the network [0.22ms]\n(pass) redirect and upstream authentication failure do not mutate credentials [0.41ms]\n(pass) external credentials are re-read, remain read-only and reject account changes/expiry [2.41ms]\n(pass) expired host-owned access does not renew or make an upstream request [0.19ms]\n(pass) oversized or non-JSON successful metadata is cancelled and rejected [0.46ms]\n(pass) overall deadline and explicit cancel release delayed fetch/body without retry [74.05ms]\n(pass) account hint only rejects mismatch; it never selects another credential [1.31ms]\n\ncommunity/builtin/tests/codex-mime.test.mjs:\n(pass) Codex missing MIME recognizes a fragmented UTF-8 Responses event and replays every byte [3.74ms]\n(pass) Codex missing MIME only recognizes complete Responses events and cancels rejected bodies [5.08ms]\n(pass) Codex missing MIME probe has a 64 KiB bound and cancellation retains upstream ownership [3.38ms]\n(pass) Codex missing MIME preserves failed, incomplete and error event semantics [2.52ms]\n(pass) Codex inferred MIME replays the remainder of a large first chunk without buffering the whole body [0.91ms]\n\ncommunity/builtin/tests/entrypoints.test.mjs:\n(pass) real builtin entrypoints initialize once and list empty MCP tools without credentials or network [230.08ms]\n(pass) legacy community default and named initializers still load, with aliases deduplicated [84.01ms]\n\ncommunity/builtin/tests/providers.test.mjs:\n(pass) Codex forces streaming and preserves the complete nonstream final object and account/session headers [1.27ms]\n(pass) Codex streaming is byte preserving and incomplete streams never look like valid JSON replies [0.50ms]\n(pass) Codex refresh returns a rotated token without exposing provider response text [1.26ms]\n(pass) externally managed Codex rereads native rotations and never calls the refresh endpoint [2.82ms]\n(pass) Copilot shares one token exchange and preserves each model native endpoint [19.81ms]\n(pass) Code Assist lazily discovers a project and retains Gemini thought/tool/usage fields [2.77ms]\n(pass) Google renewal requires the matching private OAuth client identity [0.77ms]\n(pass) two real Bun hosts serialize one rotating Codex refresh and persist its result [245.77ms]\n\n 49 pass\n 0 fail\n 374 expect() calls\nRan 49 tests across 6 files. [785.00ms]\n",
+      "published-739ecef-build.log": "go build -mod=readonly -trimpath -ldflags \"-s -w -X github.com/LIghtJUNction/zcalld-compat/internal/buildinfo.Version=0.1.6\" -o bin/zcalld-privacy ./cmd/zcalld-privacy\ngo build -mod=readonly -trimpath -ldflags \"-s -w -X github.com/LIghtJUNction/zcalld-compat/internal/buildinfo.Version=0.1.6\" -o bin/zcalld-pluginctl ./cmd/zcalld-pluginctl\n"
+    }
+  },
+  "reproduction": {
+    "before": {
+      "cache": {
+        "statuses": [
+          200,
+          200
+        ],
+        "usage_users": [
+          "user-a"
+        ],
+        "generation_users": [
+          "user-a",
+          "user-b"
+        ]
+      },
+      "during_lookup": {
+        "status": 200,
+        "calls": [
+          [
+            "usage",
+            "user-a"
+          ],
+          [
+            "generation",
+            "user-b"
+          ]
+        ]
+      }
+    },
+    "after": {
+      "cache": {
+        "statuses": [
+          200,
+          429
+        ],
+        "usage_users": [
+          "user-a",
+          "user-b"
+        ],
+        "generation_users": [
+          "user-a"
+        ]
+      },
+      "during_lookup": {
+        "error": "Codex account changed during the subscription check",
+        "calls": [
+          [
+            "usage",
+            "user-a"
+          ]
+        ]
+      }
+    }
+  },
+  "native": {
+    "core_source": "6aea363671a9eb6a210cdf88dff22f34d1c829f8",
+    "compat_source": "739ecef91bcec41d44b2388d7c346fe2bad934a1",
+    "core_binary_sha256": "0cd9454e80b63fa15d1c919bad9a50de75b59f4694d3330b483be543e3d38ce8",
+    "checks": [
+      {
+        "check": "codex-policy",
+        "command": [
+          "python3",
+          "<core-worktree>/scripts/test-codex-policy.py",
+          "--binary",
+          "<core-worktree>/target/debug/zcalld",
+          "--community-plugin",
+          "<core-worktree>/target/debug/libzcalld_community.so",
+          "--pluginctl",
+          "<compat-worktree>/bin/zcalld-pluginctl",
+          "--redact-plugin",
+          "<core-worktree>/target/debug/libzcalld_redact.so",
+          "--privacy-worker",
+          "<compat-worktree>/bin/zcalld-privacy",
+          "--routing-plugin",
+          "<core-worktree>/target/debug/libzcalld_plugin_routing.so"
+        ],
+        "exit_code": 0,
+        "elapsed_seconds": 2.908
+      },
+      {
+        "check": "codex-metadata",
+        "command": [
+          "python3",
+          "<core-worktree>/scripts/test-codex-metadata.py",
+          "--binary",
+          "<core-worktree>/target/debug/zcalld",
+          "--community-plugin",
+          "<core-worktree>/target/debug/libzcalld_community.so",
+          "--pluginctl",
+          "<compat-worktree>/bin/zcalld-pluginctl",
+          "--redact-plugin",
+          "<core-worktree>/target/debug/libzcalld_redact.so",
+          "--privacy-worker",
+          "<compat-worktree>/bin/zcalld-privacy",
+          "--routing-plugin",
+          "<core-worktree>/target/debug/libzcalld_plugin_routing.so"
+        ],
+        "exit_code": 0,
+        "elapsed_seconds": 3.69
+      }
+    ]
+  },
+  "native_build": {
+    "core_source": "6aea363671a9eb6a210cdf88dff22f34d1c829f8",
+    "exit_code": 0,
+    "elapsed_seconds": 74.585
+  },
+  "native_raw_output": {
+    "codex-policy": "test_policy_account_disabled_during_usage_never_generates (__main__.CodexPolicyTests.test_policy_account_disabled_during_usage_never_generates) ... ok\ntest_policy_actual_default_account_selects_its_own_policy (__main__.CodexPolicyTests.test_policy_actual_default_account_selects_its_own_policy) ... ok\ntest_policy_configuration_change_during_usage_never_generates (__main__.CodexPolicyTests.test_policy_configuration_change_during_usage_never_generates) ... ok\ntest_policy_group_falls_back_from_a_held_account_without_a_paid_retry (__main__.CodexPolicyTests.test_policy_group_falls_back_from_a_held_account_without_a_paid_retry) ... ok\ntest_policy_hot_sync_rechecks_a_cached_loader_without_restarting_host (__main__.CodexPolicyTests.test_policy_hot_sync_rechecks_a_cached_loader_without_restarting_host) ... ok\ntest_policy_invalid_present_values_never_become_unrestricted (__main__.CodexPolicyTests.test_policy_invalid_present_values_never_become_unrestricted) ... ok\ntest_policy_metadata_usage_is_readable_while_generation_is_held (__main__.CodexPolicyTests.test_policy_metadata_usage_is_readable_while_generation_is_held) ... ok\ntest_policy_overall_deadline_aborts_usage_without_generation_or_retry (__main__.CodexPolicyTests.test_policy_overall_deadline_aborts_usage_without_generation_or_retry) ... ok\ntest_policy_request_headers_and_body_cannot_disable_the_bound_account_policy (__main__.CodexPolicyTests.test_policy_request_headers_and_body_cannot_disable_the_bound_account_policy) ... ok\ntest_policy_unknown_quota_refuses_before_generation (__main__.CodexPolicyTests.test_policy_unknown_quota_refuses_before_generation) ... ok\ntest_policy_unsafe_registry_cannot_turn_an_account_unrestricted (__main__.CodexPolicyTests.test_policy_unsafe_registry_cannot_turn_an_account_unrestricted) ... ok\n\n----------------------------------------------------------------------\nRan 11 tests in 2.746s\n\nOK\n",
+    "codex-metadata": "test_account_hint_is_reject_only_and_duplicate_headers_are_not_collapsed (__main__.CodexMetadataTests.test_account_hint_is_reject_only_and_duplicate_headers_are_not_collapsed) ... ok\ntest_bad_upstream_metadata_does_not_poison_the_same_worker (__main__.CodexMetadataTests.test_bad_upstream_metadata_does_not_poison_the_same_worker) ... ok\ntest_client_headers_cannot_grant_a_missing_caller_binding (__main__.CodexMetadataTests.test_client_headers_cannot_grant_a_missing_caller_binding) ... ok\ntest_cold_initialization_is_in_deadline_and_does_not_cancel_shared_ready (__main__.CodexMetadataTests.test_cold_initialization_is_in_deadline_and_does_not_cancel_shared_ready) ... ok\ntest_disable_is_local_and_keeps_old_binding (__main__.CodexMetadataTests.test_disable_is_local_and_keeps_old_binding) ... ok\ntest_disabled_and_wrong_provider_bindings_fail_before_network (__main__.CodexMetadataTests.test_disabled_and_wrong_provider_bindings_fail_before_network) ... ok\ntest_disabled_by_default_allocates_no_extra_host (__main__.CodexMetadataTests.test_disabled_by_default_allocates_no_extra_host) ... ok\ntest_exact_custom_base_aliases_map_only_to_official_readonly_paths (__main__.CodexMetadataTests.test_exact_custom_base_aliases_map_only_to_official_readonly_paths) ... ok\ntest_explicit_alias_keeps_instructions_and_opaque_model_capabilities (__main__.CodexMetadataTests.test_explicit_alias_keeps_instructions_and_opaque_model_capabilities) ... ok\ntest_failed_init_stays_failed_for_other_workers_and_generation (__main__.CodexMetadataTests.test_failed_init_stays_failed_for_other_workers_and_generation) ... ok\ntest_four_official_contracts_share_the_bounded_native_transport (__main__.CodexMetadataTests.test_four_official_contracts_share_the_bounded_native_transport) ... ok\ntest_groups_and_cross_provider_routes_never_borrow_member_capabilities (__main__.CodexMetadataTests.test_groups_and_cross_provider_routes_never_borrow_member_capabilities) ... ok\ntest_methods_query_and_unrecognized_paths_cannot_become_upstream_requests (__main__.CodexMetadataTests.test_methods_query_and_unrecognized_paths_cannot_become_upstream_requests) ... ok\ntest_model_upgrade_uses_an_advertised_alias_or_is_omitted (__main__.CodexMetadataTests.test_model_upgrade_uses_an_advertised_alias_or_is_omitted) ... ok\ntest_no_first_enabled_account_fallback (__main__.CodexMetadataTests.test_no_first_enabled_account_fallback) ... ok\ntest_overall_deadline_cancels_once_without_replaying (__main__.CodexMetadataTests.test_overall_deadline_cancels_once_without_replaying) ... ok\ntest_real_lan_peer_cannot_claim_loopback_or_another_caller_with_headers (__main__.CodexMetadataTests.test_real_lan_peer_cannot_claim_loopback_or_another_caller_with_headers) ... ok\n\n----------------------------------------------------------------------\nRan 17 tests in 3.545s\n\nOK\n",
+    "integrated-core-build": "    Blocking waiting for file lock on package cache\n   Compiling zcalld v0.3.1 (<core-worktree>)\n    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1m 14s\n"
+  },
+  "native_test_counts": {
+    "codex-policy": 11,
+    "codex-metadata": 17
+  },
+  "isolation": {
+    "real_provider_requests": 0,
+    "user_codex_config_modified": false,
+    "installed_binary_replaced": false,
+    "service_restarted": false,
+    "versions_or_tags_changed": false
+  },
+  "installed_version": {
+    "exit_code": 0,
+    "stdout": "zcalld 0.3.1",
+    "stderr": ""
+  },
+  "installed_health": {
+    "exit_code": 0,
+    "stdout": "{\"status\":\"ok\",\"version\":\"0.3.1\"}",
+    "stderr": ""
+  },
+  "service": {
+    "exit_code": 0,
+    "stdout": "active\nrunning",
+    "stderr": ""
+  },
+  "validation_scope": "Native results cover core 6aea363 plus compat 739ecef. The later desktop integration retains a descendant compatibility pin and has separate validation."
+}
