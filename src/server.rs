@@ -165,6 +165,20 @@ fn handle(socket: &mut Stream, config: &Config, plugins: &mut Plugins, client: &
         let _ = http::respond(socket, 200, "application/json", body.as_bytes());
         return;
     }
+    let caller_key_id = request
+        .header("authorization")
+        .and_then(|value| value.strip_prefix("Bearer "))
+        .or_else(|| request.header("x-api-key"))
+        .or_else(|| request.header("x-goog-api-key"))
+        .and_then(|value| {
+            config
+                .caller_keys
+                .as_ref()
+                .and_then(|keys| keys.id(value, socket.is_loopback_peer()))
+        });
+    if crate::plugin_http::try_handle(socket, &request, config, plugins, caller_key_id) {
+        return;
+    }
     if request.method != "POST" {
         let _ = http::error(socket, 405, "use POST for generation or GET /v1/models");
         return;
@@ -190,6 +204,8 @@ fn handle(socket: &mut Stream, config: &Config, plugins: &mut Plugins, client: &
             &inspect,
             path,
             inspect.stream || path_stream,
+            caller_workspace(&request, config, socket),
+            &socket.routing_peer(),
         ) {
             Ok(context) => context,
             Err(error) => {
@@ -402,6 +418,8 @@ fn request_context(
     inspection: &protocol::Inspection,
     path: &str,
     stream: bool,
+    trusted_workspace: Option<&str>,
+    peer: &str,
 ) -> Result<String, String> {
     let first = |names: &[&str]| {
         names
@@ -426,19 +444,65 @@ fn request_context(
             return Err(format!("{name} context exceeds {maximum} bytes"));
         }
     }
+    let subagent = !first(&["x-claude-code-agent-id"]).trim().is_empty()
+        || first(&["x-openai-subagent"]).trim() == "collab_spawn";
+    let compact = first(&["x-openai-subagent"]).trim() == "compact"
+        || !matches!(
+            first(&["x-deepseek-harness-compact"])
+                .trim()
+                .to_ascii_lowercase()
+                .as_str(),
+            "" | "0" | "false" | "no" | "off"
+        );
+    let at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
     let context = format!(
-        "{{\"protocol\":{},\"model\":{},\"stream\":{stream},\"path\":{},\"agent\":{},\"session\":{},\"cwd\":{},\"origin\":\"local\",\"kind\":\"generation\",\"phase\":\"request\"}}",
+        "{{\"protocol\":{},\"model\":{},\"stream\":{stream},\"path\":{},\"agent\":{},\"session\":{},\"cwd\":{},\"origin\":\"local\",\"kind\":\"generation\",\"phase\":\"request\",\"routing_agent\":{},\"subagent\":{subagent},\"compact\":{compact},\"at\":{at},\"trusted_workspace\":{},\"peer\":{peer}}}",
         http::quote(protocol::protocol_name(protocol)),
         http::quote(&inspection.model),
         http::quote(path),
         http::quote(agent),
         http::quote(session),
-        http::quote(cwd)
+        http::quote(cwd),
+        http::quote(&routing_agent(agent)),
+        http::quote(trusted_workspace.unwrap_or(""))
     );
     if context.len() > 16 * 1024 {
         return Err("request context exceeds 16 KiB".into());
     }
     Ok(context)
+}
+
+fn routing_agent(value: &str) -> String {
+    let product = value
+        .trim()
+        .split(['/', ' '])
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if product.starts_with("codex") {
+        "codex".into()
+    } else if product.starts_with("claude-code") || product == "claude-cli" {
+        "claude".into()
+    } else if product.starts_with("opencode") {
+        "opencode".into()
+    } else {
+        product
+    }
+}
+
+fn caller_workspace<'a>(request: &Request, config: &'a Config, socket: &Stream) -> Option<&'a str> {
+    let supplied = request
+        .header("authorization")
+        .and_then(|value| value.strip_prefix("Bearer "))
+        .or_else(|| request.header("x-api-key"))
+        .or_else(|| request.header("x-goog-api-key"))?;
+    config
+        .caller_keys
+        .as_ref()?
+        .workspace(supplied, socket.is_loopback_peer())
 }
 
 fn request_plugin_status(error: &str) -> u16 {
@@ -1189,11 +1253,16 @@ mod tests {
             &inspection,
             "/v1/responses",
             true,
+            None,
+            "{}",
         )
         .unwrap();
         let value = crate::state_json::parse(text.as_bytes()).unwrap();
         assert_eq!(value.get("protocol").as_str(), Some("responses"));
         assert_eq!(value.get("session").as_str(), Some("session-123"));
+        assert_eq!(value.get("cwd").as_str(), Some("/project"));
+        assert_eq!(value.get("trusted_workspace").as_str(), Some(""));
+        assert!(value.get("peer").as_object().unwrap().is_empty());
         assert!(
             !text.contains("local-secret")
                 && !text.contains("private-cookie")

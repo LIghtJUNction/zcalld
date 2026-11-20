@@ -14,3 +14,4 @@ crate-type = ["cdylib", "rlib"]
 zcalld-plugin-api = { path = "../../crates/zcalld-plugin-api", version = "=0.1.1" }
 zplugin = { version = "=0.3.1", features = ["std"] }
 zconv = { version = "=0.4.0", default-features = false }
+zcalld-compat-client = { version = "=0.1.1", path = "../../crates/zcalld-compat-client" }

@@ -4,6 +4,8 @@ The migration keeps the original Magpie installation available while zcalld take
 
 The Linux handover uses [scripts/cutover.py](../scripts/cutover.py). It requires a user systemd session, Python 3.9 or newer with Linux pidfd support, the packaged zcalld user unit, and the compatibility helper. The configuration importer and gateway support other platforms; this transaction script is specifically for Linux and systemd.
 
+Advanced time, text, agent and folder conditions are preserved and validated during planning. See [Routing rules and trusted workspaces](ROUTING.md) for the condition syntax, compatibility helper requirement and verified workspace bindings. A rejected condition remains a compatibility gap until corrected; migration does not silently drop it.
+
 ## 1. Install the candidate and create a private copy
 
 Install the core and compatibility packages before preparing the transaction. Their installed paths are:

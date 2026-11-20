@@ -25,6 +25,7 @@ mod digest;
 #[path = "../../../src/state_json.rs"]
 mod json;
 use json::{Value, object};
+mod advanced;
 mod http {
     pub fn quote(value: &str) -> String {
         let mut out = String::from("\"");
@@ -128,6 +129,7 @@ struct Router {
     modified: Option<SystemTime>,
     shared: Option<SharedPools>,
     request: Option<Rc<RefCell<RequestState>>>,
+    advanced: Option<advanced::Evaluator>,
 }
 impl Router {
     fn configure_path(&mut self, path: &str) -> Result<()> {
@@ -138,6 +140,7 @@ impl Router {
         let text = invalid(fs::read_to_string(&path).map_err(|e| e.to_string()))?;
         let value = invalid(json::parse(text.as_bytes()))?;
         validate(&value)?;
+        let evaluator = advanced::Evaluator::prepare(&path, &value)?;
         let key = path.to_string_lossy().into_owned();
         let request = REQUESTS.with(|map| {
             let mut map = map.borrow_mut();
@@ -160,6 +163,7 @@ impl Router {
         self.modified = fs::metadata(&path).and_then(|m| m.modified()).ok();
         self.path = path;
         self.settings = value;
+        self.advanced = evaluator;
         self.shared = Some(shared);
         self.request = Some(request);
         Ok(())
@@ -169,7 +173,9 @@ impl Router {
         if modified != self.modified {
             let value = invalid(json::read(&self.path))?;
             validate(&value)?;
+            let evaluator = advanced::Evaluator::prepare(&self.path, &value)?;
             self.settings = value;
+            self.advanced = evaluator;
             self.modified = modified;
         }
         Ok(())
@@ -230,14 +236,8 @@ fn validate(settings: &Value) -> Result<()> {
                 return Err(Error::InvalidArgument);
             }
         }
-        for rule in rules {
-            for field in ["time", "where", "folders", "exceptFolders"] {
-                let value = rule.get(field);
-                if !matches!(value, Value::Null | Value::Array(_)) || !value.as_array().is_empty() {
-                    return Err(Error::InvalidArgument);
-                }
-            }
-        }
+        // Advanced conditions are validated by the optional worker's exact
+        // IANA/RE2 implementation during configure, before requests are accepted.
     }
     Ok(())
 }
@@ -941,9 +941,18 @@ impl GatewayPlugin for Router {
     }
     fn request(&mut self, protocol: u32, input: &[u8], output: &mut [u8]) -> Result<u64> {
         self.refresh()?;
-        let (model, session, agent) = {
+        let (model, session, agent, context) = {
             let s = self.current()?.borrow();
-            (s.model.clone(), s.session.clone(), s.agent.clone())
+            (
+                s.model.clone(),
+                s.session.clone(),
+                s._context
+                    .get("routing_agent")
+                    .as_str()
+                    .unwrap_or(&s.agent)
+                    .to_string(),
+                s._context.clone(),
+            )
         };
         let model = if model.is_empty() {
             invalid(json::parse_with_limit(input, 16 * 1024 * 1024))?
@@ -1002,8 +1011,37 @@ impl GatewayPlugin for Router {
             (held, previous)
         };
         let tokens = (input.len() / 4) as u64;
+        let rules = original.get("rules").as_array();
+        let advanced_matches = match self.advanced.as_mut() {
+            Some(worker) => worker.evaluate(&model, &request, &context, tokens, &text)?,
+            None => None,
+        };
+        if advanced_matches
+            .as_ref()
+            .is_some_and(|values| values.len() != rules.len())
+        {
+            return Err(Error::PluginStatus(8));
+        }
+        let matches = |index: usize, rule: &Value, intent: &str| {
+            if let Some(values) = &advanced_matches {
+                values[index] && {
+                    let wanted = rule.get("intent").as_str().unwrap_or("");
+                    wanted.is_empty() || wanted == intent
+                }
+            } else {
+                rule_matches(rule, &text, &request, tokens, &agent, intent)
+            }
+        };
         let mut preferred = Vec::new();
-        let mut excluded = Vec::new();
+        // A pause is re-evaluated on every request, including a held tool turn.
+        let excluded = rules
+            .iter()
+            .enumerate()
+            .filter(|(index, rule)| {
+                rule.get("pause").as_bool() == Some(true) && matches(*index, rule, "")
+            })
+            .map(|(_, rule)| string(rule, "use"))
+            .collect::<Vec<_>>();
         let mut effort = String::new();
         let mut intent = String::new();
         let mut apply_from_turn = None;
@@ -1014,9 +1052,10 @@ impl GatewayPlugin for Router {
             effort = turn.effort;
             intent = turn.intent;
         } else {
-            let ordinary = original.get("rules").as_array().iter().find(|r| {
-                string(r, "intent").is_empty()
-                    && rule_matches(r, &text, &request, tokens, &agent, "")
+            let ordinary = rules.iter().enumerate().find(|(index, rule)| {
+                rule.get("pause").as_bool() != Some(true)
+                    && string(rule, "intent").is_empty()
+                    && matches(*index, rule, "")
             });
             if ordinary.is_none()
                 && let Ok((kind, thinking)) =
@@ -1025,12 +1064,8 @@ impl GatewayPlugin for Router {
                 intent = kind;
                 effort = thinking;
             }
-            for rule in original.get("rules").as_array() {
-                if rule_matches(rule, &text, &request, tokens, &agent, &intent) {
-                    if rule.get("pause").as_bool() == Some(true) {
-                        excluded.push(string(rule, "use"));
-                        continue;
-                    }
+            for (index, rule) in rules.iter().enumerate() {
+                if rule.get("pause").as_bool() != Some(true) && matches(index, rule, &intent) {
                     let first = string(rule, "use");
                     if !first.is_empty() {
                         preferred.push(first);

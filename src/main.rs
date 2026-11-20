@@ -9,6 +9,7 @@ mod extensions;
 mod http;
 mod maintenance;
 mod migration;
+mod plugin_http;
 mod plugins;
 mod protocol;
 mod server;

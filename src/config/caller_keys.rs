@@ -9,11 +9,39 @@ pub struct CallerKeys {
 
 #[derive(Clone)]
 struct CallerKey {
+    id: Option<String>,
     secret: String,
     lan: bool,
+    workspace: Option<String>,
 }
 
 impl CallerKeys {
+    /// Return only a server-owned identifier after verifying the actual secret
+    /// and peer scope. Always compare every configured key.
+    pub fn id(&self, supplied: &str, loopback: bool) -> Option<&str> {
+        let mut id = None;
+        for key in &self.keys {
+            let matches = http::constant_eq(supplied.as_bytes(), key.secret.as_bytes());
+            if matches & (loopback || key.lan) {
+                id = key.id.as_deref();
+            }
+        }
+        id
+    }
+
+    /// A private server-owned binding, selected only by a verified credential.
+    /// Loopback trust alone and caller-supplied directory headers create no binding.
+    pub fn workspace(&self, supplied: &str, loopback: bool) -> Option<&str> {
+        let mut workspace = None;
+        for key in &self.keys {
+            let matches = http::constant_eq(supplied.as_bytes(), key.secret.as_bytes());
+            if matches & (loopback || key.lan) {
+                workspace = key.workspace.as_deref();
+            }
+        }
+        workspace
+    }
+
     pub fn allows_lan(&self) -> bool {
         self.keys.iter().any(|key| key.lan)
     }
@@ -69,7 +97,7 @@ fn parse(bytes: &[u8]) -> Result<CallerKeys, String> {
         let fields = entry.as_object().ok_or("caller key must be an object")?;
         if fields
             .keys()
-            .any(|key| !matches!(key.as_str(), "id" | "name" | "lan" | "secret"))
+            .any(|key| !matches!(key.as_str(), "id" | "name" | "lan" | "secret" | "workspace"))
         {
             return Err("caller key contains an unknown field".into());
         }
@@ -105,9 +133,27 @@ fn parse(bytes: &[u8]) -> Result<CallerKeys, String> {
             Value::Null => false,
             _ => return Err("caller key lan must be a boolean".into()),
         };
+        let workspace = match entry.get("workspace") {
+            Value::Null => None,
+            Value::String(value)
+                if value.len() <= 4096
+                    && !value.chars().any(char::is_control)
+                    && Path::new(value).is_absolute()
+                    && entry.get("id").as_str().is_some() =>
+            {
+                Some(value.clone())
+            }
+            _ => {
+                return Err(
+                    "caller workspace needs an absolute path and an explicit key id".into(),
+                );
+            }
+        };
         keys.push(CallerKey {
+            id: entry.get("id").as_str().map(str::to_string),
             secret: secret.to_string(),
             lan,
+            workspace,
         });
     }
     Ok(CallerKeys { keys })
@@ -127,9 +173,32 @@ mod tests {
         assert!(!keys.permits("fixture-laz", true));
         assert!(!keys.permits("", true));
         assert!(keys.allows_lan());
+        assert_eq!(keys.id("fixture-local", true), Some("local"));
+        assert_eq!(keys.id("fixture-local", false), None);
+        assert_eq!(keys.id("fixture-lan", false), Some("lan"));
+        assert_eq!(keys.id("fixture-laz", true), None);
+        assert_eq!(keys.id("local", true), None);
+        let anonymous = parse(br#"[{"secret":"fixture-anonymous"}]"#).unwrap();
+        assert!(anonymous.permits("fixture-anonymous", true));
+        assert_eq!(anonymous.id("fixture-anonymous", true), None);
         let empty = parse(b"[]").unwrap();
         assert!(!empty.permits("fixture-local", true));
         assert!(!empty.allows_lan());
+    }
+
+    #[test]
+    fn workspace_binding_requires_the_actual_key_and_its_peer_scope() {
+        let directory = std::env::temp_dir();
+        let data = format!(
+            r#"[{{"id":"project","secret":"fixture-bound","workspace":{}}}]"#,
+            http::quote(&directory.to_string_lossy())
+        );
+        let keys = parse(data.as_bytes()).unwrap();
+        assert_eq!(keys.workspace("fixture-bound", true), directory.to_str());
+        assert_eq!(keys.workspace("fixture-bound", false), None);
+        assert_eq!(keys.workspace("spoofed", true), None);
+        assert!(parse(br#"[{"id":"p","secret":"x","workspace":"relative"}]"#).is_err());
+        assert!(parse(br#"[{"secret":"x","workspace":"/work"}]"#).is_err());
     }
 
     #[test]
