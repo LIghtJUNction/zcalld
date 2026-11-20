@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/zcalld-plugin-api", "crates/zcalld-compat-client", "plugins/aliases", "plugins/policy", "plugins/redact", "plugins/community", "plugins/routing"]
+members = [".", "crates/zcalld-plugin-api", "crates/zcalld-compat-client", "crates/zcalld-installer", "plugins/aliases", "plugins/policy", "plugins/redact", "plugins/community", "plugins/routing"]
 exclude = ["apps/zcall-gui", "extensions/compat", "vendor/zcall", "vendor/zconv", "vendor/zplugin", "vendor/zsys"]
 resolver = "3"
 
@@ -29,6 +29,7 @@ zconv = { version = "=0.4.0", default-features = false }
 zplugin = { version = "=0.3.1", features = ["std"] }
 zcalld-plugin-api = { version = "=0.3.1", path = "crates/zcalld-plugin-api" }
 zcalld-compat-client = { version = "=0.3.1", path = "crates/zcalld-compat-client" }
+zcalld-installer = { version = "=0.3.1", path = "crates/zcalld-installer" }
 
 [profile.release]
 lto = "thin"

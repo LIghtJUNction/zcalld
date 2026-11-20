@@ -3,6 +3,7 @@
 from __future__ import annotations
 import argparse
 import gzip
+import hashlib
 import io
 import json
 import os
@@ -79,6 +80,46 @@ def source_archive(output):
         print(name)
 
 
+def install_manifest(stage, version, target, source):
+    """The installer checks this entire cohort before switching directories."""
+    windows = 'windows' in target
+    darwin = 'darwin' in target
+    suffix = '.exe' if windows else ''
+    required = [f'bin/zcalld{suffix}', f'bin/zcalld-installer{suffix}']
+    required.extend('lib/zcalld/plugins/' + (name + '.dll' if windows else 'lib' + name + ('.dylib' if darwin else '.so'))
+                    for name in (*PLUGINS, *(() if 'zcalld_desktop' in PLUGINS else ('zcalld_desktop',))))
+    if windows:
+        required.append('libexec/zcalld/zcalld-desktop-notify.exe')
+    elif darwin:
+        required.extend(('libexec/zcalld/zcalld-desktop-notify.app/Contents/Info.plist',
+                         'libexec/zcalld/zcalld-desktop-notify.app/Contents/MacOS/zcalld-desktop-notify'))
+    files = []
+    for path in sorted(stage.rglob('*')):
+        if path.is_symlink():
+            raise ValueError('native installation archives must not contain links')
+        if path.is_dir():
+            continue
+        if not path.is_file():
+            raise ValueError('native installation archives require regular files')
+        relative = path.relative_to(stage).as_posix()
+        mode = 0o755 if path.stat().st_mode & 0o111 else 0o644
+        # Windows binaries have no POSIX executable bit; manifest modes remain
+        # portable and are only used as actual permissions on Unix.
+        if relative.startswith('bin/') or relative.endswith(('.exe', '.dll', '.so', '.dylib')):
+            mode = 0o755
+        path.chmod(mode)
+        with path.open('rb') as stream:
+            digest = hashlib.file_digest(stream, 'sha256').hexdigest()
+        files.append(dict(path=relative, size=path.stat().st_size, sha256=digest, mode=mode))
+    paths = {item['path'] for item in files if item['size'] > 0}
+    if not set(required) <= paths:
+        raise ValueError('native archive is missing a required core/plugin/OS helper component')
+    manifest = dict(schema=1, product='zcalld', version=version, target=target,
+                    source=source, files=files, required=required)
+    (stage / 'INSTALL.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
+    (stage / 'INSTALL.json').chmod(0o644)
+
+
 def native_archive(args, output):
     target = args.target or next(line.split(': ', 1)[1] for line in run('rustc', '-vV').splitlines() if line.startswith('host: '))
     if target not in TARGETS:
@@ -99,6 +140,8 @@ def native_archive(args, output):
         binary = stage / 'bin' / executable
         binary.parent.mkdir(parents=True)
         shutil.copy2(build / executable, binary)
+        helper_name = "zcalld-installer.exe" if windows else "zcalld-installer"
+        shutil.copy2(build / helper_name, binary.parent / helper_name)
         plugins = stage / 'lib/zcalld/plugins'
         plugins.mkdir(parents=True)
         for plugin in PLUGINS:
@@ -144,6 +187,8 @@ def native_archive(args, output):
             if codec_licenses:
                 for copyright_file in Path(codec_licenses).glob('*/copyright'):
                     shutil.copy2(copyright_file, licenses / (copyright_file.parent.name + '.txt'))
+        install_manifest(stage, ver(), target, run('git', 'rev-parse', 'HEAD'))
+        if windows:
             name = output / (stem + '.zip')
             with zipfile.ZipFile(name, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
                 for path in sorted(stage.rglob('*')):
@@ -152,8 +197,10 @@ def native_archive(args, output):
         else:
             name = output / (stem + '.tar.gz')
             tar_tree(stage, name, epoch)
-        # Updaters validate this binary against SHA256SUMS and --version before replacing it.
+        # Keep the standalone core asset for existing clients; new installers
+        # replace only a verified full archive, and bootstrap with this helper.
         shutil.copy2(binary, output / (stem + ('.exe' if windows else '')))
+        shutil.copy2(binary.parent / helper_name, output / f"zcalld-installer-{ver()}-{target}{'.exe' if windows else ''}")
         print(name)
 
 
