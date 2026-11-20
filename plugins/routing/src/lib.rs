@@ -1202,6 +1202,38 @@ impl GatewayPlugin for Router {
     }
 }
 
+fn rewrite_selected_request(
+    settings: &Value,
+    state: &RequestState,
+    selected: &str,
+    protocol: u32,
+    input: &[u8],
+    output: &mut [u8],
+) -> Result<u64> {
+    if output.len() < input.len().saturating_add(2048) {
+        return Err(Error::BufferTooSmall);
+    }
+    let mut request = invalid(json::parse_with_limit(input, 16 * 1024 * 1024))?;
+    if let Some(group) = settings
+        .get("groups")
+        .as_array()
+        .iter()
+        .find(|group| group.get("name").as_str() == Some(&state.group))
+        && state.apply_effort
+    {
+        apply_effort(&mut request, protocol, &state.effort, group, selected);
+    }
+    if protocol != protocol::GEMINI_GENERATE_CONTENT {
+        request.set("model", selected.into());
+    }
+    let body = request.stringify();
+    if body.len() > output.len() {
+        return Err(Error::BufferTooSmall);
+    }
+    output[..body.len()].copy_from_slice(body.as_bytes());
+    Ok(body.len() as u64)
+}
+
 impl RetryPlugin for Router {
     fn configure(&mut self, config: &str) -> Result<()> {
         self.configure_path(config)
@@ -1263,35 +1295,14 @@ impl RetryPlugin for Router {
         if state.selected.is_empty() {
             return Ok(0);
         }
-        if output.len() < input.len().saturating_add(2048) {
-            return Err(Error::BufferTooSmall);
-        }
-        let mut request = invalid(json::parse_with_limit(input, 16 * 1024 * 1024))?;
-        if let Some(group) = self
-            .settings
-            .get("groups")
-            .as_array()
-            .iter()
-            .find(|g| g.get("name").as_str() == Some(&state.group))
-            && state.apply_effort
-        {
-            apply_effort(
-                &mut request,
-                protocol,
-                &state.effort,
-                group,
-                &state.selected,
-            );
-        }
-        if protocol != protocol::GEMINI_GENERATE_CONTENT {
-            request.set("model", state.selected.clone().into());
-        }
-        let body = request.stringify();
-        if body.len() > output.len() {
-            return Err(Error::BufferTooSmall);
-        }
-        output[..body.len()].copy_from_slice(body.as_bytes());
-        Ok(body.len() as u64)
+        rewrite_selected_request(
+            &self.settings,
+            &state,
+            &state.selected,
+            protocol,
+            input,
+            output,
+        )
     }
 }
 
@@ -1338,6 +1349,10 @@ impl zcalld_plugin_api::RecoveryPlugin for Router {
         }) {
             return Err(Error::InvalidArgument);
         }
+        // Serialize before changing cooldowns or selection. BufferTooSmall
+        // can be retried by the host even when JSON escaping expands the body.
+        let count =
+            rewrite_selected_request(&self.settings, &state, model, protocol, input, output)?;
         let shared = self.shared.as_ref().ok_or(Error::PluginStatus(8))?;
         {
             let mut pools = shared.lock().map_err(|_| Error::PluginStatus(8))?;
@@ -1360,7 +1375,7 @@ impl zcalld_plugin_api::RecoveryPlugin for Router {
         state.output_tokens = 0;
         state.response_tail.clear();
         drop(state);
-        RetryPlugin::request(self, protocol, input, output)
+        Ok(count)
     }
 }
 
@@ -1486,5 +1501,70 @@ mod tests {
             &mut state,
         );
         assert_eq!((state.input_tokens, state.output_tokens), (9, 3));
+    }
+
+    #[test]
+    fn recovery_resume_buffer_retry_preserves_routing_state() {
+        let until = now() + 60;
+        let mut pool = Pool::default();
+        pool.stats.insert(
+            "a/m".into(),
+            MemberStats {
+                requests: 7,
+                until,
+                ..Default::default()
+            },
+        );
+        let pools = Arc::new(Mutex::new(BTreeMap::from([("group/test".into(), pool)])));
+        let state = Rc::new(RefCell::new(RequestState {
+            group: "group/test".into(),
+            selected: "b/m".into(),
+            excluded: vec!["a/m".into()],
+            ..Default::default()
+        }));
+        let mut router = Router {
+            settings: object([("groups", Value::Array(vec![group("order")]))]),
+            request: Some(Rc::clone(&state)),
+            shared: Some(Arc::clone(&pools)),
+            ..Default::default()
+        };
+        // Short JSON control escapes can expand when the filtered body is
+        // serialized. A guessed margin must not commit routing state early.
+        let content = "\\b".repeat(1024);
+        let input =
+            format!(r#"{{"model":"b/m","messages":[{{"role":"user","content":"{content}"}}]}}"#);
+        let mut small = vec![0; input.len() + 2048];
+        assert!(matches!(
+            zcalld_plugin_api::RecoveryPlugin::resume(
+                &mut router,
+                protocol::OPENAI_CHAT,
+                "a/m",
+                input.as_bytes(),
+                &mut small
+            ),
+            Err(Error::BufferTooSmall)
+        ));
+        {
+            let shared = pools.lock().unwrap();
+            let stats = &shared["group/test"].stats["a/m"];
+            assert_eq!(stats.requests, 7);
+            assert_eq!(stats.until, until);
+        }
+        assert_eq!(state.borrow().selected, "b/m");
+        let mut large = vec![0; 8192];
+        let count = zcalld_plugin_api::RecoveryPlugin::resume(
+            &mut router,
+            protocol::OPENAI_CHAT,
+            "a/m",
+            input.as_bytes(),
+            &mut large,
+        )
+        .unwrap() as usize;
+        let body = json::parse(&large[..count]).unwrap();
+        assert_eq!(body.get("model").as_str(), Some("a/m"));
+        assert_eq!(state.borrow().selected, "a/m");
+        let shared = pools.lock().unwrap();
+        assert_eq!(shared["group/test"].stats["a/m"].requests, 8);
+        assert_eq!(shared["group/test"].stats["a/m"].until, 0);
     }
 }
