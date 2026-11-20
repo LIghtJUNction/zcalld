@@ -40,7 +40,7 @@ class PrivacyInitTests(transport.TransportTests):
 
     def cli(self, *args, ok=True):
         result = subprocess.run([str(self.binary), *args, "--config", str(self.config), "--json"],
-                                capture_output=True, text=True, timeout=25, check=False)
+                                capture_output=True, text=True, timeout=25, check=False, encoding="utf-8")
         self.assertEqual(result.returncode == 0, ok, result.stdout + result.stderr)
         return json.loads(result.stdout or "{}")
 
@@ -79,7 +79,7 @@ class PrivacyInitTests(transport.TransportTests):
         if os.name == "posix":
             self.assertEqual(key.stat().st_mode & 0o777, 0o600)
         checked = subprocess.run([str(self.binary), "check", "--config", str(self.config)],
-                                 capture_output=True, text=True, timeout=10, check=False)
+                                 capture_output=True, text=True, timeout=10, check=False, encoding="utf-8")
         self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
         self.start()
         # Public, synthetic key from the vendored redactor's test corpus.
@@ -89,9 +89,9 @@ class PrivacyInitTests(transport.TransportTests):
         self.assertIn("{{", outgoing)
 
         settings_path = Path(binding["settings"])
-        settings = json.loads(settings_path.read_text())
+        settings = json.loads(settings_path.read_text(encoding="utf-8"))
         settings.update(redactWords=["vault-fixture"], futureField={"preserved": True})
-        settings_path.write_text(json.dumps(settings))
+        settings_path.write_text(json.dumps(settings), encoding="utf-8", newline="\n")
         os.environ["ZCALLD_PRIVACY_WORKER"] = str(self.root / "missing-worker")
         # An existing binding remains authoritative; a new discovery override
         # does not silently rewrite the migrated runtime.
@@ -107,7 +107,7 @@ class PrivacyInitTests(transport.TransportTests):
 
         self.assertFalse(self.cli("privacy", "set", "off")["enabled"])
         self.assertEqual(self.echo("vault-fixture " + secret), "vault-fixture " + secret)
-        kept = json.loads(settings_path.read_text())
+        kept = json.loads(settings_path.read_text(encoding="utf-8"))
         self.assertEqual(kept["redactWords"], ["vault-fixture"])
         self.assertEqual(kept["futureField"], {"preserved": True})
         self.assertEqual(key.read_bytes(), original_key)
@@ -122,11 +122,11 @@ class PrivacyInitTests(transport.TransportTests):
 
         directory.mkdir(exist_ok=True)
         settings = directory / "settings.json"
-        settings.write_text(json.dumps({"zcalldEnabled": False, "redactWords": ["keep-rule"]}))
+        settings.write_text(json.dumps({"zcalldEnabled": False, "redactWords": ["keep-rule"]}), encoding="utf-8", newline="\n")
         binding = directory / "plugin.json"
         missing_key = directory / "old-key-missing"
         binding.write_text(json.dumps({"worker": str(self.privacy_worker),
-                                       "settings": str(settings), "key": str(missing_key)}))
+                                       "settings": str(settings), "key": str(missing_key)}), encoding="utf-8", newline="\n")
         before = settings.read_bytes(), binding.read_bytes()
         self.cli("privacy", "set", "secrets", ok=False)
         self.assertEqual((settings.read_bytes(), binding.read_bytes()), before)

@@ -31,7 +31,7 @@ def free_port() -> int:
 
 
 def rss_kib(pid: int) -> int:
-    for line in Path(f"/proc/{pid}/status").read_text().splitlines():
+    for line in Path(f"/proc/{pid}/status").read_text(encoding="utf-8").splitlines():
         if line.startswith("VmRSS:"):
             return int(line.split()[1])
     return 0
@@ -238,7 +238,7 @@ class Gateway:
     ) -> None:
         self.binary = binary.resolve()
         self.temp = tempfile.TemporaryDirectory(prefix="zcalld-test-")
-        self.root = Path(self.temp.name)
+        self.root = Path(self.temp.name).resolve()
         self.port = free_port()
         self.config = self.root / "config.conf"
         self.env = os.environ.copy()
@@ -274,13 +274,13 @@ class Gateway:
                 if not library.is_file():
                     raise RuntimeError(f"build --workspace first: missing {library.name}")
                 text += f"\n[plugin {name}]\npath={library}\nconfig_file={name}.conf\n"
-            (self.root / "aliases.conf").write_text("fast=local\n")
-            (self.root / "policy.conf").write_text("allow=local\nmax_bytes=2048\n")
+            (self.root / "aliases.conf").write_text("fast=local\n", encoding="utf-8", newline="\n")
+            (self.root / "policy.conf").write_text("allow=local\nmax_bytes=2048\n", encoding="utf-8", newline="\n")
         if bad_plugin:
             library = self.root / "invalid.so"
-            library.write_text("not an ELF shared library\n")
+            library.write_text("not an ELF shared library\n", encoding="utf-8", newline="\n")
             text += f"\n[plugin invalid]\npath={library}\n"
-        self.config.write_text(text)
+        self.config.write_text(text, encoding="utf-8", newline="\n")
         self.config.chmod(0o600)
 
     def start(self) -> "Gateway":
@@ -305,7 +305,7 @@ class Gateway:
 
     def diagnostics(self) -> str:
         self.log.flush()
-        return (self.root / "gateway.log").read_text()[-4000:]
+        return (self.root / "gateway.log").read_text(encoding="utf-8")[-4000:]
 
     def request(
         self, method: str, path: str, data: object = None, *, auth: bool = True,
@@ -336,7 +336,7 @@ class Gateway:
     def cli(self, *args: str) -> subprocess.CompletedProcess:
         return subprocess.run(
             [str(self.binary), *args, "--config", str(self.config)],
-            env=self.env, capture_output=True, text=True, timeout=8,
+            env=self.env, capture_output=True, text=True, timeout=8, encoding="utf-8",
         )
 
     def stop(self) -> int | None:
@@ -580,7 +580,7 @@ class GatewayTests(unittest.TestCase):
             gateway.close()
 
     def test_cli_and_configuration_validation(self) -> None:
-        version = subprocess.run([str(BINARY), "--version"], capture_output=True, text=True, timeout=5)
+        version = subprocess.run([str(BINARY), "--version"], capture_output=True, text=True, timeout=5, encoding="utf-8")
         self.assertEqual(version.returncode, 0)
         self.assertIn("zcalld", version.stdout.lower())
         for command in [("check",), ("models", "--json"), ("providers", "--json"),
@@ -591,21 +591,21 @@ class GatewayTests(unittest.TestCase):
                 self.assertNotIn(UPSTREAM_KEY, result.stdout)
                 if "--json" in command:
                     json.loads(result.stdout)
-        original = self.gateway.config.read_text()
+        original = self.gateway.config.read_text(encoding="utf-8")
         try:
-            self.gateway.config.write_text(original + "\n[unknown]\nvalue=1\n")
+            self.gateway.config.write_text(original + "\n[unknown]\nvalue=1\n", encoding="utf-8", newline="\n")
             self.assertNotEqual(self.gateway.cli("check").returncode, 0)
         finally:
-            self.gateway.config.write_text(original)
+            self.gateway.config.write_text(original, encoding="utf-8", newline="\n")
 
     def test_init_does_not_overwrite_existing_configuration(self) -> None:
         with tempfile.TemporaryDirectory(prefix="zcalld-init-") as directory:
-            config = Path(directory) / "config.conf"
+            config = Path(directory).resolve() / "config.conf"
             command = [str(BINARY), "init", "--config", str(config)]
-            first = subprocess.run(command, capture_output=True, text=True, timeout=5)
+            first = subprocess.run(command, capture_output=True, text=True, timeout=5, encoding="utf-8")
             self.assertEqual(first.returncode, 0, first.stderr)
             original = config.read_bytes()
-            second = subprocess.run(command, capture_output=True, text=True, timeout=5)
+            second = subprocess.run(command, capture_output=True, text=True, timeout=5, encoding="utf-8")
             self.assertNotEqual(second.returncode, 0)
             self.assertEqual(config.read_bytes(), original)
 

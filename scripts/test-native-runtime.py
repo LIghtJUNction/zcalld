@@ -47,7 +47,7 @@ thread = threading.Thread(target=upstream.serve_forever, daemon=True)
 thread.start()
 try:
     with tempfile.TemporaryDirectory(prefix="zcalld-native-") as temporary:
-        root = Path(temporary)
+        root = Path(temporary).resolve()
         listener = socket.socket()
         listener.bind(("127.0.0.1", 0))
         port = listener.getsockname()[1]
@@ -60,7 +60,7 @@ try:
             "protocol = chat\napi_key_env = NATIVE_PROVIDER_KEY\n"
             "[route public]\nprovider = fixture\nmodel = upstream\n"
             f"[plugin alias]\npath = {binary.parent / (prefix+'zcalld_aliases'+suffix)}\nconfig = fast=public\n"
-            f"[plugin policy]\npath = {binary.parent / (prefix+'zcalld_policy'+suffix)}\nconfig = allow=public\n"
+            f"[plugin policy]\npath = {binary.parent / (prefix+'zcalld_policy'+suffix)}\nconfig = allow=public\n", encoding="utf-8", newline="\n"
         )
         env = dict(os.environ, NATIVE_GATEWAY_TOKEN="gateway-fixture", NATIVE_PROVIDER_KEY="provider-fixture")
         with (root / "gateway.log").open("w+") as log:

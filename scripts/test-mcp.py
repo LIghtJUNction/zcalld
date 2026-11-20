@@ -44,21 +44,21 @@ class MCPTests(unittest.TestCase):
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(prefix="zcalld-mcp-")
-        self.root = Path(self.tmp.name)
+        self.root = Path(self.tmp.name).resolve()
         self.ext = self.root / "community"
         self.ext.mkdir(mode=0o700)
         self.processes = []
         self.logs = []
         self.source = self.root / "tools-fixture.mjs"
-        self.source.write_text(MOCK, encoding="utf-8")
+        self.source.write_text(MOCK, encoding="utf-8", newline="\n")
         self.helper("install", str(self.source), "--name", "fixture")
         self.helper("enable", "fixture")
         runtime = self.helper("runtime")
         config = {"bun": str(self.bun), "host": runtime["host"], "pi": runtime["pi"],
                   "registry": str(self.ext / "registry.json"), "auth_path": str(self.ext / "plugin-auth.json")}
         self.host_config = self.root / "community-host.json"
-        self.host_config.write_text(json.dumps(config), encoding="utf-8")
-        (self.ext / "plugin-auth.json").write_text("{}", encoding="utf-8")
+        self.host_config.write_text(json.dumps(config), encoding="utf-8", newline="\n")
+        (self.ext / "plugin-auth.json").write_text("{}", encoding="utf-8", newline="\n")
         with socket.socket() as s:
             s.bind(("127.0.0.1", 0))
             self.port = s.getsockname()[1]
@@ -67,7 +67,7 @@ class MCPTests(unittest.TestCase):
 
     def helper(self, *args):
         run = subprocess.run([str(self.pluginctl), "--root", str(self.ext), *args],
-                             capture_output=True, text=True, timeout=20)
+                             capture_output=True, text=True, timeout=20, encoding="utf-8")
         self.assertEqual(run.returncode, 0, run.stderr)
         return json.loads(run.stdout)
 
@@ -80,7 +80,7 @@ class MCPTests(unittest.TestCase):
             "[provider mock]\nbase_url=http://127.0.0.1:9\nprotocol=chat\n"
             "[route mock]\nprovider=mock\nmodel=mock\n"
             f"[plugin tools]\npath={self.community_plugin}\nconfig_file={self.host_config}\n",
-            encoding="utf-8")
+            encoding="utf-8", newline="\n")
 
     def start(self):
         log = tempfile.TemporaryFile()
@@ -148,7 +148,7 @@ class MCPTests(unittest.TestCase):
 
     def counts(self, file):
         path = self.ext / file
-        return path.read_text().splitlines() if path.exists() else []
+        return path.read_text(encoding="utf-8").splitlines() if path.exists() else []
 
     def test_handshake_ping_notifications_do_not_start_bun(self):
         self.start()
@@ -202,14 +202,14 @@ class MCPTests(unittest.TestCase):
     def test_scoped_key_filters_and_refuses_tools(self):
         keys = [{"id": key, "name": key, "secret": "fixture-" + key, "lan": False} for key in ("scoped", "readonly", "unmapped")]
         private = self.root / "caller-keys.json"
-        private.write_text(json.dumps(keys), encoding="utf-8")
+        private.write_text(json.dumps(keys), encoding="utf-8", newline="\n")
         if os.name != "nt":
             private.chmod(0o600)
         self.write_config(caller_keys=True)
         registry_file = self.ext / "registry.json"
-        registry = json.loads(registry_file.read_text())
+        registry = json.loads(registry_file.read_text(encoding="utf-8"))
         registry["mcp_permissions"] = {"scoped": {"mcp": ["magpie-tools/fixture-mjs_echo"]}, "readonly": {"read_only": True}}
-        registry_file.write_text(json.dumps(registry), encoding="utf-8")
+        registry_file.write_text(json.dumps(registry), encoding="utf-8", newline="\n")
         self.start()
         headers = {"Authorization": "Bearer fixture-scoped"}
         self.assertEqual([t["name"] for t in self.tools(headers)], ["fixture-mjs_echo"])

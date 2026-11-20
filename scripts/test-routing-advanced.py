@@ -26,21 +26,21 @@ class Advanced(unittest.TestCase):
         old = self.groups
         self.groups = self.root / "routing.json"
         old.rename(self.groups)
-        text = self.config.read_text()
+        text = self.config.read_text(encoding="utf-8")
         text = text[:text.index("[plugin routing]")]
         text = text.replace("[server]\n", "[server]\ntrust_loopback=true\n")
-        self.config.write_text(text)
+        self.config.write_text(text, encoding="utf-8", newline="\n")
         self.state["rules_worker"] = str(self.args.pluginctl)
         self.state["groups"][0]["original"] = {"affinity": "none", "rules": []}
         self.workspace = self.root / "trusted-project"
         self.workspace.mkdir()
         keys = self.root / "caller-keys.json"
         keys.write_text(json.dumps([{"id": "project", "secret": "fixture-bound", "lan": False,
-                                     "workspace": str(self.workspace)}]))
+                                     "workspace": str(self.workspace)}]), encoding="utf-8", newline="\n")
         if os.name == "posix":
             keys.chmod(0o600)
-        self.config.write_text(self.config.read_text().replace(
-            "[server]\n", f"[server]\ncaller_keys_file={keys}\n"))
+        self.config.write_text(self.config.read_text(encoding="utf-8").replace(
+            "[server]\n", f"[server]\ncaller_keys_file={keys}\n"), encoding="utf-8", newline="\n")
         self.save()
 
     tearDown = base.Routing.tearDown
@@ -53,7 +53,7 @@ class Advanced(unittest.TestCase):
         return environment
 
     def save(self):
-        self.groups.write_text(json.dumps(self.state))
+        self.groups.write_text(json.dumps(self.state), encoding="utf-8", newline="\n")
 
     def start(self):
         self.process = subprocess.Popen([str(self.args.binary), "serve", "--config", str(self.config)],
@@ -186,23 +186,23 @@ class Advanced(unittest.TestCase):
         definition = self.root / "group-definition.json"
         definition.write_text(json.dumps({"members": ["first", "second"], "mode": "rotate",
             "rules": [{"use": "second", "where": [{"field": "system", "op": "matches",
-                                                   "value": "^fixture"}]}]}))
+                                                   "value": "^fixture"}]}]}), encoding="utf-8", newline="\n")
         self.cli("groups", "set", "group/test", "--file", str(definition))
-        state = json.loads(self.groups.read_text())
+        state = json.loads(self.groups.read_text(encoding="utf-8"))
         self.assertEqual(Path(state["rules_worker"]).resolve(), self.args.pluginctl)
         self.assertEqual(state["groups"][0]["original"]["rules"][0]["where"][0]["op"], "matches")
         partial = {"rules": state["groups"][0]["original"]["rules"]}
-        definition.write_text(json.dumps(partial))
+        definition.write_text(json.dumps(partial), encoding="utf-8", newline="\n")
         self.cli("groups", "set", "group/test", "--file", str(definition))
-        self.assertEqual(json.loads(self.groups.read_text())["groups"][0]["mode"], "rotate")
+        self.assertEqual(json.loads(self.groups.read_text(encoding="utf-8"))["groups"][0]["mode"], "rotate")
         before = self.groups.read_bytes(), self.config.read_bytes()
-        invalid = json.loads(definition.read_text())
+        invalid = json.loads(definition.read_text(encoding="utf-8"))
         invalid["rules"][0]["where"][0]["value"] = "(?<=unsupported)lookbehind"
-        definition.write_text(json.dumps(invalid))
+        definition.write_text(json.dumps(invalid), encoding="utf-8", newline="\n")
         self.cli("groups", "set", "group/test", "--file", str(definition), ok=False)
         self.assertEqual((self.groups.read_bytes(), self.config.read_bytes()), before)
         for malformed in ({"members": []}, {"members": "first"}, {"mode": False}):
-            definition.write_text(json.dumps(malformed))
+            definition.write_text(json.dumps(malformed), encoding="utf-8", newline="\n")
             self.cli("groups", "set", "group/test", "--file", str(definition), ok=False)
             self.assertEqual((self.groups.read_bytes(), self.config.read_bytes()), before)
         self.start()
@@ -215,22 +215,22 @@ class Advanced(unittest.TestCase):
     def test_migration_validates_conditions_without_changing_source(self):
         source = self.root / "source-magpie"
         source.mkdir()
-        (source / "settings.json").write_text("{}")
+        (source / "settings.json").write_text("{}", encoding="utf-8", newline="\n")
         providers = {"providers": [{"id": "local", "chat": "http://127.0.0.1:11434/v1", "key": ""}],
                      "groups": [{"id": "fixture", "name": "fixture", "members": ["local/one", "local/two"],
                                  "routing": "order", "rules": [{"use": "local/two",
                                      "where": [{"field": "message", "op": "matches", "value": "^fixture"}]}]}]}
         provider_path = source / "providers.json"
-        provider_path.write_text(json.dumps(providers))
+        provider_path.write_text(json.dumps(providers), encoding="utf-8", newline="\n")
         catalog = self.root / "source-catalog.json"
         catalog.write_text(json.dumps({"data": [{"id": model} for model in
-                                               ["local/one", "local/two", "group/fixture"]]}))
+                                               ["local/one", "local/two", "group/fixture"]]}), encoding="utf-8", newline="\n")
         before = {path.name: path.read_bytes() for path in source.iterdir()}
         result = self.cli("migrate", "magpie", "--source", str(source), "--catalog", str(catalog))
         self.assertTrue(result["ready"], result)
         self.assertEqual(before, {path.name: path.read_bytes() for path in source.iterdir()})
         providers["groups"][0]["rules"][0]["where"][0]["op"] = "unknown"
-        provider_path.write_text(json.dumps(providers))
+        provider_path.write_text(json.dumps(providers), encoding="utf-8", newline="\n")
         result = self.cli("migrate", "magpie", "--source", str(source), "--catalog", str(catalog))
         self.assertFalse(result["ready"], result)
         self.assertEqual(result["summary"]["compatibility_gaps"], 1, result)
@@ -265,7 +265,7 @@ class Advanced(unittest.TestCase):
     def test_unix_socket_peer_cwd_ignores_client_directory_hint(self):
         self.rule({"use": "second", "folders": [str(self.workspace)]})
         unix = self.root / "gateway.sock"
-        self.config.write_text(self.config.read_text().replace("unix_socket=none", f"unix_socket={unix}"))
+        self.config.write_text(self.config.read_text(encoding="utf-8").replace("unix_socket=none", f"unix_socket={unix}"), encoding="utf-8", newline="\n")
         self.start()
         code = (
             "import socket,sys,json;"

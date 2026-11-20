@@ -190,7 +190,7 @@ class Cutover(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="zcalld-cutover-fixture-")
         self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name)
+        self.root = Path(self.temp.name).resolve()
         self.source, self.target, self.state = [self.root / name for name in ("old", "new", "state")]
         for p in (self.source, self.target / "extensions", self.state):
             p.mkdir(parents=True, mode=0o700)
@@ -211,7 +211,7 @@ class Cutover(unittest.TestCase):
         cutover.atomic(self.target / "usage.jsonl", usage)
         self.config = self.target / "config.conf"
         self.config.write_text('[server]\nlisten=127.0.0.1:3425\nunix_socket=auto\ntrust_loopback=true\n'
-                               '[route fixture/model]\nprovider=fixture\nmodel=wire-model\n')
+                               '[route fixture/model]\nprovider=fixture\nmodel=wire-model\n', encoding="utf-8", newline="\n")
         for name in ("zcalld", "pluginctl", "magpie"):
             cutover.atomic(self.root / name, b"fixture executable\n", 0o755)
         self.xdg = self.root / "config-home"
