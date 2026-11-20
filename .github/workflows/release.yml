@@ -121,6 +121,8 @@ jobs:
           if [[ "$RUNNER_OS" == Windows ]]; then suffix='.exe'; fi
           go build -mod=readonly -trimpath -o "../../_release/native-compat/zcalld-pluginctl$suffix" ./cmd/zcalld-pluginctl
           go build -mod=readonly -trimpath -o "../../_release/native-compat/zcalld-privacy$suffix" ./cmd/zcalld-privacy
+          go build -mod=readonly -trimpath -o "../../_release/native-compat/zcalld-claude-tui$suffix" ./cmd/zcalld-claude-tui
+          go test -mod=readonly -c -o "../../_release/native-compat/fake-claude$suffix" ./internal/claudetui
       - name: Verify the immutable source
         shell: bash
         run: |

@@ -581,9 +581,12 @@ impl RecoveryPlugin for Community {
         self.configure_host(config)
     }
     fn accepts(&mut self) -> Result<u32> {
-        Ok(1)
+        Ok(u32::from(!super::claude::native_only(&self.config)))
     }
     fn begin(&mut self, metadata: &[u8]) -> Result<OwnedResource> {
+        if super::claude::native_only(&self.config) {
+            return Err(Error::Unsupported);
+        }
         let mut planned = Recovery::new(&self.config, metadata)?;
         planned.context = Some(Rc::clone(&self.ctx));
         OwnedResource::new(planned)

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.1 — 2026-11-20
+
+- Add the optional Claude CLI provider and its native PTY/ConPTY helper, with explicit profile controls, bounded owned sessions and cancellation-aware cleanup.
+- Pin compatibility 0.3.0 and GUI 0.1.4, including complete native-bundle installation and the native Windows ACL fix.
+- Extend native release acceptance with the real helper and synthetic Claude provider chain; keep all model and account fixtures isolated.
+
 ## 0.4.0 — 2026-11-20
 
 - Install and update complete native bundles through a verified private prefix, with per-file manifests, a durable recovery journal, runtime leases and complete rollback. Package-managed installations keep using their package manager.
