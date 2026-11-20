@@ -71,6 +71,7 @@ Protocol names are `chat`, `responses`, `anthropic`, `gemini`, `completions` and
 | Endpoint | Purpose |
 | --- | --- |
 | `/v1/chat/completions`, `/v1/responses` | OpenAI-style generation |
+| `/backend-api/codex/responses` | Codex ChatGPT Responses ingress; shared authentication, privacy and routing |
 | `/v1/messages` | Anthropic Messages |
 | `/v1beta/models/{model}:generateContent` | Gemini generation |
 | `/v1beta/models/{model}:streamGenerateContent` | Gemini streaming |
