@@ -15,6 +15,8 @@ import threading
 import time
 import unittest
 
+from fixture_private import create_privacy_key
+
 
 class Upstream(http.server.BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
@@ -192,10 +194,9 @@ class TransportTests(unittest.TestCase):
         self.write_config()
         settings = self.root / "privacy-settings.json"
         settings.write_text(json.dumps({"redact": True, "redactPersonal": True, "redactModelOff": True}), encoding="utf-8", newline="\n")
-        key = self.root / "redact.key"
-        key.write_bytes(b"K" * 32)
-        if os.name == "posix":
-            key.chmod(0o600)
+        key = create_privacy_key(self.root, binary=self.binary,
+                                 redact_plugin=self.redact_plugin,
+                                 privacy_worker=self.privacy_worker)
         worker = self.privacy_worker
         if missing_worker:
             if os.name != "posix":
