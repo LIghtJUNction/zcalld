@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.2 — 2026-11-20
+
+- fix: ship Codex stream compatibility and native release coverage
+- fix(provider): honor overall deadlines and classify failures
+
 ## 0.2.1 — 2026-11-20
 
 - fix: initialize generated builtin plugins without invoking helper exports
