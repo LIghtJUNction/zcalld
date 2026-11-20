@@ -16,6 +16,24 @@ The subsequent HTTP request uses the same authentication, route selection, priva
 
 The transport regressions exercise TCP negotiation followed by a real local HTTP/SSE generation fixture, the private Unix socket, and malformed upgrades that must not become successful negotiations. An additional installed-Codex fixture uses a temporary home and a local synthetic provider; it does not use real accounts or contact a paid model. Its result is recorded separately from ordinary HTTP integration checks.
 
+## ChatGPT endpoint path
+
+The built-in OpenAI provider chooses different default URL paths according to its authentication mode. In [Codex 0.170.0 provider selection](https://github.com/openai/codex/blob/rust-v0.170.0/codex-rs/model-provider-info/src/lib.rs), API-key requests use `/v1`, while ChatGPT requests use `/backend-api/codex`. The Responses client appends `/responses` to that base.
+
+zcalld accepts the exact `/backend-api/codex/responses` path as a Responses ingress alias. It uses the same authentication, body limits, decoding, privacy, routing and upstream protocol path as `/v1/responses`. This does not expose arbitrary `/backend-api` paths or add account, model-catalog or quota endpoints.
+
+The installed-client fixture preserves each built-in provider's default path and replaces only its scheme and authority with a server inside the isolated network namespace. It asserts that both the ChatGPT WebSocket handshake and its subsequent zstd POST use `/backend-api/codex/responses`. Its recording proxy forwards that path unchanged; the actual gateway must map it to the configured upstream Responses endpoint. The API-key case separately verifies `/v1/responses`.
+
+The earlier transport fixture explicitly overrode every built-in provider to `/v1`. It proved negotiation and decoding but missed the ChatGPT default-path failure. The updated regression demonstrates the installed pre-alias gateway returning 404 before testing the fixed gateway with the same client and fake credentials. No real default external URL is contacted.
+
+## Quota response metadata
+
+The gateway forwards eleven explicitly allowed response headers: the primary and secondary used-percent, window-minutes and reset-at fields; credits-has-credits, credits-unlimited and credits-balance; limit-name; and rate-limit-reached-type, each under the `x-codex-` prefix. Other private or unrelated response headers do not become allowed because of their prefix.
+
+[Codex 0.170.0 parses these headers into rate-limit snapshots](https://github.com/openai/codex/blob/rust-v0.170.0/codex-rs/codex-api/src/rate_limits.rs). The installed-client fixture sends synthetic window and credit values from the fake upstream and verifies their exact values in the real client's `TokenCount` rollout events after HTTP/SSE completion. Those rollout files exist only in its disposable private home. No WebSocket-only `codex.rate_limits` event is injected into the SSE body.
+
+This proves response metadata reaches the client and is parsed. It does not prove that the interactive status bar shows account quota: that UI also uses the separate account-usage API. This change does not add account-usage or Codex model-catalog endpoints, and the fixture makes no real quota or account request.
+
 ## Compressed HTTP requests
 
 The handshake and the request body are separate compatibility requirements. Codex with ChatGPT authentication sends zstd after falling back to HTTP. The gateway accepts identity, gzip and zstd, decodes before routing and privacy, and normalizes the downstream request metadata to the decoded body. It removes the old content-encoding and transfer-encoding fields and sets the decoded content length.
