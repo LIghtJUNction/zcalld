@@ -6,6 +6,7 @@ DATADIR := $(PREFIX)/share
 BUMP ?= patch
 VERSION ?=
 PLUGINS := zcalld_aliases zcalld_policy zcalld_redact zcalld_community zcalld_plugin_routing zcalld_desktop
+CARGO_OUTPUT_DIR = $(shell cargo metadata --no-deps --format-version 1 --locked --offline | python3 -c 'import json, sys; print(json.load(sys.stdin)["target_directory"])')
 
 .PHONY: build check check-native install package bump release
 build:
@@ -20,12 +21,12 @@ check-native: build
 	mkdir -p _release/native-compat
 	go -C extensions/compat build -mod=readonly -trimpath -o "../../_release/native-compat/zcalld-pluginctl$(ZCALLD_NATIVE_EXE)" ./cmd/zcalld-pluginctl
 	go -C extensions/compat build -mod=readonly -trimpath -o "../../_release/native-compat/zcalld-privacy$(ZCALLD_NATIVE_EXE)" ./cmd/zcalld-privacy
-	python3 scripts/test-native-compat.py
+	python3 scripts/test-native-compat.py --binary "$(CARGO_OUTPUT_DIR)/release/zcalld$(ZCALLD_NATIVE_EXE)"
 
 install:
-	install -Dm755 target/release/zcalld "$(DESTDIR)$(BINDIR)/zcalld"
-	install -Dm755 target/release/zcalld-installer "$(DESTDIR)$(BINDIR)/zcalld-installer"
-	@for plugin in $(PLUGINS); do install -Dm755 "target/release/lib$$plugin.so" "$(DESTDIR)$(LIBDIR)/zcalld/plugins/lib$$plugin.so"; done
+	install -Dm755 "$(CARGO_OUTPUT_DIR)/release/zcalld" "$(DESTDIR)$(BINDIR)/zcalld"
+	install -Dm755 "$(CARGO_OUTPUT_DIR)/release/zcalld-installer" "$(DESTDIR)$(BINDIR)/zcalld-installer"
+	@for plugin in $(PLUGINS); do install -Dm755 "$(CARGO_OUTPUT_DIR)/release/lib$$plugin.so" "$(DESTDIR)$(LIBDIR)/zcalld/plugins/lib$$plugin.so"; done
 	install -d "$(DESTDIR)$(LIBDIR)/systemd/system" "$(DESTDIR)$(LIBDIR)/systemd/user"
 	sed 's|/usr/bin/zcalld|$(BINDIR)/zcalld|g' packaging/systemd/zcalld.service > "$(DESTDIR)$(LIBDIR)/systemd/system/zcalld.service"
 	sed 's|/usr/bin/zcalld|$(BINDIR)/zcalld|g' packaging/systemd/user/zcalld.service > "$(DESTDIR)$(LIBDIR)/systemd/user/zcalld.service"
