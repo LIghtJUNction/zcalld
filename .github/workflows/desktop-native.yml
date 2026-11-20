@@ -1,14 +1,5 @@
 name: Native desktop helpers
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'plugins/desktop/native/**'
-      - '.github/workflows/desktop-native.yml'
-  pull_request:
-    paths:
-      - 'plugins/desktop/native/**'
-      - '.github/workflows/desktop-native.yml'
   workflow_dispatch:
 
 permissions:

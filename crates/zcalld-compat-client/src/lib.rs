@@ -23,6 +23,7 @@ struct Inner {
     calls: Arc<Mutex<HashMap<u64, mpsc::Sender<Value>>>>,
     alive: Arc<AtomicBool>,
     next: AtomicU64,
+    drain_deadline: Option<Instant>,
 }
 #[derive(Clone)]
 pub struct Host(Arc<Inner>);
@@ -47,7 +48,8 @@ impl Drop for Inner {
             .child
             .get_mut()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let deadline = Instant::now() + Duration::from_secs(35);
+        let usual = Instant::now() + Duration::from_secs(35);
+        let deadline = self.drain_deadline.map_or(usual, |limit| limit.min(usual));
         loop {
             match child.try_wait() {
                 Ok(Some(_)) => return,
@@ -76,6 +78,33 @@ impl Host {
         if let Some(inner) = hosts.get(key).and_then(Weak::upgrade) {
             return Ok((Self(inner), false));
         }
+        let host = Self::isolated(program, args, cwd)?;
+        hosts.insert(key.into(), Arc::downgrade(&host.0));
+        Ok((host, true))
+    }
+
+    /// A one-shot worker owns its stdin, calls, reader and drain independently.
+    /// It never enters the shared weak registry or borrows another invocation.
+    pub fn isolated(program: &Path, args: &[String], cwd: Option<&Path>) -> Result<Self, String> {
+        Self::spawn(program, args, cwd, None)
+    }
+
+    /// Keep a one-shot operation and its credential drain within one deadline.
+    pub fn isolated_until(
+        program: &Path,
+        args: &[String],
+        cwd: Option<&Path>,
+        deadline: Instant,
+    ) -> Result<Self, String> {
+        Self::spawn(program, args, cwd, Some(deadline))
+    }
+
+    fn spawn(
+        program: &Path,
+        args: &[String],
+        cwd: Option<&Path>,
+        drain_deadline: Option<Instant>,
+    ) -> Result<Self, String> {
         let mut cmd = Command::new(program);
         cmd.args(args)
             .stdin(Stdio::piped())
@@ -105,8 +134,8 @@ impl Host {
             calls: Arc::new(Mutex::new(HashMap::new())),
             alive: Arc::new(AtomicBool::new(true)),
             next: AtomicU64::new(1),
+            drain_deadline,
         });
-        hosts.insert(key.into(), Arc::downgrade(&inner));
         let calls = Arc::clone(&inner.calls);
         let alive = Arc::clone(&inner.alive);
         std::thread::Builder::new()
@@ -154,7 +183,7 @@ impl Host {
                 }
             })
             .map_err(|_| "worker reader unavailable")?;
-        Ok((Self(inner), true))
+        Ok(Self(inner))
     }
     pub fn start(&self, mut request: Value) -> Result<Call, String> {
         if !self.0.alive.load(Ordering::Acquire) {
@@ -371,6 +400,61 @@ mod tests {
         assert_eq!(std::fs::read(&checkpoint).unwrap(), b"rotated");
         std::fs::remove_dir_all(dir).unwrap();
     }
+    #[cfg(unix)]
+    #[test]
+    fn isolated_workers_do_not_share_calls_or_lifetimes() {
+        let program = Path::new("/bin/sh");
+        let script = "IFS= read -r line; printf '{\"id\":1,\"result\":{\"owner\":\"%s\"}}\\n' \"$1\"; cat >/dev/null";
+        let first = Host::isolated(
+            program,
+            &["-c".into(), script.into(), "fixture".into(), "first".into()],
+            None,
+        )
+        .unwrap();
+        let second = Host::isolated(
+            program,
+            &[
+                "-c".into(),
+                script.into(),
+                "fixture".into(),
+                "second".into(),
+            ],
+            None,
+        )
+        .unwrap();
+        let mut a = first.start(object([("method", "work".into())])).unwrap();
+        let mut b = second.start(object([("method", "work".into())])).unwrap();
+        assert_eq!(
+            a.recv().unwrap().get("result").get("owner").as_str(),
+            Some("first")
+        );
+        a.finish();
+        drop(a);
+        drop(first);
+        assert_eq!(
+            b.recv().unwrap().get("result").get("owner").as_str(),
+            Some("second")
+        );
+        b.finish();
+        drop(b);
+        drop(second);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn isolated_drain_does_not_add_a_second_deadline() {
+        let started = Instant::now();
+        let host = Host::isolated_until(
+            Path::new("/bin/sh"),
+            &["-c".into(), "exec sleep 10".into()],
+            None,
+            started + Duration::from_millis(100),
+        )
+        .unwrap();
+        drop(host);
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
     #[test]
     fn encodings_roundtrip() {
         for v in [b"".as_slice(), b"a", b"ab", b"abc", b"hello\x00world"] {
