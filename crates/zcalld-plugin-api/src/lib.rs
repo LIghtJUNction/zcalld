@@ -172,12 +172,18 @@ pub trait RetryPlugin {
 
 /// Optional application HTTP endpoint, separate from AI request middleware.
 /// The core authenticates the connection and validates HTTP framing first.
-/// accepts returns 0 (decline) or 1 (owned); it must not execute a tool or
-/// allocate request-specific state. Conflicting endpoint owners are rejected.
+/// accepts returns 0 (decline), 1 (owned), or 3 (owned + trusted route context).
+/// Flag 3 requires a host supporting route context; older hosts reject it. All
+/// other flag combinations are invalid. It must not execute a tool or allocate
+/// request-specific state. Conflicting endpoint owners are rejected.
 ///
 /// metadata is UTF-8 JSON with method, path (without query), a bounded allowlist
 /// of protocol headers, loopback, verified caller_key_id or null, timeout_ms,
-/// and max_response_bytes. It never contains caller credentials or cookies.
+/// and max_response_bytes. Flag 3 also supplies raw query (the plugin MUST
+/// validate its own allowlist) and routing.providers/routes from loaded config.
+/// Providers expose id, plugin, account only. Routes expose id, dynamic, provider,
+/// model; dynamic groups have null provider/model. Caller headers cannot override
+/// any identity. Credentials, URLs and cookies are never included.
 /// body is borrowed for this call and is not implicitly AI-redacted.
 ///
 /// handle returns the existing dev.zcalld.provider-stream v1 HTTP resource:
