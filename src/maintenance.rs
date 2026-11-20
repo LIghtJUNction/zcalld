@@ -687,6 +687,8 @@ fn usage(context: &Context, args: &[String]) -> Result<(), String> {
     let path = context.directory.join("usage.jsonl");
     if args.first().is_some_and(|v| v == "export") {
         let target = control::option(args, "--file")?.ok_or("usage export requires --file")?;
+        // A missing source must not leave an empty destination behind.
+        let mut input = fs::File::open(&path).map_err(|e| e.to_string())?;
         let mut output = fs::OpenOptions::new();
         output.write(true).create_new(true);
         #[cfg(unix)]
@@ -695,22 +697,45 @@ fn usage(context: &Context, args: &[String]) -> Result<(), String> {
             output.mode(0o600);
         }
         let mut output = output.open(target).map_err(|e| e.to_string())?;
-        let mut input = fs::File::open(&path).map_err(|e| e.to_string())?;
         std::io::copy(&mut input, &mut output).map_err(|e| e.to_string())?;
         return control::emit(object([("ok", true.into())]));
     }
-    use std::io::{BufRead, BufReader};
+    use std::io::{BufRead, BufReader, Read};
+    const MAX_LINE_BYTES: usize = 1024 * 1024;
     let mut requests = 0u64;
     let mut failed = 0u64;
     let mut input = 0u64;
     let mut output = 0u64;
     if path.exists() {
-        for line in BufReader::new(fs::File::open(&path).map_err(|e| e.to_string())?).lines() {
-            let line = line.map_err(|e| e.to_string())?;
-            if line.len() > 1024 * 1024 {
+        let mut reader = BufReader::new(fs::File::open(&path).map_err(|e| e.to_string())?);
+        let mut line = Vec::new();
+        loop {
+            line.clear();
+            // Allow the content limit plus CRLF, without allocating an entire
+            // oversized record before discovering that it should be skipped.
+            let count = (&mut reader)
+                .take((MAX_LINE_BYTES + 2) as u64)
+                .read_until(b'\n', &mut line)
+                .map_err(|e| e.to_string())?;
+            if count == 0 {
+                break;
+            }
+            if line.last() == Some(&b'\n') {
+                line.pop();
+                if line.last() == Some(&b'\r') {
+                    line.pop();
+                }
+            } else if count == MAX_LINE_BYTES + 2 {
+                reader.skip_until(b'\n').map_err(|e| e.to_string())?;
                 continue;
             }
-            if let Ok(v) = json::parse(line.as_bytes()) {
+            if line.len() > MAX_LINE_BYTES {
+                continue;
+            }
+            // Retain the existing error for invalid UTF-8 in retained records.
+            std::str::from_utf8(&line)
+                .map_err(|_| "stream did not contain valid UTF-8".to_owned())?;
+            if let Ok(v) = json::parse(&line) {
                 requests += 1;
                 if v.get("status").as_u64().is_some_and(|v| v >= 400) {
                     failed += 1;

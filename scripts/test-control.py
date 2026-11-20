@@ -188,6 +188,79 @@ class ControlTests(unittest.TestCase):
         self.assertTrue(listed["deciders"][0]["credential_configured"])
 
 
+    def test_usage_record_size_limit_and_line_endings(self):
+        limit = 1024 * 1024
+        record = b'{"input_tokens":3,"output_tokens":4,"status":503}'
+        prefix = b'{"in":2,"out":1,"status":200}\r\n\nnot-json\n'
+        following = b'{"in":5,"out":6,"status":200}'
+        for ending in (b"\n", b"\r\n", b""):
+            for size in (limit - 1, limit, limit + 1):
+                with self.subTest(ending=ending, size=size):
+                    (self.directory / "usage.jsonl").write_bytes(
+                        prefix + record + b" " * (size - len(record)) + ending
+                        + (following if ending else b""))
+                    totals = self.cli("usage", "summary")
+                    included = int(size <= limit)
+                    after = int(bool(ending))
+                    self.assertEqual(
+                        tuple(totals[key] for key in
+                              ("requests", "failed", "input_tokens", "output_tokens")),
+                        (1 + included + after, included,
+                         2 + 3 * included + 5 * after, 1 + 4 * included + 6 * after))
+
+    def test_usage_invalid_utf8_is_an_error(self):
+        (self.directory / "usage.jsonl").write_bytes(b'{"in":1}\n\xff\n')
+        self.cli("usage", "summary", ok=False)
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "requires Linux address-space limits")
+    def test_usage_large_record_has_bounded_memory(self):
+        # Limit only this fixture child; a line larger than its entire address
+        # space must be discarded without being allocated in full.
+        with (self.directory / "usage.jsonl").open("wb") as history:
+            chunk = b" " * (1024 * 1024)
+            for _ in range(128):
+                history.write(chunk)
+            history.write(b'\n{"in":7,"out":11,"status":200}\n')
+            history.write(chunk)
+            history.write(b" ")
+        runner = (
+            "import os,resource,sys; "
+            "resource.setrlimit(resource.RLIMIT_CORE,(0,0)); "
+            "resource.setrlimit(resource.RLIMIT_AS,(96*1024*1024,)*2); "
+            "os.execv(sys.argv[1],sys.argv[1:])"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", runner, str(BINARY), "usage", "summary",
+             "--config", str(self.config), "--json"],
+            text=True, capture_output=True, env=self.env, timeout=20, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        totals = json.loads(result.stdout)
+        self.assertEqual(
+            tuple(totals[key] for key in
+                  ("requests", "failed", "input_tokens", "output_tokens")),
+            (1, 0, 7, 11))
+
+    def test_usage_export_missing_source_leaves_destination_available(self):
+        target = self.home / "usage-export.jsonl"
+        self.cli("usage", "export", "--file", str(target), ok=False)
+        self.assertFalse(target.exists())
+        original = b'{"in":17,"out":9,"status":200}\r\nnot-json\n'
+        (self.directory / "usage.jsonl").write_bytes(original)
+        self.assertTrue(self.cli("usage", "export", "--file", str(target))["ok"])
+        self.assertEqual(target.read_bytes(), original)
+        if os.name == "posix":
+            self.assertEqual(target.stat().st_mode & 0o777, 0o600)
+
+    def test_usage_export_does_not_overwrite_existing_destination(self):
+        original = b'{"in":1}\n'
+        target = self.home / "usage-export.jsonl"
+        target.write_bytes(b"keep existing contents")
+        (self.directory / "usage.jsonl").write_bytes(original)
+        self.cli("usage", "export", "--file", str(target), ok=False)
+        self.assertEqual(target.read_bytes(), b"keep existing contents")
+        self.assertEqual((self.directory / "usage.jsonl").read_bytes(), original)
+
+
     def test_provider_discovery_accepts_complete_generation_endpoint(self):
         seen = []
         class Upstream(http.server.BaseHTTPRequestHandler):
