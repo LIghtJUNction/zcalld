@@ -127,6 +127,23 @@ Print the command overview.
 .TP
 .B \-\-version
 Print the installed version.
+.SH DESKTOP INTEGRATION
+The optional native desktop plugin is disabled by default.
+.B zcalld desktop show
+reads settings and static capabilities without sending a notification or inhibiting sleep.
+.B zcalld desktop configure --file PATH
+validates and saves explicit settings; restart the gateway to use them.
+.B zcalld desktop plan --source PATH
+previews the original Magpie desktop preferences.
+.B zcalld desktop sync --source PATH --expect-plan HASH
+rechecks that plan before saving it. It does not edit agent configuration.
+.B zcalld desktop disable
+disables the plugin after the next gateway restart.
+.PP
+Notifications use fresh observations already produced by normal operations.
+Successful turn notifications exclude cancelled, incomplete and tool-only responses.
+Windows and macOS require the explicit native application identity/permission
+step described in DESKTOP.md.
 .SH FILES
 .TP
 .B ~/.config/zcalld/config.conf

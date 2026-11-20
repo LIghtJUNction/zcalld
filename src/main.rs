@@ -5,7 +5,9 @@ mod compression;
 mod config;
 mod control;
 mod curl;
+mod desktop;
 mod digest;
+mod events;
 mod extensions;
 mod http;
 mod keys;
@@ -46,6 +48,7 @@ Configuration:
   groups list|set|remove
   agents list|apply|revert|catalog
   privacy show|set off|secrets|personal
+  desktop show|configure|disable|plan|sync
   plugins list|inspect|install|enable|disable|remove|update|config|providers
   plugins quota list
   plugins quota refresh --account ACCOUNT_ID

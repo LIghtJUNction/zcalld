@@ -59,7 +59,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libcurl4-openssl-dev libzstd-dev zlib1g-dev pkg-config shellcheck
+          sudo apt-get install -y --no-install-recommends libcurl4-openssl-dev libzstd-dev zlib1g-dev pkg-config shellcheck libsystemd-dev dbus
           rustup toolchain install 1.100.0 --profile minimal --component rustfmt,clippy
       - name: Install native toolchain
         if: runner.os != 'Linux'
@@ -131,6 +131,9 @@ jobs:
           else
             python3 scripts/release.py verify-ref "$RELEASE_TAG"
           fi
+      - name: Build and validate optional native notification identities
+        shell: bash
+        run: python3 plugins/desktop/native/build.py --out-dir target/release/desktop-native --self-test
       - name: Run Linux release checks
         if: runner.os == 'Linux'
         run: ./scripts/check.sh

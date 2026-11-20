@@ -2,7 +2,7 @@
 
 A native local AI gateway for Linux, macOS and Windows, built on [zcall](https://github.com/LIghtJUNction/zcall), [zconv](https://github.com/LIghtJUNction/zconv), [zplugin](https://github.com/LIghtJUNction/zplugin) and [zsys](https://github.com/LIghtJUNction/zsys).
 
-The CLI daemon owns transport, bounded queues, credentials and protocol conversion. Privacy, community providers and model-group decisions are optional plugins. [zcall-gui](https://github.com/LIghtJUNction/zcall-gui) is a separate native application built with [zgpui](https://github.com/LIghtJUNction/zgpui); closing it leaves the gateway running. There is no embedded browser in either application. The optional compatibility package supplies the Go privacy and advanced-rule workers and one lazy Bun host for existing JavaScript community plugins. [zcall-omarchy](https://github.com/LIghtJUNction/zcall-omarchy) is a second, independent frontend that uses Omarchy's native plugin and menu interfaces without another background gateway.
+The CLI daemon owns transport, bounded queues, credentials and protocol conversion. Privacy, community providers, model-group decisions and desktop notifications are optional plugins. [zcall-gui](https://github.com/LIghtJUNction/zcall-gui) is a separate native application built with [zgpui](https://github.com/LIghtJUNction/zgpui); closing it leaves the gateway running. There is no embedded browser in either application. The optional compatibility package supplies the Go privacy and advanced-rule workers and one lazy Bun host for existing JavaScript community plugins. [zcall-omarchy](https://github.com/LIghtJUNction/zcall-omarchy) is a second, independent frontend that uses Omarchy's native plugin and menu interfaces without another background gateway.
 
 The daemon reuses zcall's optional server module for HTTP framing, protocol conversion and caller-key parsing. zcalld owns worker queues, native plugin instances, upstream transport and bounded gzip/zstd decoding; each worker retains its own plugin state.
 
@@ -98,6 +98,7 @@ zcalld plugins mcp show --json
 zcalld accounts list --json
 zcalld plugins quota list --json
 zcalld privacy show --json
+zcalld desktop show --json
 zcalld profiles save work --json
 zcalld library list --json
 zcalld library targets --json
@@ -117,6 +118,21 @@ Privacy runs before model-group classification. JSON and fragmented SSE response
 `plugins quota list` reads local saved results. With the optional compatibility helper 0.1.6 or newer, `plugins quota refresh --account ACCOUNT_ID` explicitly updates one supported account; ordinary status and quota-list commands do not refresh credentials or contact providers.
 
 Usage summaries scan local `usage.jsonl` with bounded record buffering and skip records over 1 MiB, excluding LF or CRLF. `usage export --file PATH` copies the original bytes to a new file, refuses existing destinations and uses mode `0600` on Unix. If the source cannot be opened, no destination is created. See the [usage validation](docs/validation/usage-bounds-20261120.md) for boundary coverage and export limits.
+
+[Desktop integration](docs/DESKTOP.md) is a separate native plugin, disabled by default.
+It can keep the device awake while an agent is working and deliver usage, balance,
+renewal, expiring reset-credit, first-mask and completed-turn notices. Only existing
+fresh observations are used; notifications add no provider polling. A completed
+turn requires a terminal success that was fully delivered to the client; tools,
+cancelled requests and truncated streams do not count as completed answers.
+
+Use `zcalld desktop configure --file SETTINGS.json` for explicit settings, or
+`desktop plan --source /absolute/path/to/magpie` followed by
+`desktop sync --source PATH --expect-plan HASH` to preserve existing preferences.
+Inspection and configuration validation do not send notifications or acquire an
+inhibitor. Saved changes take effect after the gateway is restarted. Windows and
+macOS notification identities require the native platform's explicit registration
+or permission step; their packaged helper never requests that permission implicitly.
 
 ## Services
 
