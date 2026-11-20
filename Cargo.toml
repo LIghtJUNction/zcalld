@@ -28,6 +28,7 @@ zcall = { version = "=0.3.0", default-features = false }
 zconv = { version = "=0.4.0", default-features = false }
 zplugin = { version = "=0.3.1", features = ["std"] }
 zcalld-plugin-api = { version = "=0.2.2", path = "crates/zcalld-plugin-api" }
+zcalld-compat-client = { version = "=0.2.2", path = "crates/zcalld-compat-client" }
 
 [profile.release]
 lto = "thin"

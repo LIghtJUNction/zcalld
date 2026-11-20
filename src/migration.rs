@@ -480,8 +480,8 @@ pub(crate) fn validate_rule_configuration(
     worker: Option<&str>,
 ) -> Result<std::path::PathBuf, String> {
     let helper = if let Some(worker) = worker {
-        let path = std::path::PathBuf::from(worker);
-        if !path.is_absolute() || !path.is_file() {
+        let path = zcalld_compat_client::helpers::resolve_legacy(Path::new(worker));
+        if !zcalld_compat_client::helpers::executable(&path) {
             return Err("rules_worker must name an absolute installed compatibility helper".into());
         }
         path

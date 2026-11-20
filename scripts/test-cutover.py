@@ -36,6 +36,38 @@ def audit_row(key, length=None):
     return cutover.encoded(value) + b"\n"
 
 
+class HelperLayoutTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(prefix="zcalld-recovery-helper-")
+        self.root = Path(self.tmp.name)
+        self.legacy = self.root / "legacy"
+        self.target = self.root / "canonical"
+        self.target.write_bytes(b"fixture")
+        self.target.chmod(0o700)
+        self.mapping = mock.patch.dict(cutover.LEGACY_HELPERS,
+                                      {str(self.legacy): str(self.target)}, clear=True)
+        self.mapping.start()
+
+    def tearDown(self):
+        self.mapping.stop()
+        self.tmp.cleanup()
+
+    def test_only_missing_exact_default_uses_executable_replacement(self):
+        self.assertEqual(cutover.resolve_legacy_helper(str(self.legacy)), self.target)
+        custom = self.root / "custom"
+        self.assertEqual(cutover.resolve_legacy_helper(str(custom)), custom)
+        self.assertEqual(cutover.resolve_legacy_helper(str(self.root) + "/./legacy"), self.legacy)
+        self.target.chmod(0o600)
+        self.assertEqual(cutover.resolve_legacy_helper(str(self.legacy)), self.legacy)
+
+    def test_existing_files_and_dangling_links_are_not_replaced(self):
+        self.legacy.write_bytes(b"configured executable")
+        self.assertEqual(cutover.resolve_legacy_helper(str(self.legacy)), self.legacy)
+        self.legacy.unlink()
+        self.legacy.symlink_to(self.root / "absent")
+        self.assertEqual(cutover.resolve_legacy_helper(str(self.legacy)), self.legacy)
+
+
 class PowerLoss(BaseException):
     """Simulate process termination outside normal exception rollback."""
 

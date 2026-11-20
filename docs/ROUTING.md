@@ -2,7 +2,7 @@
 
 The optional routing plugin evaluates a group's rules after request middleware and privacy filtering. Rules select existing public routes; they do not add upstream credentials, listeners or a second gateway. Simple groups stay entirely in Rust. Time windows, `where`, `folders` and `exceptFolders` use the optional compatibility helper for Go's RE2 engine and IANA time zone semantics.
 
-Advanced rules require the compatibility component containing the version 1 routing worker protocol, introduced in zcalld-compat 0.1.2. The native routing plugin remains optional. The packaged helper is `/usr/libexec/zcalld/zcalld-pluginctl` on Linux.
+Advanced rules require the compatibility component containing the version 1 routing worker protocol, introduced in zcalld-compat 0.1.2. The native routing plugin remains optional. The packaged helper is `/usr/lib/zcalld-compat/zcalld-pluginctl` on Arch Linux. The earlier libexec and portable layouts remain supported.
 
 ## Configure a group
 
@@ -38,7 +38,7 @@ zcalld groups set group/work --file group-work.json --config "$HOME/.config/zcal
 zcalld check --config "$HOME/.config/zcalld/config.conf"
 ```
 
-The CLI discovers the helper from `ZCALLD_PLUGINCTL` when explicitly set, the installed layout relative to the executable, or the standard Linux libexec directory. It writes the absolute helper path into `routing.json` as `rules_worker`; a daemon started by systemd therefore does not depend on the shell's environment. Development builds also recognize their compatibility source checkout.
+The CLI discovers the helper from `ZCALLD_PLUGINCTL` when explicitly set, the installed layout relative to the executable, or the standard Linux compatibility-library directory. It writes the absolute helper path into `routing.json` as `rules_worker`; a daemon started by systemd therefore does not depend on the shell's environment. Development builds also recognize their compatibility source checkout. A saved `rules_worker` equal to `/usr/libexec/zcalld/zcalld-pluginctl` can use the new installed path only when the exact old path is absent. Existing nodes and custom paths are never redirected, and loading the configuration does not rewrite it.
 
 A successful edit reports `restart_required: true`. Restart the configured service to apply the new group to its worker state. For the packaged user unit:
 

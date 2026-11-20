@@ -49,6 +49,7 @@ name = "zcalld"
 version = "0.2.2"
 dependencies = [
  "zcall",
+ "zcalld-compat-client",
  "zcalld-plugin-api",
  "zconv",
  "zplugin",

@@ -13,8 +13,8 @@ Install the core and compatibility packages before preparing the transaction. Th
 | Component | Installed path |
 | --- | --- |
 | Gateway | /usr/bin/zcalld |
-| Compatibility helper | /usr/libexec/zcalld/zcalld-pluginctl |
-| Privacy worker | /usr/libexec/zcalld/zcalld-privacy |
+| Compatibility helper | /usr/lib/zcalld-compat/zcalld-pluginctl |
+| Privacy worker | /usr/lib/zcalld-compat/zcalld-privacy |
 | User service | zcalld.service |
 
 Keep the original Magpie package and executable installed. Do not start the new user service yet, and do not rewrite existing agent configurations to perform this handover. Existing callers can continue using TCP port 3425; zcalld's own local clients prefer its private Unix socket.
@@ -61,6 +61,13 @@ The importer also copies library metadata and the complete instruction-set, inst
 
 Original MCP OAuth sign-in state is preserved in the private snapshot and in migration-archive/mcp-signins.json when present. Retaining that state does not activate an MCP authorization flow or claim that a new MCP host is already connected.
 
+On Arch Linux, compatibility executables and their bundled resources live in
+`/usr/lib/zcalld-compat`. The older libexec layout is still recognized. A saved
+privacy or routing worker path is redirected only when it exactly names the old
+default, that path is absent, and the new installed helper is executable. This
+lookup does not rewrite private configuration or completed recovery journals;
+custom paths and existing filesystem nodes remain authoritative.
+
 ## 2. Prepare the recovery journal
 
 Run the script as the desktop user who owns Magpie, without sudo. Choose the actual Magpie main PID that owns port 3425. The script checks the executable, UID, process start identity and open listening socket; it does not select a process merely by its name.
@@ -73,7 +80,7 @@ python3 scripts/cutover.py prepare \
   --source "$HOME/.config/magpie" \
   --config "$HOME/.config/zcalld/config.conf" \
   --binary /usr/bin/zcalld \
-  --pluginctl /usr/libexec/zcalld/zcalld-pluginctl \
+  --pluginctl /usr/lib/zcalld-compat/zcalld-pluginctl \
   --magpie-pid "$magpie_main_pid" \
   --state "$zcalld_cutover_state"
 ~~~
@@ -168,7 +175,7 @@ Externally managed ownership is an explicit delivered state. If its current acce
 The separate handoff command requires the account selector and its private owner manifest:
 
 ~~~sh
-/usr/libexec/zcalld/zcalld-pluginctl \
+/usr/lib/zcalld-compat/zcalld-pluginctl \
   --root "$HOME/.config/zcalld/extensions" \
   handoff --account 'builtin:codex#ACCOUNT_SLOT' \
   --owners /absolute/private/codex-owner-manifest.json \
