@@ -65,13 +65,57 @@ RATE_LIMIT_HEADERS = [
     ("x-codex-credits-has-credits", "true"),
     ("x-codex-credits-unlimited", "false"),
     ("x-codex-credits-balance", "4.25"),
+    ("x-codex-limit-name", "Codex"),
+    ("x-codex-bengalfox-primary-used-percent", "82.5"),
+    ("x-codex-bengalfox-primary-window-minutes", "300"),
+    ("x-codex-bengalfox-primary-reset-at", "1900100000"),
+    ("x-codex-bengalfox-secondary-used-percent", "45.25"),
+    ("x-codex-bengalfox-secondary-window-minutes", "10080"),
+    ("x-codex-bengalfox-secondary-reset-at", "1900700000"),
+    ("x-codex-bengalfox-limit-name", "fixture-bengalfox"),
+    ("x-codex-other-v2-primary-used-percent", "0"),
+    ("x-codex-other-v2-primary-window-minutes", "60"),
+    ("x-codex-other-v2-primary-reset-at", "1900200000"),
+    ("x-codex-other-v2-secondary-used-percent", "99.9"),
+    ("x-codex-other-v2-secondary-window-minutes", "1440"),
+    ("x-codex-other-v2-secondary-reset-at", "1900800000"),
+    ("x-codex-other-v2-limit-name", "fixture-other-v2"),
 ]
 EXPECTED_RATE_LIMITS = {
     "limit_id": "codex",
+    "limit_name": "Codex",
     "primary": {"used_percent": 37.5, "window_minutes": 300, "resets_at": 1900000000},
     "secondary": {"used_percent": 12.0, "window_minutes": 10080, "resets_at": 1900500000},
     "credits": {"has_credits": True, "unlimited": False, "balance": "4.25"},
 }
+# Codex normalizes metered limit IDs from header hyphens to underscores.
+# Credits stay in the common x-codex family and are shared by these snapshots.
+EXPECTED_MODEL_RATE_LIMITS = [
+    {
+        "limit_id": "codex_bengalfox", "limit_name": "fixture-bengalfox",
+        "primary": {"used_percent": 82.5, "window_minutes": 300, "resets_at": 1900100000},
+        "secondary": {"used_percent": 45.25, "window_minutes": 10080, "resets_at": 1900700000},
+        "credits": EXPECTED_RATE_LIMITS["credits"],
+    },
+    {
+        "limit_id": "codex_other_v2", "limit_name": "fixture-other-v2",
+        "primary": {"used_percent": 0.0, "window_minutes": 60, "resets_at": 1900200000},
+        "secondary": {"used_percent": 99.9, "window_minutes": 1440, "resets_at": 1900800000},
+        "credits": EXPECTED_RATE_LIMITS["credits"],
+    },
+]
+
+
+def rate_limit_headers(expected):
+    prefix = "x-" + expected["limit_id"].replace("_", "-")
+    names = {prefix + "-" + suffix for suffix in (
+        "primary-used-percent", "primary-window-minutes", "primary-reset-at",
+        "secondary-used-percent", "secondary-window-minutes", "secondary-reset-at",
+        "limit-name",
+    )}
+    names.update(("x-codex-credits-has-credits", "x-codex-credits-unlimited",
+                  "x-codex-credits-balance"))
+    return [(name, value) for name, value in RATE_LIMIT_HEADERS if name in names]
 
 
 def response_path(auth_shape):
@@ -167,8 +211,10 @@ class MockServer(http.server.ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
-    def __init__(self, mode, upstream=None, expected_path="/v1/responses"):
+    def __init__(self, mode, upstream=None, expected_path="/v1/responses",
+                 expected_limits=None):
         super().__init__(("127.0.0.1", 0), MockHandler)
+        self.quota_headers = rate_limit_headers(expected_limits or EXPECTED_RATE_LIMITS)
         self.mode = mode
         self.upstream = upstream
         self.expected_path = expected_path
@@ -299,7 +345,7 @@ class MockHandler(http.server.BaseHTTPRequestHandler):
                 raise ValueError("unexpected model or stream flag")
             record["status"] = 200
             self.server.record(record)
-            self.reply(200, event_bytes(), "text/event-stream", RATE_LIMIT_HEADERS)
+            self.reply(200, event_bytes(), "text/event-stream", self.server.quota_headers)
         except Exception as exc:
             self.server.errors.append(type(exc).__name__)
             try:
@@ -345,7 +391,9 @@ def rate_limit_events(codex_home):
     return observed
 
 
-def codex_case(name, port, expected, root, codex, auth_shape="custom", bootstrap_port=None):
+def codex_case(name, port, expected, root, codex, auth_shape="custom",
+               bootstrap_port=None, expected_limits=None):
+    expected_limits = expected_limits or EXPECTED_RATE_LIMITS
     case = root / name
     case.mkdir(mode=0o700)
     work = case / "work"
@@ -430,7 +478,10 @@ def codex_case(name, port, expected, root, codex, auth_shape="custom", bootstrap
     # Persistent rollout is confined to the disposable private CODEX_HOME. It
     # proves the real client parsed response headers, not just proxy receipt.
     quota_events = rate_limit_events(Path(env["CODEX_HOME"]))
-    quota_verified = EXPECTED_RATE_LIMITS in quota_events
+    # The real client's completed TokenCount retains its latest limit snapshot.
+    # Exercise each model family separately so every value is checked exactly.
+    quota_verified = expected_limits in quota_events
+    model_quota_verified = quota_verified and expected_limits["limit_id"] != "codex"
     success = not timed_out and not tool_output and (
         (process.returncode == 0 and completed and exact and quota_verified) if expected
         else (process.returncode != 0 and not completed and not exact)
@@ -447,7 +498,9 @@ def codex_case(name, port, expected, root, codex, auth_shape="custom", bootstrap
         "tool_outputs": tool_output,
         "rate_limits_verified_in_client": quota_verified,
         "rate_limits_event_count": len(quota_events),
-        "rate_limits": EXPECTED_RATE_LIMITS if quota_verified else None,
+        "rate_limits_family": expected_limits["limit_id"],
+        "rate_limits": expected_limits if quota_verified else None,
+        "model_rate_limits_verified_in_client": model_quota_verified,
         "elapsed_seconds": round(time.monotonic() - start, 3),
         "event_types": sorted({str(item.get("type")) for item in events}),
         "stderr_bytes": len(stderr),
@@ -537,52 +590,56 @@ def inner(args):
             cases.append(result)
     if args.binary:
         for auth_shape in ("api_key", "chatgpt"):
-            with MockServer("upstream") as upstream:
-                process, port, stdout, stderr = start_gateway(
-                    "/zcalld", upstream.port, root
-                )
-                try:
-                    with (MockServer("proxy", port, response_path(auth_shape)) as front,
-                          MockServer("bootstrap") as bootstrap):
-                        result = codex_case(
-                            "gateway_" + auth_shape + "_426", front.port,
-                            True, root, "/codex", auth_shape, bootstrap.port
-                        )
-                        result["http"] = front.records
-                        result["upstream_http"] = upstream.records
-                        gets = [
-                            r for r in front.records
-                            if r["method"] == "GET" and r["websocket"]
-                        ]
-                        posts = [r for r in front.records if r["method"] == "POST"]
-                        result["response_path_verified"] = bool(gets) and all(
-                            r["path"] == response_path(auth_shape) for r in gets + posts
-                        )
-                        result["passed"] &= (
-                            bool(gets) and all(r["status"] == 426 for r in gets)
-                            and len(posts) == 1 and posts[0]["status"] == 200
-                            and posts[0]["content_encoding"] == (
-                                "zstd" if auth_shape == "chatgpt" else ""
-                            )
-                            and len(upstream.records) == 1
-                            and upstream.records[0]["method"] == "POST"
-                            and upstream.records[0]["status"] == 200
-                            and upstream.records[0]["content_encoding"] in ("", "identity")
-                            and not upstream.records[0]["authorization_present"]
-                            and upstream.records[0]["path"] == "/v1/responses"
-                            and result["response_path_verified"]
-                            and not front.errors and not upstream.errors
-                        )
-                        cases.append(result)
-                finally:
-                    process.terminate()
+            for expected_limits in [EXPECTED_RATE_LIMITS, *EXPECTED_MODEL_RATE_LIMITS]:
+                with MockServer("upstream", expected_limits=expected_limits) as upstream:
+                    process, port, stdout, stderr = start_gateway(
+                        "/zcalld", upstream.port, root
+                    )
                     try:
-                        process.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        process.kill()
-                        process.wait()
-                    stdout.close()
-                    stderr.close()
+                        with (MockServer("proxy", port, response_path(auth_shape)) as front,
+                              MockServer("bootstrap") as bootstrap):
+                            result = codex_case(
+                                "gateway_" + auth_shape + (
+                                    "" if expected_limits["limit_id"] == "codex"
+                                    else "_" + expected_limits["limit_id"]) + "_426", front.port,
+                                True, root, "/codex", auth_shape, bootstrap.port,
+                                expected_limits,
+                            )
+                            result["http"] = front.records
+                            result["upstream_http"] = upstream.records
+                            gets = [
+                                r for r in front.records
+                                if r["method"] == "GET" and r["websocket"]
+                            ]
+                            posts = [r for r in front.records if r["method"] == "POST"]
+                            result["response_path_verified"] = bool(gets) and all(
+                                r["path"] == response_path(auth_shape) for r in gets + posts
+                            )
+                            result["passed"] &= (
+                                bool(gets) and all(r["status"] == 426 for r in gets)
+                                and len(posts) == 1 and posts[0]["status"] == 200
+                                and posts[0]["content_encoding"] == (
+                                    "zstd" if auth_shape == "chatgpt" else ""
+                                )
+                                and len(upstream.records) == 1
+                                and upstream.records[0]["method"] == "POST"
+                                and upstream.records[0]["status"] == 200
+                                and upstream.records[0]["content_encoding"] in ("", "identity")
+                                and not upstream.records[0]["authorization_present"]
+                                and upstream.records[0]["path"] == "/v1/responses"
+                                and result["response_path_verified"]
+                                and not front.errors and not upstream.errors
+                            )
+                            cases.append(result)
+                    finally:
+                        process.terminate()
+                        try:
+                            process.wait(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            process.kill()
+                            process.wait()
+                        stdout.close()
+                        stderr.close()
     result = {
         "schema_version": 1, "kind": "isolated_real_codex_transport",
         "codex_version": version.stdout.strip(), "source_ref": SOURCE_REF,
