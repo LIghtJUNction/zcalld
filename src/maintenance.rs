@@ -364,13 +364,71 @@ pub fn plugin_helper() -> Result<String, String> {
     Ok(crate::extensions::helper()?.to_string_lossy().into_owned())
 }
 
+fn routing_state(context: &Context) -> Result<Value, String> {
+    let path = context.directory.join("routing.json");
+    if !path.try_exists().map_err(|error| error.to_string())? {
+        return Ok(object([("groups", Value::Array(Vec::new()))]));
+    }
+    let state = json::read(&path)?;
+    let fields = state.as_object().ok_or("routing.json must be an object")?;
+    let groups: &[Value] = match fields.get("groups") {
+        None => &[],
+        Some(Value::Array(groups)) => groups,
+        _ => return Err("routing.json groups must be an array".into()),
+    };
+    for group in groups {
+        group
+            .get("name")
+            .as_str()
+            .filter(|name| !name.is_empty())
+            .ok_or("routing.json group name must be a nonempty string")?;
+        let members = match group.get("members") {
+            Value::Array(members) if !members.is_empty() => members,
+            _ => return Err("routing.json group members must be a nonempty array".into()),
+        };
+        for member in members {
+            member
+                .get("model")
+                .as_str()
+                .filter(|name| !name.is_empty())
+                .ok_or("routing.json group member model must be a nonempty string")?;
+        }
+    }
+    Ok(state)
+}
+
+/// Keep ordinary route/provider edits from invalidating managed model groups.
+pub(crate) fn check_group_route_mutation<'a>(
+    context: &Context,
+    routes: impl IntoIterator<Item = &'a str>,
+    removing: bool,
+) -> Result<(), String> {
+    let state = routing_state(context)?;
+    let routes: std::collections::BTreeSet<_> = routes.into_iter().collect();
+    for group in state.get("groups").as_array() {
+        let name = group.get("name").as_str().unwrap();
+        if routes.contains(name) {
+            return Err(format!(
+                "route {name} is a managed group; use groups set or groups remove"
+            ));
+        }
+        if removing {
+            for member in group.get("members").as_array() {
+                let model = member.get("model").as_str().unwrap();
+                if routes.contains(model) {
+                    return Err(format!(
+                        "route {model} is used by group {name}; update its members with groups set or remove it with groups remove first"
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 fn groups(context: &Context, args: &[String]) -> Result<(), String> {
     let path = context.directory.join("routing.json");
-    let mut state = if path.exists() {
-        json::read(&path)?
-    } else {
-        object([("groups", Value::Array(Vec::new()))])
-    };
+    let mut state = routing_state(context)?;
     let action = args.first().map(String::as_str).unwrap_or("list");
     if action == "list" {
         let deciders = state
@@ -668,10 +726,14 @@ fn routes(context: &Context, args: &[String]) -> Result<(), String> {
             {
                 return Err("unknown provider".into());
             }
+            check_group_route_mutation(context, [name.as_str()], false)?;
             text = control::ini_set(&text, &section, "provider", &format!("\"{provider}\""))?;
             text = control::ini_set(&text, &section, "model", model)?;
         }
-        "remove" => text = control::ini_remove(&text, &section),
+        "remove" => {
+            check_group_route_mutation(context, [name.as_str()], true)?;
+            text = control::ini_remove(&text, &section);
+        }
         _ => return Err("routes expects list, set or remove".into()),
     }
     control::save_config(context, &text, "routes")?;

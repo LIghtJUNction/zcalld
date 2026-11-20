@@ -50,6 +50,11 @@ a standard-input credential or writing files.
 .BR routes " | " groups
 List, set or remove model routes and model groups.
 Edits preserve the selected provider's literal name, including quotes or spaces.
+Managed group routes must be changed through groups set/remove. Direct route edits
+and provider model options cannot overwrite them. Route/provider removal refuses
+entries still used by a group; change its members or remove the group first.
+These checks run before credential input, backups or writes and reject malformed
+routing.json rather than assuming no groups exist.
 .TP
 .B agents
 Discover supported installed agents, inspect the adapter catalog, apply gateway
