@@ -137,4 +137,6 @@ Day-to-day checks run locally. Formal release workflows validate five native tar
 
 [RELEASING.md](docs/RELEASING.md) describes publishing and recovery. [PLUGINS.md](docs/PLUGINS.md) describes the SDK. [PERFORMANCE.md](docs/PERFORMANCE.md) contains measured daemon baselines, with versions and workload limitations. GUI renderer and native-platform evidence live in its own repository. No client pricing table, subscription tier or paid feature gate is built into these projects.
 
+[Deployment acceptance, 2026-11-20](docs/DEPLOYMENT-2026-11-20.md) records the installed 0.2.4 gateway with 0.1.5-2 compatibility workers: migration preservation, real JSON/SSE generation, package provenance and full-process-tree memory including swap. Its scope differs from the historical minimal-daemon benchmark.
+
 MIT licensed. Magpie compatibility code retains upstream notices in the optional compatibility repository.
