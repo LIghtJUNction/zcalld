@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.3 — 2026-11-20
+
+- fix(arch): resolve relocated compatibility helpers
+
 ## 0.2.2 — 2026-11-20
 
 - fix: ship Codex stream compatibility and native release coverage
