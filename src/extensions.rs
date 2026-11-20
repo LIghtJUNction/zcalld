@@ -220,7 +220,7 @@ pub fn privacy_plugin(config_path: &Path) -> Result<Option<PluginSpec>, String> 
 }
 
 /// Group routing runs after privacy, so an optional decision provider sees masked text.
-pub fn routing_plugin(config_path: &Path) -> Result<Option<PluginSpec>, String> {
+pub fn routing_plugin(config_path: &Path) -> Result<Option<(PluginSpec, Vec<String>)>, String> {
     let path = root(config_path)?
         .parent()
         .ok_or("configuration parent missing")?
@@ -232,10 +232,25 @@ pub fn routing_plugin(config_path: &Path) -> Result<Option<PluginSpec>, String> 
     if value.get("groups").as_array().is_empty() {
         return Ok(None);
     }
-    Ok(Some(PluginSpec {
-        path: library("plugin_routing")?,
-        config: path.to_string_lossy().into_owned(),
-    }))
+    let groups = value
+        .get("groups")
+        .as_array()
+        .iter()
+        .map(|group| {
+            group
+                .get("name")
+                .as_str()
+                .map(str::to_owned)
+                .ok_or_else(|| "routing group has no name".to_string())
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(Some((
+        PluginSpec {
+            path: library("plugin_routing")?,
+            config: path.to_string_lossy().into_owned(),
+        },
+        groups,
+    )))
 }
 
 /// Resolve the settings actually bound to the plugin, including migrated paths.

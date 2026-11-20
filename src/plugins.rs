@@ -38,6 +38,21 @@ struct Entry {
     http: Option<HttpPluginProxy<'static>>,
 }
 
+#[derive(Clone, Copy)]
+pub struct HttpHandler {
+    index: usize,
+    pub route_context: bool,
+}
+
+fn http_decision(flags: u32) -> Result<Option<bool>, String> {
+    match flags {
+        0 => Ok(None),
+        1 => Ok(Some(false)),
+        3 => Ok(Some(true)),
+        _ => Err("HTTP plugin returned an invalid route decision".into()),
+    }
+}
+
 pub struct RetryPlan {
     pub model: String,
     pub body: Option<Vec<u8>>,
@@ -200,20 +215,23 @@ impl Plugins {
     }
 
     /// Resolve an optional endpoint before allocating any HTTP metadata.
-    pub fn http_handler(&mut self, path: &str) -> Result<Option<usize>, String> {
+    pub fn http_handler(&mut self, path: &str) -> Result<Option<HttpHandler>, String> {
         let mut selected = None;
         for (index, entry) in self.entries.iter_mut().enumerate() {
             let Some(http) = &mut entry.http else {
                 continue;
             };
-            match http
+            let flags = http
                 .accepts(path)
-                .map_err(|e| hook_error(&entry.path, "HTTP route", e))?
-            {
-                0 => {}
-                1 if selected.is_none() => selected = Some(index),
-                1 => return Err("multiple plugins claim the same HTTP endpoint".into()),
-                _ => return Err("HTTP plugin returned an invalid route decision".into()),
+                .map_err(|e| hook_error(&entry.path, "HTTP route", e))?;
+            if let Some(route_context) = http_decision(flags)? {
+                if selected.is_some() {
+                    return Err("multiple plugins claim the same HTTP endpoint".into());
+                }
+                selected = Some(HttpHandler {
+                    index,
+                    route_context,
+                });
             }
         }
         Ok(selected)
@@ -221,11 +239,14 @@ impl Plugins {
 
     pub fn http_fetch(
         &mut self,
-        handler: usize,
+        handler: HttpHandler,
         metadata: &str,
         body: &[u8],
     ) -> Result<ProviderResponse, String> {
-        let entry = self.entries.get_mut(handler).ok_or("unknown HTTP plugin")?;
+        let entry = self
+            .entries
+            .get_mut(handler.index)
+            .ok_or("unknown HTTP plugin")?;
         let http = entry.http.as_mut().ok_or("HTTP plugin is unavailable")?;
         let resource = http
             .handle(metadata, body)
@@ -566,6 +587,15 @@ pub struct ProviderHead {
 mod tests {
     use super::*;
 
+    #[test]
+    fn http_route_flags_are_explicit_and_reject_unknown_capabilities() {
+        assert_eq!(http_decision(0).unwrap(), None);
+        assert_eq!(http_decision(1).unwrap(), Some(false));
+        assert_eq!(http_decision(3).unwrap(), Some(true));
+        for flags in [2, 4, 5, 7, u32::MAX] {
+            assert!(http_decision(flags).is_err());
+        }
+    }
     #[test]
     fn empty_chain_preserves_input_without_an_output_allocation() {
         let mut plugins = Plugins::load(&[]).unwrap();
