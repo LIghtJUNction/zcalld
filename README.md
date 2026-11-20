@@ -107,6 +107,8 @@ zcalld usage export --file usage-export.jsonl --json
 zcalld update check --json
 ```
 
+Provider `--api-key-stdin` updates an exclusive credential reference in place. If another provider, header or gateway token shares that reference, the edited provider receives a separate credential slot and the other references keep their saved value. New slots avoid existing saved credentials, configuration references and environment variables. Use `--api-key-env NAME` to select an existing credential instead; it cannot be combined with `--api-key-stdin`. Environment values still take precedence over saved credentials. Invalid or oversized credential files are rejected before either file is changed.
+
 Agent edits preserve unrelated fields and keep exact-byte backups. Revert refuses to overwrite later user edits unless explicitly forced. Account controls operate on the actual private compatibility-host store. Community packages must be deliberately enabled; trusted native libraries run inside the daemon process.
 
 The [agent library](docs/LIBRARY.md) manages MCP definitions, instruction sets and skill files separately from gateway providers. Preview/apply/revert keeps exact owned bytes and refuses conflicting user edits. [Community MCP](docs/MCP.md) uses the optional HTTP plugin interface and the same shared Bun process as community providers; initialize and ping do not start that process. Caller-key permissions remain separate from upstream credentials.
