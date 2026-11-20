@@ -554,6 +554,10 @@ pub(crate) fn enable_privacy(config_path: &Path, settings: &Value) -> Result<boo
                 "model_dir",
                 base.join("models").to_string_lossy().into_owned().into(),
             ),
+            (
+                "history_dir",
+                base.join("history").to_string_lossy().into_owned().into(),
+            ),
         ])
     } else {
         state_json::read(&binding_path)?

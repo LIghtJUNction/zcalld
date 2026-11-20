@@ -9,8 +9,8 @@ def create_privacy_key(root, *, binary, redact_plugin, privacy_worker):
     """Return a random key protected by POSIX modes or a private Windows DACL.
 
     Keep the bootstrap config in its own directory so the test gateway cannot
-    discover its binding and accidentally load privacy twice. This command does
-    not start a gateway, a privacy worker, or a provider host.
+    discover its binding and accidentally load privacy twice. It runs a
+    short-lived privacy preflight worker, without a gateway or community host.
     """
     directory = Path(root) / "privacy-key-fixture"
     directory.mkdir(mode=0o700)

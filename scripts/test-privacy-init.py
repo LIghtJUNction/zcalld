@@ -44,11 +44,12 @@ class PrivacyInitTests(transport.TransportTests):
         self.assertEqual(result.returncode == 0, ok, result.stdout + result.stderr)
         return json.loads(result.stdout or "{}")
 
-    def echo(self, original, stream=False):
+    def echo(self, original, stream=False, headers=None):
         status, body = transport.request(
             http.client.HTTPConnection("127.0.0.1", self.port, timeout=5),
             "/v1/chat/completions",
             {"model": "test", "messages": [{"role": "user", "content": original}], "stream": stream},
+            headers=headers,
         )
         self.assertEqual(status, 200, body.decode(errors="replace"))
         if stream:
@@ -73,6 +74,7 @@ class PrivacyInitTests(transport.TransportTests):
         binding_path = directory / "plugin.json"
         original_binding = binding_path.read_bytes()
         binding = json.loads(original_binding)
+        self.assertEqual(Path(binding["history_dir"]), directory / "history")
         key = Path(binding["key"])
         original_key = key.read_bytes()
         self.assertEqual(len(original_key), 32)
@@ -112,6 +114,58 @@ class PrivacyInitTests(transport.TransportTests):
         self.assertEqual(kept["futureField"], {"preserved": True})
         self.assertEqual(key.read_bytes(), original_key)
         self.assertEqual(binding_path.read_bytes(), original_binding)
+
+    def test_private_audit_records_and_counters_survive_graceful_shutdown(self):
+        self.cli("privacy", "set", "secrets")
+        binding = json.loads((self.root / "privacy/plugin.json").read_text(encoding="utf-8"))
+        history = Path(binding["history_dir"])
+        self.assertEqual(list(history.glob("*.jsonl")), [])
+        self.assertEqual(list(history.glob("checked-*.json")), [])
+        process = self.start()
+        headers = {"X-Agent-Name": "privacy-audit-fixture",
+                   "X-Session-Id": "privacy-audit-session"}
+        secret = "sk-proj-Wn4rT7yQ2mLx9VbK3cZp"
+        original = "Use this fixture key " + secret
+        for stream in (False, True):
+            outgoing = self.echo(original, stream, headers=headers)
+            self.assertNotIn(secret, outgoing)
+        self.assertEqual(self.echo("Ordinary synthetic text.", headers=headers),
+                         "Ordinary synthetic text.")
+        self.cli("privacy", "set", "off")
+        self.assertEqual(self.echo(original, headers=headers), original)
+        self.stop(process)
+
+        files = sorted(history.glob("????-??-??.jsonl"))
+        records = [json.loads(line) for path in files
+                   for line in path.read_text(encoding="utf-8").splitlines()]
+        self.assertEqual(len(records), 2)
+        for record in records:
+            self.assertEqual(record["agent"], "privacy-audit-fixture")
+            self.assertEqual(record["session"], "privacy-audit-session")
+            self.assertEqual(record["what"], "/v1/chat/completions")
+            self.assertGreater(record["n"], 0)
+            self.assertTrue(record["values"])
+            for field in ("body", "original", "Snips", "Back", "Sent"):
+                self.assertNotIn(field, record)
+        checked_files = sorted(history.glob("checked-????-??-??.json"))
+        self.assertTrue(checked_files, "shutdown must flush pending audit counters")
+        counters = [json.loads(path.read_text(encoding="utf-8"))
+                    for path in checked_files]
+        self.assertTrue(all(set(value) == {"privacy-audit-fixture"} for value in counters))
+        self.assertEqual(sum(value["privacy-audit-fixture"].get("looked", 0)
+                             for value in counters), 3)
+        self.assertEqual(sum(value["privacy-audit-fixture"].get("masked", 0)
+                             for value in counters), 2)
+        self.assertEqual(sum(value["privacy-audit-fixture"].get("whole", 0)
+                             for value in counters), 0)
+        for path in [*files, *checked_files]:
+            raw = path.read_text(encoding="utf-8")
+            self.assertNotIn(secret, raw)
+            self.assertNotIn(original, raw)
+            if os.name == "posix":
+                self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        if os.name == "posix":
+            self.assertEqual(history.stat().st_mode & 0o777, 0o700)
 
     def test_missing_runtime_and_missing_original_key_fail_without_enabling(self):
         os.environ["ZCALLD_PRIVACY_WORKER"] = str(self.root / "missing-worker")
