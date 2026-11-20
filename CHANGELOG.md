@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.4 — 2026-11-20
+
+- fix: release socket locks explicitly and check Windows helper paths
+
 ## 0.2.3 — 2026-11-20
 
 - fix(arch): resolve relocated compatibility helpers
