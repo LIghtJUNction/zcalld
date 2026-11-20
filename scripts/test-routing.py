@@ -14,6 +14,8 @@ import threading
 import time
 import unittest
 
+from fixture_private import create_privacy_key
+
 
 class Mock(http.server.BaseHTTPRequestHandler):
     def log_message(self, *_):
@@ -81,10 +83,9 @@ class Routing(unittest.TestCase):
         self.log = tempfile.TemporaryFile()
         settings = self.root / 'settings.json'
         settings.write_text(json.dumps({'redact': True, 'redactPersonal': True, 'redactModelOff': True}), encoding="utf-8", newline="\n")
-        key = self.root / 'redact.key'
-        key.write_bytes(b'K' * 32)
-        if os.name == 'posix':
-            key.chmod(0o600)
+        key = create_privacy_key(self.root, binary=self.args.binary,
+                                 redact_plugin=self.args.redact_plugin,
+                                 privacy_worker=self.args.privacy_worker)
         privacy = self.root / 'privacy.json'
         privacy.write_text(json.dumps({'worker': str(self.args.privacy_worker), 'settings': str(settings), 'key': str(key)}), encoding="utf-8", newline="\n")
         self.state = {'groups': [{'name': 'group/test', 'mode': 'order', 'members': [
