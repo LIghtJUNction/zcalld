@@ -2,7 +2,7 @@
 
 A native local AI gateway for Linux, macOS and Windows, built on [zcall](https://github.com/LIghtJUNction/zcall), [zconv](https://github.com/LIghtJUNction/zconv), [zplugin](https://github.com/LIghtJUNction/zplugin) and [zsys](https://github.com/LIghtJUNction/zsys).
 
-The CLI daemon owns transport, bounded queues, credentials and protocol conversion. Privacy, community providers and model-group decisions are optional plugins. [zcall-gui](https://github.com/LIghtJUNction/zcall-gui) is a separate native application built with [zui](https://github.com/LIghtJUNction/zui); closing it leaves the gateway running. There is no embedded browser in either application. The optional compatibility package supplies the Go privacy and advanced-rule workers and one lazy Bun host for existing JavaScript community plugins. [zcall-omarchy](https://github.com/LIghtJUNction/zcall-omarchy) is a second, independent frontend that uses Omarchy's native plugin and menu interfaces without another background gateway.
+The CLI daemon owns transport, bounded queues, credentials and protocol conversion. Privacy, community providers and model-group decisions are optional plugins. [zcall-gui](https://github.com/LIghtJUNction/zcall-gui) is a separate native application built with [zgpui](https://github.com/LIghtJUNction/zgpui); closing it leaves the gateway running. There is no embedded browser in either application. The optional compatibility package supplies the Go privacy and advanced-rule workers and one lazy Bun host for existing JavaScript community plugins. [zcall-omarchy](https://github.com/LIghtJUNction/zcall-omarchy) is a second, independent frontend that uses Omarchy's native plugin and menu interfaces without another background gateway.
 
 ## Install
 

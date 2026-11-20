@@ -20,10 +20,10 @@ This rule was explicitly requested on 2026-11-20 (Asia/Taipei). Existing owners 
 | zcalld core, packages, migration/cutover | zcalld maintainer |
 | zcalld-compat optional privacy/community host | compatibility maintainer |
 | zcall-gui application and native packages | GUI maintainer |
-| zui-native package / zui repository | zui maintainer, with the Project Z coordinator owning the agreed single registry publication |
+| zgpui package / zgpui repository | zgpui maintainer, with the Project Z coordinator owning the agreed single registry publication |
 | Other Project Z downstream repositories | their existing owners; updates and evidence must return to the originating library owner |
 
-The root repository pins zcall, zconv, zplugin, zsys, compatibility and GUI sources. The GUI pins zui. Both levels are part of a zui propagation; updating only the GUI's inner gitlink is insufficient.
+The root repository pins zcall, zconv, zplugin, zsys, compatibility and GUI sources. The GUI pins zgpui through vendor/zgpui. Both levels are part of a zgpui propagation; updating only the GUI's inner gitlink is insufficient.
 
 ## Release records
 
