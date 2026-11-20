@@ -45,6 +45,38 @@ SOURCE_URL = (
     + SOURCE_REF
     + "/codex-rs/core/src/client.rs"
 )
+PROVIDER_SOURCE_URL = (
+    "https://github.com/openai/codex/blob/"
+    + SOURCE_REF
+    + "/codex-rs/model-provider-info/src/lib.rs"
+)
+# Preserve the reviewed built-in provider's auth-dependent default path. Only
+# the scheme/authority changes to our isolated loopback server; changing ChatGPT
+# to /v1 would hide the /backend-api/codex/responses compatibility regression.
+API_BASE_PATH = "/v1"
+CHATGPT_BASE_PATH = "/backend-api/codex"
+RATE_LIMIT_HEADERS = [
+    ("x-codex-primary-used-percent", "37.5"),
+    ("x-codex-primary-window-minutes", "300"),
+    ("x-codex-primary-reset-at", "1900000000"),
+    ("x-codex-secondary-used-percent", "12"),
+    ("x-codex-secondary-window-minutes", "10080"),
+    ("x-codex-secondary-reset-at", "1900500000"),
+    ("x-codex-credits-has-credits", "true"),
+    ("x-codex-credits-unlimited", "false"),
+    ("x-codex-credits-balance", "4.25"),
+]
+EXPECTED_RATE_LIMITS = {
+    "limit_id": "codex",
+    "primary": {"used_percent": 37.5, "window_minutes": 300, "resets_at": 1900000000},
+    "secondary": {"used_percent": 12.0, "window_minutes": 10080, "resets_at": 1900500000},
+    "credits": {"has_credits": True, "unlimited": False, "balance": "4.25"},
+}
+
+
+def response_path(auth_shape):
+    base = CHATGPT_BASE_PATH if auth_shape == "chatgpt" else API_BASE_PATH
+    return base + "/responses"
 
 
 def digest(path):
@@ -135,10 +167,11 @@ class MockServer(http.server.ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
-    def __init__(self, mode, upstream=None):
+    def __init__(self, mode, upstream=None, expected_path="/v1/responses"):
         super().__init__(("127.0.0.1", 0), MockHandler)
         self.mode = mode
         self.upstream = upstream
+        self.expected_path = expected_path
         self.records = []
         self.errors = []
         self.mutex = threading.Lock()
@@ -198,7 +231,23 @@ class MockHandler(http.server.BaseHTTPRequestHandler):
             "authorization_present": bool(self.headers.get("Authorization")),
         }
         try:
-            if self.path != "/v1/responses":
+            if self.server.mode == "bootstrap" and self.command == "GET":
+                replies = {
+                    "/backend-api/wham/accounts/check": {"accounts": [{
+                        "id": "fixture-account", "plan_type": "plus",
+                        "workspace_backend_origin": "https://chatgpt.com",
+                        "account_routing_override": "NO_CONSTRAINT",
+                    }]},
+                    "/backend-api/wham/config/bundle": {
+                        "config_toml": {"enterprise_managed": []}
+                    },
+                }
+                if self.path in replies:
+                    record["status"] = 200
+                    self.server.record(record)
+                    self.reply(200, json.dumps(replies[self.path]).encode())
+                    return
+            if self.path != self.server.expected_path:
                 record["status"] = 404
                 self.server.record(record)
                 self.reply(404, b"{}")
@@ -250,7 +299,7 @@ class MockHandler(http.server.BaseHTTPRequestHandler):
                 raise ValueError("unexpected model or stream flag")
             record["status"] = 200
             self.server.record(record)
-            self.reply(200, event_bytes(), "text/event-stream")
+            self.reply(200, event_bytes(), "text/event-stream", RATE_LIMIT_HEADERS)
         except Exception as exc:
             self.server.errors.append(type(exc).__name__)
             try:
@@ -276,7 +325,27 @@ def private_environment(root):
     return env
 
 
-def codex_case(name, port, expected, root, codex, auth_shape="custom"):
+def rate_limit_events(codex_home):
+    """Extract only synthetic quota fields from this fixture's own rollout."""
+    observed = []
+    total = 0
+    for path in sorted((codex_home / "sessions").rglob("*.jsonl")):
+        with path.open("rb") as stream:
+            while line := stream.readline(256 * 1024 + 1):
+                total += len(line)
+                if len(line) > 256 * 1024 or total > 8 * 1024 * 1024:
+                    raise ValueError("fixture rollout exceeded its read bound")
+                value = json.loads(line)
+                payload = value.get("payload", {})
+                if value.get("type") != "event_msg" or payload.get("type") != "token_count":
+                    continue
+                limits = payload.get("rate_limits")
+                if isinstance(limits, dict):
+                    observed.append({key: limits.get(key) for key in EXPECTED_RATE_LIMITS})
+    return observed
+
+
+def codex_case(name, port, expected, root, codex, auth_shape="custom", bootstrap_port=None):
     case = root / name
     case.mkdir(mode=0o700)
     work = case / "work"
@@ -297,7 +366,11 @@ def codex_case(name, port, expected, root, codex, auth_shape="custom"):
         'model_instructions_file = ' + json.dumps(str(instructions)) + '\n'
     )
     if builtin:
-        config += 'openai_base_url = "http://127.0.0.1:' + str(port) + '/v1"\n'
+        base_path = CHATGPT_BASE_PATH if auth_shape == "chatgpt" else API_BASE_PATH
+        config += 'openai_base_url = "http://127.0.0.1:' + str(port) + base_path + '"\n'
+        # Account/backend discovery has a separate URL setting. Keep it in the
+        # same isolated server as well; no real account endpoint is reachable.
+        config += 'chatgpt_base_url = "http://127.0.0.1:' + str(bootstrap_port or port) + '/backend-api/"\n'
         fake_auth(Path(env["CODEX_HOME"]), auth_shape)
     config += (
         '[analytics]\nenabled = false\n'
@@ -318,7 +391,7 @@ def codex_case(name, port, expected, root, codex, auth_shape="custom"):
     Path(env["CODEX_HOME"], "config.toml").write_text(config)
     last = case / "last.txt"
     command = [
-        codex, "exec", "--skip-git-repo-check", "--ephemeral", "--ignore-rules",
+        codex, "exec", "--skip-git-repo-check", "--ignore-rules",
         "--json", "--color", "never", "--cd", str(work),
         "--output-last-message", str(last), PROMPT,
     ]
@@ -354,16 +427,27 @@ def codex_case(name, port, expected, root, codex, auth_shape="custom"):
         for item in events
     )
     exact = last.is_file() and last.read_text().strip() == "OK"
+    # Persistent rollout is confined to the disposable private CODEX_HOME. It
+    # proves the real client parsed response headers, not just proxy receipt.
+    quota_events = rate_limit_events(Path(env["CODEX_HOME"]))
+    quota_verified = EXPECTED_RATE_LIMITS in quota_events
     success = not timed_out and not tool_output and (
-        (process.returncode == 0 and completed and exact) if expected
+        (process.returncode == 0 and completed and exact and quota_verified) if expected
         else (process.returncode != 0 and not completed and not exact)
     )
     return {
         "case": name, "auth_shape": auth_shape, "passed": success, "exit_code": process.returncode,
+        "expected_response_path": response_path(auth_shape),
+        "builtin_endpoint_override": (
+            "loopback_origin_only_preserving_default_path" if builtin else None
+        ),
         "expected_completion": expected,
         "retry_policy": "builtin_defaults" if builtin else "http_0_stream_0",
         "timed_out": timed_out, "completed": completed, "exact_ok": exact,
         "tool_outputs": tool_output,
+        "rate_limits_verified_in_client": quota_verified,
+        "rate_limits_event_count": len(quota_events),
+        "rate_limits": EXPECTED_RATE_LIMITS if quota_verified else None,
         "elapsed_seconds": round(time.monotonic() - start, 3),
         "event_types": sorted({str(item.get("type")) for item in events}),
         "stderr_bytes": len(stderr),
@@ -430,13 +514,18 @@ def inner(args):
         ("custom", "400"), ("custom", "426"), ("api_key", "426"),
         ("chatgpt", "400"), ("chatgpt", "426"),
     ]:
-        with MockServer(status) as server:
+        with (MockServer(status, expected_path=response_path(auth_shape)) as server,
+              MockServer("bootstrap") as bootstrap):
             result = codex_case("mock_" + auth_shape + "_" + status, server.port,
-                                status == "426", root, "/codex", auth_shape)
+                                status == "426", root, "/codex", auth_shape, bootstrap.port)
             result["http"] = server.records
             gets = [r for r in server.records if r["method"] == "GET" and r["websocket"]]
             posts = [r for r in server.records if r["method"] == "POST"]
+            result["response_path_verified"] = bool(gets) and all(
+                r["path"] == response_path(auth_shape) for r in gets + posts
+            )
             result["passed"] &= bool(gets) and not server.errors
+            result["passed"] &= result["response_path_verified"]
             if status == "400":
                 result["passed"] &= not posts and all(r["status"] == 400 for r in gets)
             else:
@@ -453,10 +542,11 @@ def inner(args):
                     "/zcalld", upstream.port, root
                 )
                 try:
-                    with MockServer("proxy", port) as front:
+                    with (MockServer("proxy", port, response_path(auth_shape)) as front,
+                          MockServer("bootstrap") as bootstrap):
                         result = codex_case(
                             "gateway_" + auth_shape + "_426", front.port,
-                            True, root, "/codex", auth_shape
+                            True, root, "/codex", auth_shape, bootstrap.port
                         )
                         result["http"] = front.records
                         result["upstream_http"] = upstream.records
@@ -465,6 +555,9 @@ def inner(args):
                             if r["method"] == "GET" and r["websocket"]
                         ]
                         posts = [r for r in front.records if r["method"] == "POST"]
+                        result["response_path_verified"] = bool(gets) and all(
+                            r["path"] == response_path(auth_shape) for r in gets + posts
+                        )
                         result["passed"] &= (
                             bool(gets) and all(r["status"] == 426 for r in gets)
                             and len(posts) == 1 and posts[0]["status"] == 200
@@ -476,6 +569,8 @@ def inner(args):
                             and upstream.records[0]["status"] == 200
                             and upstream.records[0]["content_encoding"] in ("", "identity")
                             and not upstream.records[0]["authorization_present"]
+                            and upstream.records[0]["path"] == "/v1/responses"
+                            and result["response_path_verified"]
                             and not front.errors and not upstream.errors
                         )
                         cases.append(result)
@@ -492,6 +587,8 @@ def inner(args):
         "schema_version": 1, "kind": "isolated_real_codex_transport",
         "codex_version": version.stdout.strip(), "source_ref": SOURCE_REF,
         "source_url": SOURCE_URL,
+        "provider_source_url": PROVIDER_SOURCE_URL,
+        "chatgpt_default_base_path": CHATGPT_BASE_PATH,
         "separate_network_namespace": True, "inherited_credentials": False,
         "real_model_requests": 0, "fixture_replays": 0,
         "passed": all(case["passed"] for case in cases),

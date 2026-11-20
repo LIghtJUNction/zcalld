@@ -24,13 +24,23 @@
       "blob_sha": "feeea5fea4b031f7238a4412ef31378cf89a5c97",
       "facts": [
         "The built-in OpenAI provider supports WebSockets and requires authentication.",
-        "The custom-provider supports_websockets field defaults to false."
+        "The custom-provider supports_websockets field defaults to false.",
+        "ChatGPT authentication defaults to /backend-api/codex; API-key authentication defaults to /v1.",
+        "The client appends /responses to its selected provider base URL."
+      ]
+    },
+    {
+      "url": "https://github.com/openai/codex/blob/rust-v0.170.0/codex-rs/codex-api/src/rate_limits.rs",
+      "blob_sha": "4fcfc4ccd68aac340be71be3639e804e476d2ed1",
+      "facts": [
+        "HTTP response headers are parsed into primary/secondary rate-limit windows and credit snapshots.",
+        "The fixture verifies header-derived values in actual client TokenCount events, without injecting a WebSocket-only event into SSE."
       ]
     }
   ],
   "fixture": {
     "path": "scripts/test-codex-transport.py",
-    "sha256": "f951f2c119c33097abd17a04230588cf9d6750814dfa0b88bbe5e8f0bdb561a1",
+    "sha256": "95d29dc41032b1475170d7db9805e18d6320ab389fc6dfaaf6d509ecbcd72ad3",
     "invocation": "python3 scripts/test-codex-transport.py --codex /path/to/codex --binary /path/to/zcalld --output /private/receipt.json",
     "platform": "Linux x86_64",
     "network": "separate bubblewrap network namespace",
@@ -39,12 +49,17 @@
     "real_provider_requests": 0,
     "fixture_replays": 0,
     "tests_passed": 7,
-    "tests_skipped": 0
+    "tests_skipped": 0,
+    "endpoint_selection": "built-in OpenAI auth-dependent default path; scheme and authority replaced with isolated loopback",
+    "chatgpt_response_path": "/backend-api/codex/responses",
+    "api_key_response_path": "/v1/responses",
+    "account_bootstrap": "separate local fixed accounts/check and config/bundle responses; generated fake account only",
+    "quota_validation": "synthetic upstream headers compared with actual client TokenCount rollout snapshots in the disposable private home"
   },
   "tested_gateway": {
-    "binary_sha256": "5b0cbfe3225bfbc1d7319caaad3e881f9e9ba12c8f046fa050b5c34b2923a2af",
-    "build_stage": "hotfix build before the version bump",
-    "base_revision": "226764bd980419bfd123bf297b891e09ccdc94c1"
+    "binary_sha256": "bc84f4d55dcc090ed9ed4ac876a2ac502812941ccad9e68c6e0b955e55d0e34b",
+    "build_stage": "backend-path and quota-header fix before the version bump",
+    "base_revision": "f711564dfc30883537a86376f6390c5f8bb13666"
   },
   "regression_before_decoder": {
     "binary_sha256": "a3bd70ce2ef9872616b46459ffbf2de3d26413f3d9efeb0177b2acefd1713d38",
@@ -70,6 +85,8 @@
       "completed": false,
       "exact_ok": false,
       "client_exit_code": 1,
+      "response_path": "/v1/responses",
+      "response_path_verified": true,
       "handshake_statuses": [
         400,
         400
@@ -77,7 +94,10 @@
       "post_statuses": [],
       "post_content_encodings": [],
       "retry_policy": "http_0_stream_0",
-      "tool_outputs": false
+      "tool_outputs": false,
+      "rate_limits_verified_in_client": false,
+      "rate_limits_event_count": 0,
+      "synthetic_rate_limits": null
     },
     {
       "name": "mock_custom_426",
@@ -87,6 +107,8 @@
       "completed": true,
       "exact_ok": true,
       "client_exit_code": 0,
+      "response_path": "/v1/responses",
+      "response_path_verified": true,
       "handshake_statuses": [
         426
       ],
@@ -97,7 +119,27 @@
         "identity"
       ],
       "retry_policy": "http_0_stream_0",
-      "tool_outputs": false
+      "tool_outputs": false,
+      "rate_limits_verified_in_client": true,
+      "rate_limits_event_count": 1,
+      "synthetic_rate_limits": {
+        "limit_id": "codex",
+        "primary": {
+          "used_percent": 37.5,
+          "window_minutes": 300,
+          "resets_at": 1900000000
+        },
+        "secondary": {
+          "used_percent": 12.0,
+          "window_minutes": 10080,
+          "resets_at": 1900500000
+        },
+        "credits": {
+          "has_credits": true,
+          "unlimited": false,
+          "balance": "4.25"
+        }
+      }
     },
     {
       "name": "mock_api_key_426",
@@ -107,63 +149,8 @@
       "completed": true,
       "exact_ok": true,
       "client_exit_code": 0,
-      "handshake_statuses": [
-        426
-      ],
-      "post_statuses": [
-        200
-      ],
-      "post_content_encodings": [
-        "identity"
-      ],
-      "retry_policy": "builtin_defaults",
-      "tool_outputs": false
-    },
-    {
-      "name": "mock_chatgpt_400",
-      "passed": true,
-      "auth_shape": "chatgpt",
-      "expected_completion": false,
-      "completed": false,
-      "exact_ok": false,
-      "client_exit_code": 1,
-      "handshake_statuses": [
-        400,
-        400
-      ],
-      "post_statuses": [],
-      "post_content_encodings": [],
-      "retry_policy": "builtin_defaults",
-      "tool_outputs": false
-    },
-    {
-      "name": "mock_chatgpt_426",
-      "passed": true,
-      "auth_shape": "chatgpt",
-      "expected_completion": true,
-      "completed": true,
-      "exact_ok": true,
-      "client_exit_code": 0,
-      "handshake_statuses": [
-        426
-      ],
-      "post_statuses": [
-        200
-      ],
-      "post_content_encodings": [
-        "zstd"
-      ],
-      "retry_policy": "builtin_defaults",
-      "tool_outputs": false
-    },
-    {
-      "name": "gateway_api_key_426",
-      "passed": true,
-      "auth_shape": "api_key",
-      "expected_completion": true,
-      "completed": true,
-      "exact_ok": true,
-      "client_exit_code": 0,
+      "response_path": "/v1/responses",
+      "response_path_verified": true,
       "handshake_statuses": [
         426
       ],
@@ -175,7 +162,136 @@
       ],
       "retry_policy": "builtin_defaults",
       "tool_outputs": false,
+      "rate_limits_verified_in_client": true,
+      "rate_limits_event_count": 1,
+      "synthetic_rate_limits": {
+        "limit_id": "codex",
+        "primary": {
+          "used_percent": 37.5,
+          "window_minutes": 300,
+          "resets_at": 1900000000
+        },
+        "secondary": {
+          "used_percent": 12.0,
+          "window_minutes": 10080,
+          "resets_at": 1900500000
+        },
+        "credits": {
+          "has_credits": true,
+          "unlimited": false,
+          "balance": "4.25"
+        }
+      }
+    },
+    {
+      "name": "mock_chatgpt_400",
+      "passed": true,
+      "auth_shape": "chatgpt",
+      "expected_completion": false,
+      "completed": false,
+      "exact_ok": false,
+      "client_exit_code": 1,
+      "response_path": "/backend-api/codex/responses",
+      "response_path_verified": true,
+      "handshake_statuses": [
+        400,
+        400
+      ],
+      "post_statuses": [],
+      "post_content_encodings": [],
+      "retry_policy": "builtin_defaults",
+      "tool_outputs": false,
+      "rate_limits_verified_in_client": false,
+      "rate_limits_event_count": 0,
+      "synthetic_rate_limits": null
+    },
+    {
+      "name": "mock_chatgpt_426",
+      "passed": true,
+      "auth_shape": "chatgpt",
+      "expected_completion": true,
+      "completed": true,
+      "exact_ok": true,
+      "client_exit_code": 0,
+      "response_path": "/backend-api/codex/responses",
+      "response_path_verified": true,
+      "handshake_statuses": [
+        426
+      ],
+      "post_statuses": [
+        200
+      ],
+      "post_content_encodings": [
+        "zstd"
+      ],
+      "retry_policy": "builtin_defaults",
+      "tool_outputs": false,
+      "rate_limits_verified_in_client": true,
+      "rate_limits_event_count": 1,
+      "synthetic_rate_limits": {
+        "limit_id": "codex",
+        "primary": {
+          "used_percent": 37.5,
+          "window_minutes": 300,
+          "resets_at": 1900000000
+        },
+        "secondary": {
+          "used_percent": 12.0,
+          "window_minutes": 10080,
+          "resets_at": 1900500000
+        },
+        "credits": {
+          "has_credits": true,
+          "unlimited": false,
+          "balance": "4.25"
+        }
+      }
+    },
+    {
+      "name": "gateway_api_key_426",
+      "passed": true,
+      "auth_shape": "api_key",
+      "expected_completion": true,
+      "completed": true,
+      "exact_ok": true,
+      "client_exit_code": 0,
+      "response_path": "/v1/responses",
+      "response_path_verified": true,
+      "handshake_statuses": [
+        426
+      ],
+      "post_statuses": [
+        200
+      ],
+      "post_content_encodings": [
+        "identity"
+      ],
+      "retry_policy": "builtin_defaults",
+      "tool_outputs": false,
+      "rate_limits_verified_in_client": true,
+      "rate_limits_event_count": 1,
+      "synthetic_rate_limits": {
+        "limit_id": "codex",
+        "primary": {
+          "used_percent": 37.5,
+          "window_minutes": 300,
+          "resets_at": 1900000000
+        },
+        "secondary": {
+          "used_percent": 12.0,
+          "window_minutes": 10080,
+          "resets_at": 1900500000
+        },
+        "credits": {
+          "has_credits": true,
+          "unlimited": false,
+          "balance": "4.25"
+        }
+      },
       "upstream_posts": 1,
+      "upstream_paths": [
+        "/v1/responses"
+      ],
       "upstream_content_encodings": [
         "identity"
       ],
@@ -189,6 +305,8 @@
       "completed": true,
       "exact_ok": true,
       "client_exit_code": 0,
+      "response_path": "/backend-api/codex/responses",
+      "response_path_verified": true,
       "handshake_statuses": [
         426
       ],
@@ -200,7 +318,30 @@
       ],
       "retry_policy": "builtin_defaults",
       "tool_outputs": false,
+      "rate_limits_verified_in_client": true,
+      "rate_limits_event_count": 1,
+      "synthetic_rate_limits": {
+        "limit_id": "codex",
+        "primary": {
+          "used_percent": 37.5,
+          "window_minutes": 300,
+          "resets_at": 1900000000
+        },
+        "secondary": {
+          "used_percent": 12.0,
+          "window_minutes": 10080,
+          "resets_at": 1900500000
+        },
+        "credits": {
+          "has_credits": true,
+          "unlimited": false,
+          "balance": "4.25"
+        }
+      },
       "upstream_posts": 1,
+      "upstream_paths": [
+        "/v1/responses"
+      ],
       "upstream_content_encodings": [
         "identity"
       ],
@@ -212,6 +353,30 @@
     "The SSE response is fixed local fixture data, not a live model or account check.",
     "The real-client execution here covers Linux only; native release platform gates are separate.",
     "Built-in client retry defaults are preserved. Each successful case observed one generation POST.",
-    "Model-catalog discovery is outside this fixture and receives a local 404 response."
-  ]
+    "Model-catalog discovery is outside this fixture and receives a local 404 response.",
+    "The previous transport fixture forced ChatGPT onto /v1; this revised fixture retains the default backend path.",
+    "The gateway quota assertions prove client response-header consumption, not interactive footer display or account-usage endpoint support.",
+    "The gateway does not implement the account-bootstrap or model-catalog endpoints simulated or rejected by this isolated fixture."
+  ],
+  "regression_before_backend_alias": {
+    "binary_sha256": "7c01e4aa0462772619e0d2ee76b3bd360df13a8cf55159cd9076820c1eefb8f4",
+    "path": "/backend-api/codex/responses",
+    "handshake_statuses": [
+      426
+    ],
+    "post_statuses": [
+      404,
+      404,
+      404,
+      404,
+      404,
+      404
+    ],
+    "post_encoding": "zstd",
+    "upstream_posts": 0,
+    "completed": false,
+    "meaning": "The installed pre-alias gateway negotiated HTTP but returned 404 for the actual ChatGPT fallback path. Built-in Codex retry behavior produced six rejected POSTs; none reached an upstream.",
+    "api_key_completed": true,
+    "api_key_quota_verified_in_client": false
+  }
 }
