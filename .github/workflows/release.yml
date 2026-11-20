@@ -133,7 +133,7 @@ jobs:
           python3 scripts/test-control.py
           python3 scripts/test-library.py
           python3 scripts/test-native-runtime.py --binary "$ZCALLD_TEST_BINARY"
-      - name: Verify native privacy, routing and community MCP workers
+      - name: Verify native privacy, routing, MCP and builtin provider workers
         shell: bash
         run: python3 scripts/test-native-compat.py
       - name: Assemble the native archive

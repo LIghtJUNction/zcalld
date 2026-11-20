@@ -37,4 +37,7 @@ subprocess.run([sys.executable, str(root / "scripts/test-routing-advanced.py"), 
 subprocess.run([sys.executable, str(root / "scripts/test-mcp.py"),
                 "--binary", str(binary), "--pluginctl", str(pluginctl),
                 "--community-plugin", str(community)], cwd=root, check=True)
-print("Native compatibility accepted: privacy, advanced routing and community MCP over real Rust/Go/Bun IPC")
+subprocess.run([sys.executable, str(root / "scripts/test-builtin-fetch.py"), *common,
+                "--pluginctl", str(pluginctl), "--community-plugin", str(community)],
+               cwd=root, check=True)
+print("Native compatibility accepted: privacy, routing, MCP and generated builtin provider fetch over real Rust/Go/Bun IPC")
