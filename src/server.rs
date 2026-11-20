@@ -135,7 +135,7 @@ fn handle(socket: &mut Stream, config: &Config, plugins: &mut Plugins, client: &
     ) {
         Ok(request) => request,
         Err(error) => {
-            let _ = http::error(socket, error.status, error.message);
+            http::reject_and_close(socket, error.status, error.message);
             return;
         }
     };

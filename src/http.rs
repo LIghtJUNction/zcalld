@@ -337,6 +337,49 @@ pub fn error(socket: &mut Stream, status: u16, message: &str) -> io::Result<()> 
     respond(socket, status, "application/json", body.as_bytes())
 }
 
+/// Send an early rejection before discarding a bounded amount of in-flight input.
+/// A write half-close preserves the response when the peer sent the body after
+/// its headers (RFC 9112 section 9.6). Dropping a socket with unread input can
+/// instead reset TCP and erase the response on Windows.
+pub fn reject_and_close(socket: &mut Stream, status: u16, message: &str) {
+    if error(socket, status, message).is_err() || socket.shutdown_write().is_err() {
+        return;
+    }
+    discard_rejected_input(socket);
+}
+
+fn discard_rejected_input(socket: &mut Stream) -> usize {
+    let deadline = Instant::now() + Duration::from_millis(200);
+    let mut remaining = 64 * 1024;
+    let mut buffer = [0u8; 4096];
+    while remaining != 0 && !STOPPING.load(Ordering::Relaxed) {
+        let Some(time_left) = deadline.checked_duration_since(Instant::now()) else {
+            break;
+        };
+        if time_left.is_zero()
+            || socket
+                .set_read_timeout(Some(time_left.min(Duration::from_millis(50))))
+                .is_err()
+        {
+            break;
+        }
+        let capacity = remaining.min(buffer.len());
+        match socket.read(&mut buffer[..capacity]) {
+            Ok(0) => break,
+            Ok(count) => remaining -= count,
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::Interrupted
+                        | io::ErrorKind::TimedOut
+                        | io::ErrorKind::WouldBlock
+                ) => {}
+            Err(_) => break,
+        }
+    }
+    64 * 1024 - remaining
+}
+
 pub fn reason(status: u16) -> &'static str {
     match status {
         200 => "OK",
@@ -444,6 +487,100 @@ pub fn constant_eq(left: &[u8], right: &[u8]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn tcp_pair() -> (std::net::TcpStream, Stream) {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let client = std::net::TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (server, _) = listener.accept().unwrap();
+        client
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        client
+            .set_write_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        server
+            .set_write_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        server.set_nodelay(true).unwrap();
+        client.set_nodelay(true).unwrap();
+        (client, Stream::Tcp(server))
+    }
+
+    #[test]
+    fn rejection_arrives_before_a_delayed_request_body() {
+        let (mut client, mut server) = tcp_pair();
+        let worker = std::thread::spawn(move || {
+            let error = match read_request(&mut server, 1024, Duration::from_secs(3)) {
+                Ok(_) => panic!("Origin request must be rejected"),
+                Err(error) => error,
+            };
+            assert_eq!(error.status, 403);
+            reject_and_close(&mut server, error.status, error.message);
+        });
+        client.write_all(b"POST /v1/chat/completions HTTP/1.1\r\nHost: localhost\r\nOrigin: https://example.invalid\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n").unwrap();
+        // FIN on the response direction must arrive without waiting for "{}".
+        let mut response = String::new();
+        client.read_to_string(&mut response).unwrap();
+        assert!(response.starts_with("HTTP/1.1 403 Forbidden\r\n"));
+        assert!(response.ends_with("\"code\":403}}"));
+        // A scheduler pause can exceed the bounded drain grace period. The
+        // response is already complete; late input may then be refused.
+        for result in [
+            client.write_all(b"{}"),
+            client.shutdown(std::net::Shutdown::Write),
+        ] {
+            if let Err(error) = result {
+                assert!(matches!(
+                    error.kind(),
+                    io::ErrorKind::BrokenPipe
+                        | io::ErrorKind::ConnectionReset
+                        | io::ErrorKind::ConnectionAborted
+                        | io::ErrorKind::NotConnected
+                ));
+            }
+        }
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn rejected_incomplete_body_cannot_hold_a_worker() {
+        let (mut client, mut server) = tcp_pair();
+        let (done, result) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            reject_and_close(&mut server, 403, "blocked");
+            done.send(()).unwrap();
+        });
+        let mut response = String::new();
+        client.read_to_string(&mut response).unwrap();
+        assert!(response.starts_with("HTTP/1.1 403 Forbidden\r\n"));
+        // The peer deliberately keeps its sending side open indefinitely.
+        result.recv_timeout(Duration::from_secs(2)).unwrap();
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn rejected_input_discard_has_a_byte_budget() {
+        let (mut client, mut server) = tcp_pair();
+        // Queue an over-budget body before starting the deadline. This tests
+        // bytes consumed, without depending on how fast the peer is scheduled.
+        client.write_all(&[b'x'; 64 * 1024]).unwrap();
+        client.write_all(b"!").unwrap();
+        let (done, result) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let count = discard_rejected_input(&mut server);
+            server
+                .set_read_timeout(Some(Duration::from_secs(3)))
+                .unwrap();
+            let mut tail = [0u8; 1];
+            server.read_exact(&mut tail).unwrap();
+            done.send((count, tail)).unwrap();
+        });
+        assert_eq!(
+            result.recv_timeout(Duration::from_secs(4)).unwrap(),
+            (64 * 1024, *b"!")
+        );
+        worker.join().unwrap();
+    }
+
     #[test]
     fn json_escaping() {
         assert_eq!(quote("a\n\"b"), "\"a\\n\\\"b\"");

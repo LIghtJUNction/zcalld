@@ -2,6 +2,7 @@
 """Exercise real listener startup, HTTP, ownership, and shutdown with a local mock."""
 import argparse
 import contextlib
+import errno
 import http.client
 import http.server
 import json
@@ -132,6 +133,52 @@ class TransportTests(unittest.TestCase):
         for file in self.log_files:
             file.close()
         self.directory.cleanup()
+
+    def test_origin_rejection_preserves_response_before_split_body(self):
+        self.write_config()
+        self.start()
+        with socket.create_connection(("127.0.0.1", self.port), timeout=3) as client:
+            client.sendall(
+                b"POST /v1/chat/completions HTTP/1.1\r\nHost: localhost\r\n"
+                b"Origin: https://example.invalid\r\nContent-Type: application/json\r\n"
+                b"Content-Length: 2\r\n\r\n")
+            response = http.client.HTTPResponse(client)
+            response.begin()
+            self.assertEqual(response.status, 403)
+            self.assertEqual(json.loads(response.read())["error"]["code"], 403)
+            self.assertEqual(client.recv(1), b"")
+            # The body is deliberately sent after the rejection's FIN.
+            try:
+                client.sendall(b"{}")
+                client.shutdown(socket.SHUT_WR)
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                # A delayed test thread can exceed the bounded close grace.
+                pass
+            except OSError as error:
+                if error.errno != errno.ENOTCONN:
+                    raise
+        self.assertEqual(self.upstream.requests, [])
+
+    def test_incomplete_rejected_bodies_release_all_workers(self):
+        self.write_config()
+        self.start()
+        with contextlib.ExitStack() as stack:
+            for _ in range(2):
+                client = stack.enter_context(socket.create_connection(
+                    ("127.0.0.1", self.port), timeout=3))
+                client.sendall(
+                    b"POST /v1/chat/completions HTTP/1.1\r\nHost: localhost\r\n"
+                    b"Origin: https://example.invalid\r\nContent-Type: application/json\r\n"
+                    b"Content-Length: 1048576\r\n\r\n")
+                response = http.client.HTTPResponse(client)
+                response.begin()
+                self.assertEqual(response.status, 403)
+                self.assertEqual(json.loads(response.read())["error"]["code"], 403)
+            # Both sending sides remain open, but health must regain a worker.
+            status, _ = request(http.client.HTTPConnection(
+                "127.0.0.1", self.port, timeout=2))
+            self.assertEqual(status, 200)
+        self.assertEqual(self.upstream.requests, [])
 
     def write_config(self, tcp=True, unix=False, extra=""):
         self.config.write_text(
