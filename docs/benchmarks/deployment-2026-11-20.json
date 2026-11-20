@@ -1,0 +1,341 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-20",
+  "kind": "recorded_deployment_acceptance_and_resource_observations",
+  "document": "../DEPLOYMENT-2026-11-20.md",
+  "deployment": {
+    "os": "Linux",
+    "package_system": "Arch",
+    "architecture": "x86_64",
+    "versions": {
+      "core_package": "0.2.4-1",
+      "compat_package": "0.1.5-2",
+      "gui_application": "0.1.0",
+      "omarchy_frontend": "0.1.2"
+    },
+    "service_state": {
+      "LoadState": "loaded",
+      "ActiveState": "active",
+      "SubState": "running",
+      "UnitFileState": "enabled"
+    },
+    "tcp": {
+      "bind": "0.0.0.0",
+      "port": 3425,
+      "existing_listener_preserved": true
+    },
+    "unix_socket": {
+      "available": true,
+      "mode": "0600",
+      "private_permissions_verified": true
+    },
+    "transaction": {
+      "completed": true,
+      "elapsed_seconds": 5.2965,
+      "meaning": "entire cutover transaction",
+      "exact_client_unavailability_measured": false
+    },
+    "startup": {
+      "original_xdg_login_autostart_backed_up_and_disabled": true,
+      "replacement_user_systemd_service_enabled": true,
+      "all_potential_original_startup_mechanisms_claimed": false
+    }
+  },
+  "preservation": {
+    "providers": 8,
+    "routes": 99,
+    "full_catalog_metadata_preserved": true,
+    "groups": 14,
+    "accounts": 7,
+    "community_packages": 4,
+    "agent_paths": {
+      "tracked": 16,
+      "existing_unchanged": 8,
+      "absent_still_absent": 8
+    },
+    "native_authentication_owner_identities_preserved": 4,
+    "externally_managed_accounts_preserved": 1,
+    "privacy": {
+      "source_rule_fields_preserved": 5,
+      "active_key_bytes": 32,
+      "active_key_unchanged": true,
+      "model_files_unchanged": 4,
+      "prior_record_files_with_prefixes_preserved": 27,
+      "checked_counters_monotonic": true
+    },
+    "usage": {
+      "preserved_bytes": 161013002,
+      "source_bytes": 161013002,
+      "candidate_bytes": 161013332,
+      "source_prefix_preserved": true,
+      "candidate_prefix_preserved": true,
+      "source_unchanged_after_handover": true
+    }
+  },
+  "functional_acceptance": {
+    "tcp_and_unix_health_catalog_mcp_recorded_passed": true,
+    "catalog_http_status": 200,
+    "catalog_entries": 99,
+    "mcp": {
+      "protocol_version": "2025-06-18",
+      "initialize_ping_and_tools_list_passed": true,
+      "listed_tools": 0,
+      "production_tools_call_exercised": false
+    },
+    "generation": {
+      "passed": true,
+      "attempts": 2,
+      "automatic_retries": 0,
+      "hard_token_cap": false,
+      "wire_hard_cap": false,
+      "results": [
+        {
+          "stream": false,
+          "http_status": 200,
+          "content_type_matches": true,
+          "bytes": 2142,
+          "first_byte_ms": 7026.78,
+          "elapsed_ms": 7026.9,
+          "exact_ok": true,
+          "completed": true
+        },
+        {
+          "stream": true,
+          "http_status": 200,
+          "content_type_matches": true,
+          "bytes": 7409,
+          "first_byte_ms": 5426.19,
+          "elapsed_ms": 6020.25,
+          "exact_ok": true,
+          "completed": true,
+          "events": 10,
+          "text_delta_events": 1
+        }
+      ]
+    },
+    "coverage": "two controlled production requests; not an all-provider, all-model, tool-execution, throughput or concurrency test",
+    "additional_generation_requests_by_final_audit": 0
+  },
+  "resources": {
+    "unit": "KiB",
+    "controlled_load_test": false,
+    "captures_simultaneous": false,
+    "samples": [
+      {
+        "label": "magpie_before_handover",
+        "scope": "existing application process tree",
+        "process_count": 5,
+        "memory_complete_for_sampled_processes": true,
+        "rss_kib": 252868,
+        "pss_kib": 209245,
+        "swap_pss_kib": 281888,
+        "swap_kib": 286604,
+        "private_resident_kib": 200588,
+        "pss_plus_swap_pss_kib": 491133,
+        "sample_seconds": 4.029,
+        "clock_ticks_per_second": 100,
+        "cpu_ticks_common_processes": 0,
+        "processes_appeared": 0,
+        "processes_disappeared": 0
+      },
+      {
+        "label": "gateway_before_controlled_requests",
+        "scope": "configured gateway process tree after metadata checks",
+        "process_count": 2,
+        "memory_complete_for_sampled_processes": true,
+        "rss_kib": 82888,
+        "pss_kib": 76392,
+        "swap_pss_kib": 0,
+        "swap_kib": 0,
+        "private_resident_kib": 75468,
+        "pss_plus_swap_pss_kib": 76392,
+        "sample_seconds": 4.0174,
+        "clock_ticks_per_second": 100,
+        "cpu_ticks_common_processes": 2,
+        "processes_appeared": 0,
+        "processes_disappeared": 0
+      },
+      {
+        "label": "gateway_after_controlled_requests",
+        "scope": "configured gateway process tree after two controlled production requests",
+        "process_count": 3,
+        "memory_complete_for_sampled_processes": true,
+        "rss_kib": 182828,
+        "pss_kib": 173599,
+        "swap_pss_kib": 0,
+        "swap_kib": 0,
+        "private_resident_kib": 172444,
+        "pss_plus_swap_pss_kib": 173599,
+        "sample_seconds": 4.0329,
+        "clock_ticks_per_second": 100,
+        "cpu_ticks_common_processes": 2,
+        "processes_appeared": 0,
+        "processes_disappeared": 0
+      },
+      {
+        "label": "optional_gui_final_observation",
+        "scope": "one existing GUI process; excludes gateway, compositor and separately accounted GPU allocations",
+        "process_count": 1,
+        "rss_kib": 23664,
+        "pss_kib": 16938,
+        "swap_pss_kib": 10832,
+        "swap_kib": 10836,
+        "private_resident_kib": 16128,
+        "pss_plus_swap_pss_kib": 27770,
+        "sample_seconds": null,
+        "cpu_ticks_common_processes": null
+      }
+    ],
+    "definitions": {
+      "rss": "resident pages; summed process RSS may double count shared pages",
+      "pss": "resident pages with shared pages apportioned proportionally",
+      "swap_pss": "swapped pages apportioned proportionally",
+      "pss_plus_swap_pss": "arithmetic sum for one observation; not total system or GPU memory"
+    },
+    "limitations": [
+      "different capture times, states and frontend scopes",
+      "pre-request gateway already received metadata checks",
+      "GUI excludes gateway, compositor and separately accounted GPU memory",
+      "short CPU windows do not establish steady-state utilization",
+      "no improvement percentage or capacity claim",
+      "earlier minimal-core measurements are a separate configuration"
+    ]
+  },
+  "gui_observation": {
+    "connected": true,
+    "displayed_gateway_version": "0.2.4",
+    "displayed_gui_version": "0.1.0",
+    "left_on_overview": true,
+    "no_generation_config_or_service_action": true,
+    "new_gpu_or_cpu_benchmark": false,
+    "private_screenshots_published": false,
+    "visual_design_acceptance_claimed": false
+  },
+  "validation": {
+    "formal_release": {
+      "run": "https://github.com/LIghtJUNction/zcalld/actions/runs/44674414875",
+      "source_commit": "b9bef29e56897cd05ce2b9587aedb51fefb00842",
+      "native_targets": [
+        "x86_64-unknown-linux-gnu",
+        "aarch64-unknown-linux-gnu",
+        "x86_64-pc-windows-msvc",
+        "aarch64-apple-darwin",
+        "x86_64-apple-darwin"
+      ],
+      "all_native_build_and_acceptance_jobs_passed": true,
+      "published": true,
+      "aur_published": true
+    },
+    "arch_core_source_build": {
+      "dependency_checks_enabled": true,
+      "check_function_executed": true,
+      "build_jobs": 2,
+      "rust_tests_passed": 109,
+      "http_integration_tests_passed": 19,
+      "fhs_and_permissions_verified": true,
+      "native_plugin_entry_points_verified": 5,
+      "elf_dependency_closures_verified": 6,
+      "rpath_or_runpath_present": false
+    },
+    "installed_package_fixtures": {
+      "passed": 35,
+      "total": 35,
+      "skipped": 0,
+      "suites": {
+        "privacy": 3,
+        "routing": 9,
+        "mcp": 14,
+        "builtin_fetch": 9
+      }
+    },
+    "namcap": {
+      "core_recipe": {
+        "errors": 0,
+        "warnings": 0
+      },
+      "core_package": {
+        "errors": 0,
+        "warnings": 0
+      },
+      "compat_recipe": {
+        "errors": 0,
+        "warnings": 0
+      },
+      "compat_package": {
+        "errors": 0,
+        "warnings": 1,
+        "warning": "Dependency included, but may not be needed ('zcalld')",
+        "retained_requirement": "zcalld>=0.2.3 ensures support for the canonical Arch helper path; this is not inferable from ELF dependencies"
+      }
+    }
+  },
+  "dependencies": {
+    "core_declared_arch_runtime": [
+      "glibc",
+      "libgcc",
+      "curl"
+    ],
+    "pinned_project_libraries": {
+      "zcall": "0.3.0",
+      "zconv": "0.4.0",
+      "zplugin": "0.3.1",
+      "zsys": "0.1.1"
+    },
+    "optional_compatibility_runtime": [
+      "Go helper executables",
+      "Bun host when enabled",
+      "local model assets when enabled"
+    ],
+    "canonical_arch_helper_directory": "/usr/lib/zcalld-compat",
+    "cli_symlink_directory": "/usr/bin",
+    "frontends_required_for_gateway_operation": false
+  },
+  "artifacts": {
+    "core": {
+      "release": "https://github.com/LIghtJUNction/zcalld/releases/tag/v0.2.4",
+      "source_commit": "b9bef29e56897cd05ce2b9587aedb51fefb00842",
+      "source_archive": "zcalld-0.2.4-source.tar.gz",
+      "source_archive_sha256": "be26976f7cb84e18dc584dc25a9959fa9d97473862bfef03f41092029c10f524",
+      "arch_package": "zcalld-0.2.4-1-x86_64.pkg.tar.zst",
+      "arch_package_bytes": 1742923,
+      "arch_package_sha256": "818b686851d20b0cda5ccc16606af637b099bf96c5c2513606679b0d9d215728",
+      "arch_package_origin": "built during acceptance from the published AUR source recipe",
+      "aur_url": "https://aur.archlinux.org/packages/zcalld",
+      "aur_commit": "434c41380fcf76a673d0af8c10559a3cb86afb9f",
+      "recursive_source_gitlinks": {
+        "apps/zcall-gui": "5dbc423eedd4d529a38b3e8e3adc3e6355a56b2b",
+        "apps/zcall-gui/vendor/zui": "5e37fcfb791eec9ac523fc19373e95d0a513112f",
+        "apps/zcall-omarchy": "78282c3c3cfa6e9e65e2cbd654f38a96398c6e03",
+        "extensions/compat": "fefb7a4ced278498524658f1953140e94e6c72a0",
+        "vendor/zcall": "8fb84b812b8025e34399b28e27242605d68ea345",
+        "vendor/zconv": "0af1f7eb0766ff0ce9db5cee7c6184eff511a8c1",
+        "vendor/zplugin": "00d566eedcff7b2932e90b9dfeb44910c783d305",
+        "vendor/zsys": "808fcfdb73584ca7ca122e20b76f0209f56ab0f7"
+      }
+    },
+    "compat": {
+      "release": "https://github.com/LIghtJUNction/zcalld-compat/releases/tag/v0.1.5",
+      "runtime_source_commit": "a1ad1577d22d67b7557dda0a5be1270cc92af86a",
+      "packaging_source_commit": "fefb7a4ced278498524658f1953140e94e6c72a0",
+      "source_archive": "zcalld-compat-0.1.5-source.tar.gz",
+      "source_archive_sha256": "7b7972a79e4abdeb7e54590bead662032840fcb11b355ae1c60ea406ceff14cc",
+      "arch_package": "zcalld-compat-0.1.5-2-x86_64.pkg.tar.zst",
+      "arch_package_bytes": 4187038,
+      "arch_package_sha256": "8053759d52c83c3afe08677940498667bab3076ac72f8563780d460b1d1b6729",
+      "arch_package_origin": "built during acceptance from the published AUR source recipe",
+      "aur_url": "https://aur.archlinux.org/packages/zcalld-compat",
+      "aur_commit": "aba7fb8e04a46bb215192faf001c2c20d663f6b2"
+    }
+  },
+  "support_boundaries": [
+    "live deployment, migration, systemd and GUI observation were checked on one Linux installation",
+    "native CI results do not certify interactive authentication, keychain access or real-provider behavior on every platform",
+    "inventory preservation is distinct from upstream availability and full feature equivalence",
+    "externally managed credentials retain their explicit owner and handoff contract"
+  ],
+  "publication": {
+    "aggregate_record_only": true,
+    "machine_paths_process_ids_account_provider_labels_credentials_and_key_fingerprints_excluded": true,
+    "additional_product_tests_or_generation_requests_issued_to_prepare_report": false
+  }
+}

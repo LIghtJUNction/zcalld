@@ -1,5 +1,11 @@
 # Performance reference: zcalld 0.1.0
 
+> These are historical **0.1.0 minimal-daemon** measurements. For the installed
+> **0.2.4 gateway with 0.1.5-2 compatibility workers**, see the
+> [2026-11-20 deployment acceptance](DEPLOYMENT-2026-11-20.md), which reports the
+> complete gateway process tree, the separate GUI and swap accounting. The
+> approximately 10 MiB baseline below does not describe that compatibility deployment.
+
 Six runs completed **30,000 of 30,000 measured gateway requests successfully**.
 Across three runs per configuration, throughput medians were **2,210.08 requests/s**
 with no plugins and **2,379.19 requests/s** with aliases and policy enabled.
