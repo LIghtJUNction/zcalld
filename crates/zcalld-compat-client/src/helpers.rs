@@ -24,17 +24,15 @@ pub fn executable(path: &Path) -> bool {
     let Ok(metadata) = std::fs::metadata(path) else {
         return false;
     };
-    if !path.is_absolute() || !metadata.is_file() {
-        return false;
-    }
+    let regular = path.is_absolute() && metadata.is_file();
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        metadata.permissions().mode() & 0o111 != 0
+        regular && metadata.permissions().mode() & 0o111 != 0
     }
     #[cfg(not(unix))]
     {
-        true
+        regular
     }
 }
 

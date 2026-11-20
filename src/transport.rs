@@ -489,6 +489,9 @@ mod unix {
             {
                 let _ = fs::remove_file(&self.path);
             }
+            // close alone retains flock while a dup or pre-exec child still
+            // holds this open-file description. Our ownership ends here.
+            let _ = self._lock.unlock();
         }
     }
 
@@ -538,6 +541,23 @@ mod unix {
             drop(socket);
             assert!(!directory.socket().exists());
             assert!(Socket::bind(&directory.socket()).is_ok());
+        }
+
+        #[test]
+        fn drop_releases_lock_while_an_inherited_descriptor_remains_open() {
+            let directory = Directory::new();
+            let socket = Socket::bind(&directory.socket()).unwrap();
+            // dup and fork share the open-file description. A child can inherit
+            // it until exec even when the descriptor is close-on-exec.
+            let inherited = socket._lock.try_clone().unwrap();
+            assert!(Socket::bind(&directory.socket()).is_err());
+            drop(socket);
+            let restarted = Socket::bind(&directory.socket()).unwrap();
+            assert!(UnixStream::connect(directory.socket()).is_ok());
+            drop(inherited);
+            assert!(Socket::bind(&directory.socket()).is_err());
+            drop(restarted);
+            assert!(!directory.socket().exists());
         }
 
         #[test]
