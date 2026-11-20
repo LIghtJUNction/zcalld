@@ -278,6 +278,8 @@ fn handle(socket: &mut Stream, config: &Config, plugins: &mut Plugins, client: &
     let deadline = Instant::now() + Duration::from_millis(config.upstream_timeout_ms);
     let mut attempted = Vec::with_capacity(MAX_GROUP_ATTEMPTS);
     let mut retry_body: Option<Vec<u8>> = None;
+    let mut recovery_candidates = Vec::new();
+    let mut recovered_once = false;
     for attempt in 0..MAX_GROUP_ATTEMPTS {
         if socket.is_disconnected() {
             return;
@@ -345,7 +347,9 @@ fn handle(socket: &mut Stream, config: &Config, plugins: &mut Plugins, client: &
             model: &inspect.model,
             stream,
             maximum: config.max_response,
-            defer_rejections: plugins.has_retry() && attempt + 1 < MAX_GROUP_ATTEMPTS,
+            defer_rejections: !recovered_once
+                && (plugins.has_retry() || plugins.has_recovery())
+                && attempt + 1 < MAX_GROUP_ATTEMPTS,
             quota_source: plugins
                 .has_events()
                 .then(|| events::codex_source(provider))
@@ -404,6 +408,16 @@ fn handle(socket: &mut Stream, config: &Config, plugins: &mut Plugins, client: &
         let Some(rejected) = outcome.rejected.take() else {
             return;
         };
+        if plugins.has_recovery()
+            && let Some(candidate) = crate::recovery::Candidate::capture(
+                &selected,
+                provider,
+                &route.model,
+                outcome.status,
+            )
+        {
+            recovery_candidates.push(candidate);
+        }
         if STOPPING.load(Ordering::Relaxed) || Instant::now() >= deadline {
             send_rejection(
                 socket,
@@ -424,6 +438,50 @@ fn handle(socket: &mut Stream, config: &Config, plugins: &mut Plugins, client: &
         ) {
             Ok(Some(next)) => next,
             Ok(None) => {
+                // Only a complete refusal and an exhausted retry controller
+                // authorize optional provider recovery. Never replay middleware
+                // or infer success from an unknown reset/transport result.
+                if !recovered_once && attempt + 1 < MAX_GROUP_ATTEMPTS {
+                    match crate::recovery::attempt(socket, plugins, &recovery_candidates, deadline)
+                    {
+                        Ok(Some(index)) => {
+                            let recovered_model = recovery_candidates[index].route.clone();
+                            recovered_once = true;
+                            let resumed = match plugins.resume_recovery(
+                                protocol_id(source),
+                                &recovered_model,
+                                input,
+                                config.max_body,
+                            ) {
+                                Ok(body) => body,
+                                Err(_) => {
+                                    let _ = http::error(
+                                        socket,
+                                        502,
+                                        "recovered request could not be prepared",
+                                    );
+                                    return;
+                                }
+                            };
+                            if let Some(body) = resumed {
+                                match protocol::inspect(source, &body, path_model.as_deref()) {
+                                    Ok(inspection)
+                                        if (inspection.stream || path_stream) == stream => {}
+                                    _ => {
+                                        let _ =
+                                            http::error(socket, 502, "invalid recovered request");
+                                        return;
+                                    }
+                                }
+                                retry_body = Some(body);
+                            }
+                            selected = recovered_model;
+                            continue;
+                        }
+                        Ok(None) => {}
+                        Err(_) => eprintln!("optional provider recovery unavailable"),
+                    }
+                }
                 send_rejection(
                     socket,
                     plugins,
