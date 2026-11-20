@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/zcalld-plugin-api", "crates/zcalld-compat-client", "plugins/aliases", "plugins/policy", "plugins/redact", "plugins/community", "plugins/routing"]
+members = [".", "crates/zcalld-plugin-api", "crates/zcalld-compat-client", "plugins/aliases", "plugins/policy", "plugins/redact", "plugins/community", "plugins/routing", "plugins/desktop"]
 exclude = ["apps/zcall-gui", "extensions/compat", "vendor/zcall", "vendor/zconv", "vendor/zplugin", "vendor/zsys"]
 resolver = "3"
 

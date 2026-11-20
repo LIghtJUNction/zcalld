@@ -138,6 +138,9 @@ impl Config {
             config.dynamic_routes = groups;
             config.plugins.push(routing);
         }
+        if let Some(desktop) = crate::desktop::plugin(path)? {
+            config.plugins.push(desktop);
+        }
         if config.plugins.len() > 32 {
             return Err("configuration exceeds plugin limit after managed extensions".into());
         }

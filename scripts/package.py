@@ -15,7 +15,7 @@ import tomllib
 import zipfile
 
 ROOT = Path(__file__).resolve().parent.parent
-PLUGINS = ('zcalld_aliases', 'zcalld_policy', 'zcalld_redact', 'zcalld_community', 'zcalld_plugin_routing')
+PLUGINS = ('zcalld_aliases', 'zcalld_policy', 'zcalld_redact', 'zcalld_community', 'zcalld_plugin_routing', 'zcalld_desktop')
 TARGETS = ('x86_64-unknown-linux-gnu', 'aarch64-unknown-linux-gnu',
            'x86_64-pc-windows-msvc', 'aarch64-apple-darwin', 'x86_64-apple-darwin')
 
@@ -104,6 +104,20 @@ def native_archive(args, output):
         for plugin in PLUGINS:
             name = plugin + '.dll' if windows else 'lib' + plugin + ('.dylib' if darwin else '.so')
             shutil.copy2(build / name, plugins / name)
+        if windows or darwin:
+            native = build / 'desktop-native'
+            destination = stage / 'libexec/zcalld'
+            destination.mkdir(parents=True)
+            if windows:
+                helper = native / 'zcalld-desktop-notify.exe'
+                if not helper.is_file():
+                    raise ValueError('build and self-test the native desktop helper before packaging')
+                shutil.copy2(helper, destination / helper.name)
+            else:
+                helper = native / 'zcalld-desktop-notify.app'
+                if not (helper / 'Contents/MacOS/zcalld-desktop-notify').is_file():
+                    raise ValueError('build and self-test the desktop application identity before packaging')
+                shutil.copytree(helper, destination / helper.name)
         docs = stage / 'share/doc/zcalld'
         docs.mkdir(parents=True)
         shutil.copy2(ROOT / 'README.md', docs / 'README.md')

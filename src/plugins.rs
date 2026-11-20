@@ -6,7 +6,7 @@ use zcalld_plugin_api::{
     ProviderPluginApi, ProviderPluginProxy, ResponsePluginApi, ResponsePluginProxy, RetryPluginApi,
     RetryPluginProxy, protocol, status,
 };
-use zcalld_plugin_api::{HttpPluginApi, HttpPluginProxy};
+use zcalld_plugin_api::{EventPluginApi, EventPluginProxy, HttpPluginApi, HttpPluginProxy, events};
 use zplugin::{Error, Plugin, UnloadPolicy};
 
 const MAX_PLUGINS: usize = 32;
@@ -36,6 +36,7 @@ struct Entry {
     provider: Option<ProviderPluginProxy<'static>>,
     retry: Option<RetryPluginProxy<'static>>,
     http: Option<HttpPluginProxy<'static>>,
+    events: Option<EventPluginProxy<'static>>,
 }
 
 #[derive(Clone, Copy)]
@@ -156,6 +157,17 @@ impl Plugins {
                 Err(Error::InterfaceNotFound) => None,
                 Err(e) => return Err(hook_error(&path, "HTTP create", e)),
             };
+            let events = match Plugin::create_owned(&library, EventPluginApi::SPEC) {
+                Ok(instance) => {
+                    let mut p = EventPluginApi::wrap(instance)
+                        .map_err(|e| hook_error(&path, "events bind", e))?;
+                    p.configure(&spec.config)
+                        .map_err(|e| hook_error(&path, "events configure", e))?;
+                    Some(p)
+                }
+                Err(Error::InterfaceNotFound) => None,
+                Err(e) => return Err(hook_error(&path, "events create", e)),
+            };
             if provider.is_some() && entries.iter().any(|e: &Entry| e.provider.is_some()) {
                 return Err("only one community provider host may be configured".into());
             }
@@ -167,9 +179,76 @@ impl Plugins {
                 provider,
                 retry,
                 http,
+                events,
             });
         }
         Ok(Self { entries })
+    }
+
+    /// Static validation only; no activation or inbox consumption.
+    pub fn event_status(&mut self) -> Result<Vec<String>, String> {
+        let mut result = Vec::new();
+        for entry in &mut self.entries {
+            if let Some(plugin) = &mut entry.events {
+                let mut bytes = vec![0u8; events::MAX_EVENT_BYTES];
+                let count = plugin
+                    .status(&mut bytes)
+                    .map_err(|e| hook_error(&entry.path, "events status", e))?;
+                let count = usize::try_from(count)
+                    .ok()
+                    .filter(|n| *n <= bytes.len())
+                    .ok_or("event plugin returned an invalid status length")?;
+                bytes.truncate(count);
+                result.push(String::from_utf8(bytes).map_err(|_| "event status is not UTF-8")?);
+            }
+        }
+        Ok(result)
+    }
+
+    pub fn has_events(&self) -> bool {
+        self.entries.iter().any(|entry| entry.events.is_some())
+    }
+
+    /// Notification failures cannot turn a successful generation into an error.
+    pub fn emit_event(&mut self, kind: u32, event: &str) {
+        if event.len() > events::MAX_EVENT_BYTES {
+            crate::events::diagnostic("oversized event");
+            return;
+        }
+        for entry in &mut self.entries {
+            if let Some(plugin) = &mut entry.events {
+                match plugin.emit(kind, event) {
+                    Ok(0..=2) => {}
+                    _ => crate::events::diagnostic("event delivery"),
+                }
+            }
+        }
+    }
+
+    pub fn begin_events(&mut self, metadata: &str) -> crate::events::Leases {
+        let mut leases = crate::events::Leases::default();
+        if metadata.len() > events::MAX_EVENT_BYTES {
+            crate::events::diagnostic("oversized request metadata");
+            return leases;
+        }
+        for entry in &mut self.entries {
+            if let Some(plugin) = &mut entry.events {
+                match plugin.begin(metadata) {
+                    Ok(resource) => {
+                        if resource
+                            .check(events::REQUEST_TYPE, events::REQUEST_VERSION)
+                            .is_ok()
+                        {
+                            leases.push(resource);
+                        } else {
+                            crate::events::diagnostic("invalid request lease");
+                        }
+                    }
+                    Err(_) => crate::events::diagnostic("request lease"),
+                }
+            }
+        }
+        leases
     }
 
     /// Initialize optional post-conversion response hooks for one request.

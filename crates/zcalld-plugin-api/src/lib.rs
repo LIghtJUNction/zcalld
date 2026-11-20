@@ -200,3 +200,43 @@ pub trait HttpPlugin {
     fn accepts(&mut self, path: &str) -> zplugin::Result<u32>;
     fn handle(&mut self, metadata: &str, body: &[u8]) -> zplugin::Result<zplugin::OwnedResource>;
 }
+
+/// Optional local desktop events. No existing gateway/observer ABI is changed.
+pub mod events {
+    pub const CONTROL_ACTIVATE: u32 = 0;
+    pub const QUOTA_OBSERVED: u32 = 1;
+    pub const MASK_FIRST: u32 = 2;
+    pub const REQUEST_TYPE: &str = "dev.zcalld.request-events";
+    pub const REQUEST_VERSION: u32 = 1;
+    pub const HEAD: u32 = 1;
+    pub const BODY: u32 = 2;
+    pub const FINISH: u32 = 3;
+    pub const MAX_EVENT_BYTES: usize = 16 * 1024;
+}
+
+/// Opt-in side effects isolated from the generation result. configure/status
+/// must not activate OS notification/inhibitor resources or consume an inbox.
+/// Only a serving host sends CONTROL_ACTIVATE (empty object), after all workers
+/// initialize. Inbox producers may publish kinds 1 and 2 only.
+///
+/// begin receives bounded JSON with version, numeric protocol, normalized agent,
+/// opaque session/conversation digests, kind and subagent; never credentials,
+/// prompt text, workspace paths or original personal values. Its resource must
+/// have the type/version in events. HEAD receives status/protocol/stream/type;
+/// BODY receives only actually delivered, post-conversion/restoration bytes;
+/// FINISH receives status and delivered=true only after complete downstream
+/// framing succeeds. Operations return zero. A dropped/uncompleted lease MUST
+/// release active state and MUST NOT produce a successful-turn notification.
+///
+/// emit accepts a <=16 KiB versioned quota or first-mask event, performs no
+/// network call, and must not block generation on OS work. Returns 0 accepted,
+/// 1 queue full, 2 disabled/unsupported. Any error is diagnostic only. status
+/// returns capability/counters/static errors without event payloads and is
+/// replay-safe on BufferTooSmall. Native code remains operator-trusted.
+#[zplugin::interface(id = "dev.zcalld.events", version = 1)]
+pub trait EventPlugin {
+    fn configure(&mut self, config: &str) -> zplugin::Result<()>;
+    fn begin(&mut self, metadata: &str) -> zplugin::Result<zplugin::OwnedResource>;
+    fn emit(&mut self, kind: u32, event: &str) -> zplugin::Result<u32>;
+    fn status(&mut self, output: &mut [u8]) -> zplugin::Result<u64>;
+}
