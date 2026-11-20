@@ -35,8 +35,8 @@ class ControlTests(unittest.TestCase):
     def tearDown(self):
         self.temporary.cleanup()
 
-    def cli(self, *args, input=None, ok=True):
-        result = subprocess.run([str(BINARY), *args, "--config", str(self.config), "--json"],
+    def cli(self, *args, input=None, ok=True, config=None):
+        result = subprocess.run([str(BINARY), *args, "--config", str(self.config if config is None else config), "--json"],
                                 input=input, text=True, capture_output=True, env=self.env,
                                 timeout=20, check=False, encoding="utf-8")
         if ok:
@@ -59,6 +59,135 @@ class ControlTests(unittest.TestCase):
                  "--route", "bad[section]", input="another-private-secret", ok=False)
         self.assertEqual(credentials.read_bytes(), old_credentials)
         self.assertEqual(self.config.read_bytes(), old_config)
+
+    @staticmethod
+    def directory_state(directory):
+        return {str(path.relative_to(directory)): path.read_bytes() if path.is_file() else None
+                for path in directory.rglob("*")}
+
+    def test_model_validation_rejects_unloadable_values_atomically(self):
+        invalid = [
+            ("empty", ""), ("whitespace", "   "),
+            ("double-quoted-empty", '""'), ("single-quoted-empty", "''"),
+            ("unclosed-double-quote", '"unfinished'),
+            ("unclosed-single-quote", "'unfinished"),
+            ("ascii-over-limit", "m" * 513),
+            ("utf8-over-limit", "é" * 257),
+            ("quoted-over-limit", '"' + "m" * 513 + '"'),
+        ]
+        commands = [
+            ("provider-add", ("providers", "add", "new", "--base-url",
+                              "https://example.invalid/v1", "--api-key-stdin",
+                              "--route", "validated")),
+            ("provider-edit", ("providers", "edit", "fixture", "--api-key-stdin",
+                               "--route", "validated")),
+            ("route-set", ("routes", "set", "validated", "--provider", "fixture")),
+        ]
+        original = self.config.read_bytes()
+        for action, command in commands:
+            for label, model in invalid:
+                with self.subTest(action=action, model=label):
+                    with tempfile.TemporaryDirectory(dir=self.home) as temporary:
+                        directory = Path(temporary)
+                        config = directory / "config.conf"
+                        config.write_bytes(original)
+                        credentials = directory / "credentials"
+                        credentials.write_bytes(b'KEEP="fixture-existing-secret"\n')
+                        credentials.chmod(0o600)
+                        (directory / "backups").mkdir()
+                        (directory / "backups/keep").write_bytes(b"existing-backup")
+                        before = self.directory_state(directory)
+                        result = self.cli(*command, "--model", model, config=config,
+                                          input="fixture-replacement-secret", ok=False)
+                        self.assertEqual(self.directory_state(directory), before)
+                        self.assertNotIn("fixture-existing-secret", json.dumps(result))
+                        self.assertNotIn("fixture-replacement-secret", json.dumps(result))
+
+    def test_model_validation_does_not_create_credentials(self):
+        before = self.directory_state(self.directory)
+        self.cli("providers", "add", "new", "--base-url", "https://example.invalid/v1",
+                 "--api-key-stdin", "--model", "", input="fixture-new-secret", ok=False)
+        self.assertEqual(self.directory_state(self.directory), before)
+
+    def test_model_validation_leaves_stdin_unread(self):
+        cases = [
+            ("empty-model", ("--model", "", "--route", "validated")),
+            ("long-model", ("--model", "m" * 513, "--route", "validated")),
+            ("unclosed-model", ("--model", '"unfinished', "--route", "validated")),
+            ("missing-model", ("--model",)),
+            ("duplicate-model", ("--model", "m", "--model", "n")),
+            ("invalid-route", ("--model", "m", "--route", "bad[section]")),
+            ("long-route", ("--model", "m", "--route", "r" * 513)),
+            ("missing-route", ("--model", "m", "--route")),
+            ("duplicate-route", ("--model", "m", "--route", "one", "--route", "two")),
+            ("leading-tab", ("--model", "\tm", "--route", "validated")),
+            ("trailing-newline", ("--model", "m\n", "--route", "validated")),
+            ("internal-control", ("--model", "m\x85n", "--route", "validated")),
+        ]
+        original = self.config.read_bytes()
+        for label, arguments in cases:
+            with self.subTest(case=label):
+                with tempfile.TemporaryDirectory(dir=self.home) as temporary:
+                    directory = Path(temporary)
+                    config = directory / "config.conf"
+                    config.write_bytes(original)
+                    before = self.directory_state(directory)
+                    with tempfile.TemporaryFile() as source:
+                        source.write(b"fixture-unconsumed-secret\n")
+                        source.seek(0)
+                        result = subprocess.run(
+                            [str(BINARY), "providers", "edit", "fixture", "--api-key-stdin",
+                             *arguments, "--config", str(config), "--json"],
+                            stdin=source, text=True, capture_output=True, env=self.env,
+                            timeout=20, check=False, encoding="utf-8")
+                        self.assertEqual(source.tell(), 0, result.stderr + result.stdout)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertEqual(self.directory_state(directory), before)
+
+    def test_model_validation_accepts_parsed_byte_limits(self):
+        cases = [
+            ("ascii-limit", "m" * 512, "m" * 512),
+            ("utf8-limit", "é" * 256, "é" * 256),
+            ("outer-whitespace", "  " + "m" * 512 + "  ", "m" * 512),
+            ("quoted-spaces", '" x "', " x "),
+            ("quoted-whitespace", '"   "', "   "),
+            ("literal-quotes", "'\"\"'", '""'),
+            ("literal-backslash", r'"model\path"', r"model\path"),
+        ]
+        commands = [
+            ("provider-add", ("providers", "add", "new", "--base-url",
+                              "https://example.invalid/v1", "--route", "validated")),
+            ("provider-edit", ("providers", "edit", "fixture", "--route", "validated")),
+            ("route-set", ("routes", "set", "validated", "--provider", "fixture")),
+        ]
+        for action, command in commands:
+            for label, raw, expected in cases:
+                with self.subTest(action=action, model=label):
+                    self.cli(*command, "--model", raw)
+                    routes = self.cli("routes", "list")["routes"]
+                    self.assertEqual(next(r["model"] for r in routes
+                                          if r["name"] == "validated"), expected)
+                    check = subprocess.run([str(BINARY), "check", "--config", str(self.config)],
+                                           capture_output=True, text=True, env=self.env,
+                                           timeout=20, check=False, encoding="utf-8")
+                    self.assertEqual(check.returncode, 0, check.stderr + check.stdout)
+
+    def test_model_validation_preserves_group_model_values(self):
+        original = self.config.read_text(encoding="utf-8")
+        for raw, expected in [("'\"\"'", '""'), ('" x "', " x "),
+                              ('"""', '"'), ('"   "', "   ")]:
+            with self.subTest(raw=raw):
+                self.config.write_text(original.replace("model = model\n", f"model = {raw}\n"),
+                                       encoding="utf-8", newline="\n")
+                self.cli("groups", "set", "group/validated",
+                         "--members", "fixture/model", "--mode", "rotate")
+                routes = self.cli("routes", "list")["routes"]
+                self.assertEqual(next(r["model"] for r in routes
+                                      if r["name"] == "group/validated"), expected)
+                check = subprocess.run([str(BINARY), "check", "--config", str(self.config)],
+                                       capture_output=True, text=True, env=self.env,
+                                       timeout=20, check=False, encoding="utf-8")
+                self.assertEqual(check.returncode, 0, check.stderr + check.stdout)
 
     def provider_env(self, name):
         return next(p["api_key_env"] for p in self.cli("providers", "list")["providers"]

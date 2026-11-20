@@ -631,6 +631,19 @@ fn providers(context: &Context, args: &[String]) -> Result<(), String> {
                 }
                 text = ini_set(&text, &section, "api_key_env", env)?;
             }
+            if let Some(model) = option(args, "--model")? {
+                if !config::valid_model(config::parse_ini_value(model)?) {
+                    return Err("model must be nonempty and at most 512 bytes".into());
+                }
+                let route = option(args, "--route")?
+                    .map(str::to_string)
+                    .unwrap_or_else(|| format!("{name}/{model}"));
+                if !valid_name(&route) {
+                    return Err("route name contains unsupported characters".into());
+                }
+                text = ini_set(&text, &format!("route {route}"), "provider", name)?;
+                text = ini_set(&text, &format!("route {route}"), "model", model)?;
+            }
             if flag(args, "--api-key-stdin") {
                 let mut key = String::new();
                 std::io::stdin()
@@ -657,16 +670,6 @@ fn providers(context: &Context, args: &[String]) -> Result<(), String> {
                 }
                 pending_credentials = Some((path, content));
                 text = ini_set(&text, &section, "api_key_env", &env)?;
-            }
-            if let Some(model) = option(args, "--model")? {
-                let route = option(args, "--route")?
-                    .map(str::to_string)
-                    .unwrap_or_else(|| format!("{name}/{model}"));
-                if !valid_name(&route) {
-                    return Err("route name contains unsupported characters".into());
-                }
-                text = ini_set(&text, &format!("route {route}"), "provider", name)?;
-                text = ini_set(&text, &format!("route {route}"), "model", model)?;
             }
             let mut paths = vec![context.path.clone()];
             if let Some((path, _)) = &pending_credentials {
