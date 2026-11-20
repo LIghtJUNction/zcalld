@@ -111,6 +111,8 @@ Provider `--api-key-stdin` updates an exclusive credential reference in place. I
 
 Model edits through `providers add/edit --model` or `routes set --model` use the configuration reader's INI value rules: the parsed model must be nonempty, contain no control characters and fit in 512 UTF-8 bytes. Provider model and route errors are rejected before reading `--api-key-stdin`, creating backups or writing files. Group routes preserve the selected model's literal quotes and surrounding spaces.
 
+Provider add/edit validates the effective base URL and protocol together before reading credentials or writing files. Route and group edits preserve the selected provider's literal name, including quotes or spaces. Configuration updates and removals recognize section headers with surrounding whitespace, while keeping whitespace inside names distinct.
+
 Agent edits preserve unrelated fields and keep exact-byte backups. Revert refuses to overwrite later user edits unless explicitly forced. Account controls operate on the actual private compatibility-host store. Community packages must be deliberately enabled; trusted native libraries run inside the daemon process.
 
 The [agent library](docs/LIBRARY.md) manages MCP definitions, instruction sets and skill files separately from gateway providers. Preview/apply/revert keeps exact owned bytes and refuses conflicting user edits. [Community MCP](docs/MCP.md) uses the optional HTTP plugin interface and the same shared Bun process as community providers; initialize and ping do not start that process. Caller-key permissions remain separate from upstream credentials.

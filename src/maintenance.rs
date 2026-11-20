@@ -588,7 +588,7 @@ fn groups(context: &Context, args: &[String]) -> Result<(), String> {
                 &text,
                 &section,
                 "provider",
-                &configured.providers[first.provider].name,
+                &format!("\"{}\"", configured.providers[first.provider].name),
             )?;
             // This model is already parsed; preserve literal quotes and whitespace.
             text = control::ini_set(&text, &section, "model", &format!("\"{}\"", first.model))?;
@@ -668,7 +668,7 @@ fn routes(context: &Context, args: &[String]) -> Result<(), String> {
             {
                 return Err("unknown provider".into());
             }
-            text = control::ini_set(&text, &section, "provider", provider)?;
+            text = control::ini_set(&text, &section, "provider", &format!("\"{provider}\""))?;
             text = control::ini_set(&text, &section, "model", model)?;
         }
         "remove" => text = control::ini_remove(&text, &section),
