@@ -168,12 +168,19 @@ pub fn config_text(context: &Context) -> Result<String, String> {
         ))
     }
 }
+fn section_header(line: &str) -> Option<&str> {
+    line.trim()
+        .strip_prefix('[')?
+        .strip_suffix(']')
+        .map(str::trim)
+}
+
 pub fn sections(text: &str) -> Vec<(String, BTreeMap<String, String>)> {
     let mut out: Vec<(String, BTreeMap<String, String>)> = Vec::new();
     for line in text.lines() {
         let line = line.trim();
-        if line.starts_with('[') && line.ends_with(']') {
-            out.push((line[1..line.len() - 1].trim().into(), BTreeMap::new()));
+        if let Some(section) = section_header(line) {
+            out.push((section.into(), BTreeMap::new()));
         } else if !line.starts_with(['#', ';'])
             && let Some((key, value)) = line.split_once('=')
             && let Some((_, fields)) = out.last_mut()
@@ -207,7 +214,10 @@ pub fn ini_set(text: &str, section: &str, key: &str, value: &str) -> Result<Stri
     }
     let mut lines: Vec<String> = text.lines().map(String::from).collect();
     let header = format!("[{section}]");
-    let start = if let Some(i) = lines.iter().position(|v| v.trim() == header) {
+    let start = if let Some(i) = lines
+        .iter()
+        .position(|v| section_header(v) == Some(section))
+    {
         i
     } else {
         if !lines.is_empty() {
@@ -217,7 +227,7 @@ pub fn ini_set(text: &str, section: &str, key: &str, value: &str) -> Result<Stri
         lines.len() - 1
     };
     let end = (start + 1..lines.len())
-        .find(|i| lines[*i].trim().starts_with('['))
+        .find(|i| section_header(&lines[*i]).is_some())
         .unwrap_or(lines.len());
     if let Some(i) = (start + 1..end).find(|i| {
         lines[*i]
@@ -234,9 +244,8 @@ pub fn ini_remove(text: &str, section: &str) -> String {
     let mut removing = false;
     let mut out = String::new();
     for line in text.lines() {
-        let t = line.trim();
-        if t.starts_with('[') && t.ends_with(']') {
-            removing = &t[1..t.len() - 1] == section;
+        if let Some(header) = section_header(line) {
+            removing = header == section;
         }
         if !removing {
             out.push_str(line);
@@ -622,7 +631,13 @@ fn providers(context: &Context, args: &[String]) -> Result<(), String> {
                 .map(str::to_string)
                 .or_else(|| old.get("protocol").cloned())
                 .unwrap_or_else(|| "chat".into());
-            crate::protocol::parse_protocol(&protocol)?;
+            let parsed_protocol = crate::protocol::parse_protocol(&protocol)?;
+            crate::protocol::endpoint(
+                config::parse_ini_value(&url)?,
+                parsed_protocol,
+                "validation-model",
+                false,
+            )?;
             text = ini_set(&text, &section, "base_url", &url)?;
             text = ini_set(&text, &section, "protocol", &protocol)?;
             if let Some(env) = option(args, "--api-key-env")? {

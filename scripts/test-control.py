@@ -60,10 +60,165 @@ class ControlTests(unittest.TestCase):
         self.assertEqual(credentials.read_bytes(), old_credentials)
         self.assertEqual(self.config.read_bytes(), old_config)
 
+    def check_config(self, config=None):
+        result = subprocess.run(
+            [str(BINARY), "check", "--config", str(self.config if config is None else config)],
+            capture_output=True, text=True, env=self.env, timeout=20,
+            check=False, encoding="utf-8")
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+
     @staticmethod
     def directory_state(directory):
         return {str(path.relative_to(directory)): path.read_bytes() if path.is_file() else None
                 for path in directory.rglob("*")}
+
+    def test_config_consistency_endpoint_errors_preserve_input_and_files(self):
+        complete = "http://127.0.0.1:39999/v1/chat/completions"
+        original = self.config.read_text(encoding="utf-8").replace(
+            "base_url = http://127.0.0.1:39999/v1\n", f"base_url = {complete}\n")
+        invalid = [("--base-url", url) for url in (
+            "http://", "http://127.0.0.1:65536/v1",
+            "http://127.0.0.1:39999/v1/bad%2G",
+            "http://127.0.0.1:39999/v1/has space",
+        )]
+        invalid.append(("--base-url", complete, "--protocol", "anthropic"))
+        cases = [(action, name, options)
+                 for action, name in (("add", "new"), ("edit", "fixture"))
+                 for options in invalid]
+        cases.append(("edit", "fixture", ("--protocol", "anthropic")))
+        for action, name, options in cases:
+            with self.subTest(action=action, options=options):
+                with tempfile.TemporaryDirectory(dir=self.home) as temporary:
+                    directory = Path(temporary)
+                    config = directory / "config.conf"
+                    config.write_text(original, encoding="utf-8", newline="\n")
+                    if action == "edit":
+                        credentials = directory / "credentials"
+                        credentials.write_bytes(b'KEEP="fixture-existing-secret"\n')
+                        credentials.chmod(0o600)
+                        (directory / "backups").mkdir()
+                        (directory / "backups/keep").write_bytes(b"existing-backup")
+                    self.check_config(config)
+                    before = self.directory_state(directory)
+                    with tempfile.TemporaryFile() as source:
+                        source.write(b"fixture-unconsumed-secret\n")
+                        source.seek(0)
+                        result = subprocess.run(
+                            [str(BINARY), "providers", action, name, *options,
+                             "--api-key-stdin", "--config", str(config), "--json"],
+                            stdin=source, text=True, capture_output=True,
+                            env=self.env, timeout=20, check=False, encoding="utf-8")
+                        self.assertEqual(source.tell(), 0, result.stderr + result.stdout)
+                    self.assertNotEqual(result.returncode, 0, result.stderr + result.stdout)
+                    self.assertIn("error", json.loads(result.stdout))
+                    self.assertEqual(self.directory_state(directory), before)
+                    for secret in ("fixture-existing-secret", "fixture-unconsumed-secret"):
+                        self.assertNotIn(secret, result.stdout + result.stderr)
+
+    def test_config_consistency_endpoint_accepts_matching_values(self):
+        original = self.config.read_bytes()
+        endpoint = "http://127.0.0.1:39999/v1/messages"
+        for action, name in (("add", "new"), ("edit", "fixture")):
+            for url in (endpoint, endpoint + "   "):
+                with self.subTest(action=action, base_url=url):
+                    with tempfile.TemporaryDirectory(dir=self.home) as temporary:
+                        config = Path(temporary) / "config.conf"
+                        config.write_bytes(original)
+                        self.cli("providers", action, name, "--base-url", url,
+                                 "--protocol", "anthropic", "--api-key-stdin",
+                                 input="fixture-valid-secret", config=config)
+                        self.check_config(config)
+                        provider = next(row for row in self.cli(
+                            "providers", "list", config=config)["providers"]
+                            if row["name"] == name)
+                        self.assertEqual(provider["base_url"], endpoint)
+                        self.assertEqual(provider["protocol"], "anthropic")
+
+    def test_config_consistency_preserves_selected_provider_identity(self):
+        names = [
+            ('"quoted"', "quoted"), ("'quoted'", "quoted"),
+            ('"unfinished', "sibling"), ("'unfinished", "sibling"),
+            (" quoted", "quoted"), ("internal name", "sibling"),
+            (r"path\name", "sibling"),
+        ]
+        for selected, sibling in names:
+            for action in ("route", "group"):
+                with self.subTest(provider=selected, action=action):
+                    with tempfile.TemporaryDirectory(dir=self.home) as temporary:
+                        config = Path(temporary) / "config.conf"
+                        config.write_text(
+                            "[server]\nlisten = 127.0.0.1:39415\nunix_socket = none\n"
+                            f"[provider {sibling}]\nbase_url = http://127.0.0.1:39998/v1\n"
+                            "auth = none\n"
+                            f"[provider {selected}]\nbase_url = http://127.0.0.1:39999/v1\n"
+                            "auth = none\n"
+                            f'[route seed]\nprovider = "{selected}"\nmodel = m\n',
+                            encoding="utf-8", newline="\n")
+                        self.check_config(config)
+                        target = "added" if action == "route" else "group/added"
+                        if action == "route":
+                            self.cli("routes", "set", target, "--provider", selected,
+                                     "--model", "m", config=config)
+                        else:
+                            self.cli("groups", "set", target, "--members", "seed",
+                                     "--mode", "rotate", config=config)
+                        routes = self.cli("routes", "list", config=config)["routes"]
+                        self.assertEqual(next(row["provider"] for row in routes
+                                              if row["name"] == target), selected)
+                        self.check_config(config)
+
+    def test_config_consistency_updates_spaced_section_headers(self):
+        cases = [
+            ("provider fixture", ("providers", "edit", "fixture", "--base-url",
+                                  "https://example.invalid/v2"),
+             "providers", "fixture", "base_url", "https://example.invalid/v2"),
+            ("route fixture/model", ("routes", "set", "fixture/model",
+                                    "--provider", "fixture", "--model", "edited"),
+             "routes", "fixture/model", "model", "edited"),
+        ]
+        for section, command, collection, name, field, expected in cases:
+            for pattern in ("[ {} ]", "\t[  {}  ]\t", "\u2003[\u2003{}\u2003]\u2003"):
+                with self.subTest(section=section, pattern=pattern):
+                    with tempfile.TemporaryDirectory(dir=self.home) as temporary:
+                        config = Path(temporary) / "config.conf"
+                        header = pattern.format(section)
+                        original = self.config.read_text(encoding="utf-8").replace(
+                            f"[{section}]", header) + "# keep unrelated comment\n"
+                        config.write_text(original, encoding="utf-8", newline="\n")
+                        self.check_config(config)
+                        self.cli(*command, config=config)
+                        self.check_config(config)
+                        rows = [row for row in self.cli(collection, "list", config=config)[collection]
+                                if row["name"] == name]
+                        self.assertEqual(len(rows), 1)
+                        self.assertEqual(rows[0][field], expected)
+                        written = config.read_text(encoding="utf-8")
+                        self.assertIn(header, written)
+                        self.assertIn("auth = none\n", written)
+                        self.assertIn("# keep unrelated comment\n", written)
+
+    def test_config_consistency_removes_spaced_section_headers(self):
+        original = self.config.read_text(encoding="utf-8")
+        for action in ("routes", "providers"):
+            for pattern in ("[ {} ]", "\t[  {}  ]\t", "\u2003[\u2003{}\u2003]\u2003"):
+                with self.subTest(action=action, pattern=pattern):
+                    with tempfile.TemporaryDirectory(dir=self.home) as temporary:
+                        config = Path(temporary) / "config.conf"
+                        config.write_text(
+                            original + pattern.format("provider unused") + "\n"
+                            "base_url = https://example.invalid/v1\nauth = none\n"
+                            + pattern.format("route unused/model") + "\n"
+                            "provider = unused\nmodel = m\n",
+                            encoding="utf-8", newline="\n")
+                        self.check_config(config)
+                        target = "unused/model" if action == "routes" else "unused"
+                        self.cli(action, "remove", target, config=config)
+                        routes = self.cli("routes", "list", config=config)["routes"]
+                        self.assertEqual([row["name"] for row in routes], ["fixture/model"])
+                        providers = self.cli("providers", "list", config=config)["providers"]
+                        expected = {"fixture", "unused"} if action == "routes" else {"fixture"}
+                        self.assertEqual({row["name"] for row in providers}, expected)
+                        self.check_config(config)
 
     def test_model_validation_rejects_unloadable_values_atomically(self):
         invalid = [
