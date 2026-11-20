@@ -18,8 +18,9 @@ use zcalld_plugin_api::{
 };
 use zplugin::{Error, OwnedResource, ResourceHandler, Result};
 mod codex;
+mod maintenance;
 mod mcp;
-use zcalld_plugin_api::HttpPluginExport;
+use zcalld_plugin_api::{HttpPluginExport, RecoveryPluginExport};
 static INIT: Mutex<()> = Mutex::new(());
 thread_local! {static CONTEXTS:RefCell<HashMap<String,Weak<RefCell<Context>>>>=RefCell::new(HashMap::new());}
 #[derive(Default)]
@@ -376,7 +377,21 @@ impl ProviderPlugin for Community {
         self.configure_host(c)
     }
     fn fetch(&mut self, request: &[u8]) -> Result<OwnedResource> {
+        let started = Instant::now();
         let mut params = json::parse(request).map_err(|_| Error::InvalidArgument)?;
+        // Maintenance may use only an explicit configured provider account,
+        // never the legacy default/first-account generation fallback.
+        let explicit_account = params
+            .get("account")
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned);
+        let timeout = params
+            .get("timeout_ms")
+            .as_u64()
+            .unwrap_or(300_000)
+            .clamp(1, 3_600_000);
+        let deadline = started + Duration::from_millis(timeout);
         let registry = read(
             self.config
                 .get("registry")
@@ -387,30 +402,15 @@ impl ProviderPlugin for Community {
         let body = params.get("body").as_str().ok_or(Error::InvalidArgument)?;
         let encoded = encode(body.as_bytes());
         params.set("body", encoded.into());
-        // Keep an explicit fixed credit window; user configuration cannot unbound it.
         params.set("window", 524_288usize.into());
-        let timeout = params
-            .get("timeout_ms")
-            .as_u64()
-            .unwrap_or(300_000)
-            .clamp(1, 3_600_000);
-        // The host returns only HTTP headers/body events, not connection progress.
-        // Waiting for its head also includes provider setup, reasoning, and an
-        // optional SSE-to-JSON collection. Only the overall request deadline
-        // applies here; the direct curl transport owns a separate connect budget.
-        let call = self
-            .host()?
-            .start(object([("method", "fetch".into()), ("params", params)]))
-            .map_err(fail)?;
-        OwnedResource::new(Stream {
-            call,
-            initialization: None,
-            head: None,
-            bytes: Vec::new(),
-            offset: 0,
-            ended: false,
-            deadline: Instant::now() + Duration::from_millis(timeout),
-        })
+        // Initialization and an optional one-shot preflight are polled through
+        // the resource. A generation RPC is not sent early or replayed here.
+        OwnedResource::new(maintenance::Fetch::new(
+            self,
+            params,
+            explicit_account.as_deref(),
+            deadline,
+        )?)
     }
 }
 struct Stream {
@@ -563,6 +563,7 @@ zplugin::export_interfaces!(
  ContextPluginExport<Community> => create,
  ResponsePluginExport<Community> => create,
  HttpPluginExport<Community> => create,
+ RecoveryPluginExport<Community> => create,
 );
 
 impl ContextPlugin for Community {
