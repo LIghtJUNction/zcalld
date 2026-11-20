@@ -124,7 +124,7 @@ def bump(args: argparse.Namespace) -> None:
                     raise ValueError("workspace version assignment was not found")
             lines = []
             for line in content.splitlines(keepends=True):
-                if re.match(r"\s*(?:zcalld-plugin-api|zcalld-compat-client)\s*=", line):
+                if re.match(r"\s*(?:zcalld-plugin-api|zcalld-compat-client|zcalld-installer)\s*=", line):
                     line, changed = re.subn(
                         r'(version\s*=\s*")=?' + re.escape(old) + r'(")',
                         lambda m: m[1] + "=" + new + m[2], line)
@@ -193,6 +193,7 @@ def artifact_names() -> list[str]:
     for target in TARGETS:
         stem = f"zcalld-{ver}-{target}"
         names.extend([stem + (".zip" if "windows" in target else ".tar.gz"), stem + (".exe" if "windows" in target else "")])
+        names.append(f"zcalld-installer-{ver}-{target}" + (".exe" if "windows" in target else ""))
     return names
 
 

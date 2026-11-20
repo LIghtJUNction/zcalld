@@ -24,6 +24,7 @@ check-native: build
 
 install:
 	install -Dm755 target/release/zcalld "$(DESTDIR)$(BINDIR)/zcalld"
+	install -Dm755 target/release/zcalld-installer "$(DESTDIR)$(BINDIR)/zcalld-installer"
 	@for plugin in $(PLUGINS); do install -Dm755 "target/release/lib$$plugin.so" "$(DESTDIR)$(LIBDIR)/zcalld/plugins/lib$$plugin.so"; done
 	install -d "$(DESTDIR)$(LIBDIR)/systemd/system" "$(DESTDIR)$(LIBDIR)/systemd/user"
 	sed 's|/usr/bin/zcalld|$(BINDIR)/zcalld|g' packaging/systemd/zcalld.service > "$(DESTDIR)$(LIBDIR)/systemd/system/zcalld.service"

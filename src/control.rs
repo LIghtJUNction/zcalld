@@ -43,6 +43,12 @@ pub fn run(input: &[String]) -> Option<Result<(), String>> {
         index += 1;
     }
     let command = args.first().map(String::as_str).unwrap_or("");
+    if command == "install" {
+        if config_count != 0 || json_count > 1 {
+            return Some(Err("install does not accept --config or duplicate --json".into()));
+        }
+        return Some(crate::installer::run(&args[1..]));
+    }
     if command == "keys" && (config_count > 1 || json_count > 1 || invalid_config_value) {
         return Some(Err("duplicate or invalid global caller key option".into()));
     }
