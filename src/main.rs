@@ -16,6 +16,7 @@ mod migration;
 mod plugin_http;
 mod plugins;
 mod protocol;
+mod recovery;
 mod server;
 mod state_json;
 mod system;

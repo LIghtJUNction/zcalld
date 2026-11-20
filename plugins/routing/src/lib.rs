@@ -12,8 +12,8 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use zcalld_plugin_api::{
-    ContextPlugin, ContextPluginExport, GatewayPlugin, GatewayPluginExport, ResponsePlugin,
-    ResponsePluginExport, RetryPlugin, RetryPluginExport, protocol,
+    ContextPlugin, ContextPluginExport, GatewayPlugin, GatewayPluginExport, RecoveryPluginExport,
+    ResponsePlugin, ResponsePluginExport, RetryPlugin, RetryPluginExport, protocol,
 };
 use zplugin::{Error, Result};
 
@@ -1295,6 +1295,75 @@ impl RetryPlugin for Router {
     }
 }
 
+impl zcalld_plugin_api::RecoveryPlugin for Router {
+    fn configure(&mut self, config: &str) -> Result<()> {
+        self.configure_path(config)
+    }
+
+    fn accepts(&mut self) -> Result<u32> {
+        Ok(0) // Observe a proven recovery; this router never spends/reset quotas.
+    }
+
+    fn begin(&mut self, _metadata: &[u8]) -> Result<zplugin::OwnedResource> {
+        Err(Error::Unsupported)
+    }
+
+    fn resume(
+        &mut self,
+        protocol: u32,
+        model: &str,
+        input: &[u8],
+        output: &mut [u8],
+    ) -> Result<u64> {
+        let current = self.current()?.clone();
+        let mut state = current.borrow_mut();
+        if state.group.is_empty() {
+            return Ok(0);
+        }
+        if !protocol::is_supported(protocol) {
+            return Err(Error::InvalidArgument);
+        }
+        if output.len() < input.len().saturating_add(2048) {
+            return Err(Error::BufferTooSmall);
+        }
+        let group = self
+            .settings
+            .get("groups")
+            .as_array()
+            .iter()
+            .find(|group| group.get("name").as_str() == Some(&state.group))
+            .ok_or(Error::InvalidArgument)?;
+        if !group.get("members").as_array().iter().any(|member| {
+            member.get("model").as_str() == Some(model) && member.get("off").as_bool() != Some(true)
+        }) {
+            return Err(Error::InvalidArgument);
+        }
+        let shared = self.shared.as_ref().ok_or(Error::PluginStatus(8))?;
+        {
+            let mut pools = shared.lock().map_err(|_| Error::PluginStatus(8))?;
+            let pool = pools.entry(state.group.clone()).or_default();
+            let stats = pool.stats.entry(model.into()).or_default();
+            stats.until = 0;
+            stats.requests = stats.requests.saturating_add(1);
+            if let Some(turn) = pool
+                .turns
+                .iter_mut()
+                .rev()
+                .find(|turn| turn.key == state.turn_key)
+            {
+                turn.model = model.into();
+            }
+        }
+        state.selected = model.into();
+        state.excluded.retain(|excluded| excluded != model);
+        state.input_tokens = 0;
+        state.output_tokens = 0;
+        state.response_tail.clear();
+        drop(state);
+        RetryPlugin::request(self, protocol, input, output)
+    }
+}
+
 fn extract_usage(value: &Value, state: &mut RequestState) {
     let usage = if !matches!(value.get("usage"), Value::Null) {
         value.get("usage")
@@ -1365,7 +1434,7 @@ impl ResponsePlugin for Router {
 fn create() -> Result<Router> {
     Ok(Router::default())
 }
-zplugin::export_interfaces!(version=(zcalld_plugin_api::version_component(env!("CARGO_PKG_VERSION_MAJOR")),zcalld_plugin_api::version_component(env!("CARGO_PKG_VERSION_MINOR")),zcalld_plugin_api::version_component(env!("CARGO_PKG_VERSION_PATCH"))),unload=pinned; GatewayPluginExport<Router> => create, ContextPluginExport<Router> => create, ResponsePluginExport<Router> => create, RetryPluginExport<Router> => create,);
+zplugin::export_interfaces!(version=(zcalld_plugin_api::version_component(env!("CARGO_PKG_VERSION_MAJOR")),zcalld_plugin_api::version_component(env!("CARGO_PKG_VERSION_MINOR")),zcalld_plugin_api::version_component(env!("CARGO_PKG_VERSION_PATCH"))),unload=pinned; GatewayPluginExport<Router> => create, ContextPluginExport<Router> => create, ResponsePluginExport<Router> => create, RetryPluginExport<Router> => create, RecoveryPluginExport<Router> => create,);
 
 #[cfg(test)]
 mod tests {
