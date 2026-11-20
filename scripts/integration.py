@@ -37,6 +37,31 @@ CODEX_HEADERS = {
     "X-Codex-Credits-Balance": "12.5",
     "X-Codex-Limit-Name": "Codex",
     "X-Codex-Rate-Limit-Reached-Type": "primary",
+    "X-Codex-Bengalfox-Primary-Used-Percent": "82.50",
+    "X-Codex-Bengalfox-Primary-Window-Minutes": "300",
+    "X-Codex-Bengalfox-Primary-Reset-At": "1900100000",
+    "X-Codex-Bengalfox-Secondary-Used-Percent": "45.25",
+    "X-Codex-Bengalfox-Secondary-Window-Minutes": "10080",
+    "X-Codex-Bengalfox-Secondary-Reset-At": "1900700000",
+    "X-Codex-Bengalfox-Limit-Name": "fixture-bengalfox",
+    "x-CODEX-Other-v2-Primary-Used-Percent": "0.00",
+    "x-CODEX-Other-v2-Primary-Window-Minutes": "60",
+    "x-CODEX-Other-v2-Primary-Reset-At": "1900200000",
+    "x-CODEX-Other-v2-Secondary-Used-Percent": "99.9",
+    "x-CODEX-Other-v2-Secondary-Window-Minutes": "1440",
+    "x-CODEX-Other-v2-Secondary-Reset-At": "1900800000",
+    "x-CODEX-Other-v2-Limit-Name": "fixture-other-v2",
+}
+BLOCKED_CODEX_HEADERS = {
+    "Set-Cookie": "upstream-session=private",
+    "Authorization": "Bearer upstream-private",
+    "ChatGPT-Account-Id": "private-account",
+    "X-Codex-Private-Session": "private-session",
+    "X-Codex-Bengalfox-Private-Session": "private-model-session",
+    "X-Codex-Bengalfox-Credits-Balance": "private-model-credit",
+    "X-Codex-Bengalfox-Reset-At": "private-wrong-suffix",
+    "X-Codex--Primary-Used-Percent": "private-empty-family",
+    "X-Other-Primary-Used-Percent": "private-other-family",
 }
 
 
@@ -142,10 +167,8 @@ class MockHandler(http.server.BaseHTTPRequestHandler):
     def send_codex_headers(self) -> None:
         for name, value in CODEX_HEADERS.items():
             self.send_header(name, value)
-        self.send_header("Set-Cookie", "upstream-session=private")
-        self.send_header("Authorization", "Bearer upstream-private")
-        self.send_header("ChatGPT-Account-Id", "private-account")
-        self.send_header("X-Codex-Private-Session", "private-session")
+        for name, value in BLOCKED_CODEX_HEADERS.items():
+            self.send_header(name, value)
 
     def begin_stream(self) -> None:
         self.send_response(200)
@@ -166,6 +189,10 @@ class MockHandler(http.server.BaseHTTPRequestHandler):
             return
         self.state.record({"path": self.path, "headers": dict(self.headers), "body": body})
         model = body.get("model", "")
+        if model in ("quota-429", "quota-503"):
+            self.send_json(int(model.rsplit("-", 1)[1]),
+                           {"error": {"message": "mock quota rejection"}}, Retry_After="30")
+            return
         if model == "fail":
             self.send_json(503, {"error": {"message": "mock rejection"}}, Retry_After="1")
             return
@@ -291,6 +318,8 @@ class Gateway:
             ("cancel", "cancel", "upstream"), ("failure", "fail", "upstream"),
             ("redirect", "redirect", "upstream"), ("close", "close", "upstream"),
             ("cross", "claude", "anthropic"), ("responses", "upstream-model", "responses"),
+            ("responses-quota-429", "quota-429", "responses"),
+            ("responses-quota-503", "quota-503", "responses"),
             ("gemini", "upstream-model", "gemini"), ("completions", "upstream-model", "completions"),
             ("interactions", "upstream-model", "interactions"),
         ]:
@@ -502,6 +531,13 @@ class GatewayTests(unittest.TestCase):
                 self.assertEqual(self.mock.state.latest()["path"], expected_path)
                 json.loads(body)
 
+    def assert_codex_response_headers(self, headers: dict) -> None:
+        headers = {key.lower(): value for key, value in headers.items()}
+        for name, value in CODEX_HEADERS.items():
+            self.assertEqual(headers.get(name.lower()), value, name)
+        for name in BLOCKED_CODEX_HEADERS:
+            self.assertNotIn(name.lower(), headers)
+
     def test_codex_quota_headers_reach_json_and_sse_clients_without_private_headers(self) -> None:
         for path in ["/v1/responses", "/backend-api/codex/responses"]:
             for stream in [False, True]:
@@ -509,12 +545,22 @@ class GatewayTests(unittest.TestCase):
                     status, headers, body = self.gateway.request(
                         "POST", path, {"model": "responses", "input": "hello", "stream": stream})
                     self.assertEqual(status, 200, body)
-                    headers = {key.lower(): value for key, value in headers.items()}
-                    for name, value in CODEX_HEADERS.items():
-                        self.assertEqual(headers.get(name.lower()), value)
-                    for private in ["set-cookie", "authorization", "chatgpt-account-id",
-                                    "x-codex-private-session"]:
-                        self.assertNotIn(private, headers)
+                    self.assert_codex_response_headers(headers)
+
+    def test_codex_model_quota_headers_survive_explicit_upstream_refusals(self) -> None:
+        for path in ["/v1/responses", "/backend-api/codex/responses"]:
+            for expected_status in [429, 503]:
+                for stream in [False, True]:
+                    with self.subTest(path=path, status=expected_status, stream=stream):
+                        status, headers, body = self.gateway.request(
+                            "POST", path, {"model": f"responses-quota-{expected_status}",
+                                           "input": "hello", "stream": stream})
+                        self.assertEqual(status, expected_status, body)
+                        self.assertEqual(json.loads(body),
+                                         {"error": {"message": "mock quota rejection"}})
+                        normalized = {key.lower(): value for key, value in headers.items()}
+                        self.assertEqual(normalized.get("retry-after"), "30")
+                        self.assert_codex_response_headers(headers)
 
     def test_codex_alias_preserves_authentication_and_exact_path_boundary(self) -> None:
         path = "/backend-api/codex/responses"

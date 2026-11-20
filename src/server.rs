@@ -867,6 +867,57 @@ impl Forward<'_, '_, '_, '_> {
         Ok(())
     }
 }
+// Codex discovers per-model limits through named header families. Forward only
+// the documented window/name fields; credits remain shared, fixed-name fields.
+fn response_header_allowed(name: &str) -> bool {
+    if [
+        "retry-after",
+        "request-id",
+        "x-request-id",
+        "x-codex-credits-has-credits",
+        "x-codex-credits-unlimited",
+        "x-codex-credits-balance",
+        "x-codex-rate-limit-reached-type",
+    ]
+    .iter()
+    .any(|expected| name.eq_ignore_ascii_case(expected))
+    {
+        return true;
+    }
+    let Some(prefix) = name.get(..7) else {
+        return false;
+    };
+    if !prefix.eq_ignore_ascii_case("x-codex") {
+        return false;
+    }
+    let rest = &name[7..];
+    for suffix in [
+        "-primary-used-percent",
+        "-primary-window-minutes",
+        "-primary-reset-at",
+        "-secondary-used-percent",
+        "-secondary-window-minutes",
+        "-secondary-reset-at",
+        "-limit-name",
+    ] {
+        let Some(split) = rest.len().checked_sub(suffix.len()) else {
+            continue;
+        };
+        let Some((family, field)) = rest.split_at_checked(split) else {
+            continue;
+        };
+        if field.eq_ignore_ascii_case(suffix) {
+            return family.is_empty()
+                || family.strip_prefix('-').is_some_and(|family| {
+                    family.split('-').all(|part| {
+                        !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_alphanumeric())
+                    })
+                });
+        }
+    }
+    false
+}
+
 impl Sink for Forward<'_, '_, '_, '_> {
     fn header(&mut self, bytes: &[u8]) -> Result<(), String> {
         self.header_bytes += bytes.len();
@@ -906,23 +957,7 @@ impl Sink for Forward<'_, '_, '_, '_> {
             if key.eq_ignore_ascii_case("content-type") {
                 self.writer.content_type = value.to_string();
             }
-            if matches!(
-                key.to_ascii_lowercase().as_str(),
-                "retry-after"
-                    | "request-id"
-                    | "x-request-id"
-                    | "x-codex-primary-used-percent"
-                    | "x-codex-primary-window-minutes"
-                    | "x-codex-primary-reset-at"
-                    | "x-codex-secondary-used-percent"
-                    | "x-codex-secondary-window-minutes"
-                    | "x-codex-secondary-reset-at"
-                    | "x-codex-credits-has-credits"
-                    | "x-codex-credits-unlimited"
-                    | "x-codex-credits-balance"
-                    | "x-codex-limit-name"
-                    | "x-codex-rate-limit-reached-type"
-            ) {
+            if response_header_allowed(key) {
                 self.writer.extra.push((key.to_string(), value.to_string()));
             }
         }
