@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.0 — 2026-11-20
+
+- feat: share gateway primitives and manage caller keys
+- fix: normalize the pinned Windows zlib static archive name
+
 ## 0.2.5 — 2026-11-20
 
 - fix: pin the released GUI after the zgpui rename
