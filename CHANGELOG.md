@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.2 — 2026-11-20
+
+- Explicitly release installer and runtime exclusive locks when their owning operation ends, including when a duplicate descriptor remains open.
+- Inspect canonical Windows drive roots as complete paths while retaining all ancestor, reparse-point and noncanonical-path checks.
+- Add deterministic lock-lifetime regressions and a native Windows canonical-path regression.
+- Carry forward the Claude provider and complete portable compat bundle from the 0.4.1 validation candidate; that candidate did not pass the full native release gate and was not published.
+
 ## 0.4.1 — 2026-11-20
 
 - Add the optional Claude CLI provider and its native PTY/ConPTY helper, with explicit profile controls, bounded owned sessions and cancellation-aware cleanup.
