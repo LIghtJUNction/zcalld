@@ -4,7 +4,7 @@ exclude = ["apps/zcall-gui", "extensions/compat", "vendor/zcall", "vendor/zconv"
 resolver = "3"
 
 [workspace.package]
-version = "0.3.1"
+version = "0.4.0"
 edition = "2024"
 rust-version = "1.100"
 license = "MIT"
@@ -27,8 +27,8 @@ include = ["src/**", "examples/config.conf", "README.md", "LICENSE", "Cargo.toml
 zcall = { version = "=0.4.0", default-features = false, features = ["server"] }
 zconv = { version = "=0.4.0", default-features = false }
 zplugin = { version = "=0.3.1", features = ["std"] }
-zcalld-plugin-api = { version = "=0.3.1", path = "crates/zcalld-plugin-api" }
-zcalld-compat-client = { version = "=0.3.1", path = "crates/zcalld-compat-client" }
+zcalld-plugin-api = { version = "=0.4.0", path = "crates/zcalld-plugin-api" }
+zcalld-compat-client = { version = "=0.4.0", path = "crates/zcalld-compat-client" }
 
 [profile.release]
 lto = "thin"

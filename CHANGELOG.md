@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.0 — 2026-11-20
+
+- merge: include current quota header fixes before release preparation [skip ci]
+- docs: record verified native listener PTY acceptance [skip ci]
+- fix: preserve per-model Codex quota headers
+- merge: synchronize native listener with explicit plugin context [skip ci]
+- docs: clarify native listener endpoint and input limits [skip ci]
+- feat(listener): connect native SSMCP input to the local gateway [skip ci]
+- feat: expose explicit read-only context to HTTP plugins
+- feat: expose opt-in trusted route context to HTTP extensions
+- chore: exclude private workspace session state
+- docs: record verified zgpui cohort propagation
+- fix: complete zgpui propagation for the zcall 0.3 cohort [skip ci]
+
 ## 0.3.1 — 2026-11-20
 
 - test: exercise the real Codex ChatGPT path and quota parsing
