@@ -79,7 +79,7 @@ The core supplies actual peer classification, the verified caller-key ID and loa
 
 An incoming `ChatGPT-Account-Id` is an untrusted consistency hint. If present, it must match the account selected by the explicit binding. Duplicate, empty, malformed or mismatched values are rejected. The hint never selects an account or grants access. Incoming Authorization is never used as upstream authentication.
 
-A model is returned only when a configured static route maps to a slug in that account's official response. The exposed slug becomes the public route ID; the upstream entry's instructions and other JSON fields are retained. Missing instructions are rejected, and unbound upstream models are omitted. Dynamic groups and routes belonging to another provider cannot borrow a member's metadata. The filtered catalog gets its own content-derived ETag.
+A model is returned only when a configured static route maps to a slug in that account's official response. The exposed slug becomes the public route ID; the upstream entry's instructions and capabilities are retained. An upgrade target uses its advertised canonical slug or its unique local alias. The upgrade is omitted when the target is absent from the filtered catalog or has multiple aliases without a canonical route. Missing instructions are rejected, and unbound upstream models are omitted. Dynamic groups and routes belonging to another provider cannot borrow a member's metadata. The filtered catalog gets its own content-derived ETag.
 
 Usage, account-bootstrap and config-bundle responses preserve validated upstream JSON bytes. No quota percentage, account or instruction text is synthesized. These are request-time upstream reads; the local quota-cache CLI is a separate interface.
 
@@ -89,7 +89,7 @@ Externally owned native credentials are reread from their bound source without w
 
 Each metadata request uses the smaller of the gateway's overall timeout and 30 seconds, including waiting for cold shared-host initialization. Response data is limited to the smaller of the configured response limit and 4 MiB. Streaming retains the existing byte-credit and cancellation protocol.
 
-Timeout or disconnection releases the request's own calls and cancels its pending stream. It does not kill a shared host or cancel another request's initialization wait. An enabled community plugin that fails initialization makes that native host fail closed for subsequent calls. The management CLI retains partial-load diagnostics.
+Timeout, a TCP reset or a full Unix-socket disconnection releases the request's own calls and cancels its pending stream. The worker and shared host remain available for later requests, and another request's initialization wait is preserved. A client that closes only its write direction can continue reading its response. Ordinary TCP FIN alone is treated as a possible write half-close; its request retains the normal response and deadline. An enabled community plugin that fails initialization makes that native host fail closed for subsequent calls. The management CLI retains partial-load diagnostics.
 
 Redirects, invalid JSON, incompatible content types, missing model instructions and oversized bodies fail explicitly. Returned errors use static categories; arbitrary upstream error text, credentials and response headers are not reflected. Successful metadata responses expose only JSON content type, cache policy and an applicable ETag.
 
@@ -171,9 +171,31 @@ that retains request redaction. It makes no real provider request.
 | Evidence | Coverage |
 | --- | --- |
 | [Native metadata fixture](../scripts/test-codex-metadata.py) | Generated bundle and native HTTP plugin; explicit binding; actual peer classification; forged headers; query/method rejection; bounds; cold-init cancellation; shared failures; no host when disabled |
+| [Installed Codex client fixture](../scripts/test-codex-client-metadata.py) | Codex 0.170.0 app-server parses account windows and bound model aliases; malformed usage produces a client error; no model turn is started |
+| [HTTP cancellation fixture](../scripts/test-http-cancellation.py) | TCP reset and full Unix disconnect release pending calls; the same worker and shared host remain usable; TCP and Unix write half-closes retain responses |
 | [Native compaction fixture](../scripts/test-codex-compaction.py) | Plain, gzip and zstd through the actual privacy worker and routing plugin; opaque IDs and ciphertext in JSON/SSE; plaintext masked upstream and restored downstream |
 | [Native policy fixture](../scripts/test-codex-policy.py) | Per-account policy updates, final-account selection, fail-closed quota checks, cancellation and privacy-preserving group fallback |
 | [MCP fixture](../scripts/test-mcp.py) | Existing tools, sessions and cancellation |
 | [Builtin hook tests](https://github.com/LIghtJUNction/zcalld-compat/tree/main/community/builtin/tests) | Fixed origin, redirects, malformed metadata, external ownership, bounded reads and compaction preparation |
 
 These fixtures use synthetic credentials and local network substitutes. They do not exercise a real subscription, spend credits, refresh an account or change a user's Codex configuration. Passing these contracts does not establish that every Codex feature or every provider account has been tested.
+
+### Installed-client acceptance
+
+With Codex 0.170.0 installed and the native build artifacts available, run on Linux:
+
+```sh
+python3 scripts/test-codex-client-metadata.py \
+  --binary target/release/zcalld \
+  --community-plugin target/release/libzcalld_community.so \
+  --pluginctl _release/native-compat/zcalld-pluginctl \
+  --redact-plugin target/release/libzcalld_redact.so \
+  --privacy-worker _release/native-compat/zcalld-privacy \
+  --routing-plugin target/release/libzcalld_plugin_routing.so
+```
+
+This separate acceptance target requires the installed client. It sends only initialization,
+account-rate-limit and model-list RPCs through an isolated gateway. The fixture uses disposable
+credentials and local metadata, verifies the parsed client values, and rejects attempted
+external HTTP connections through a local proxy. The portable native suite includes HTTP
+cancellation checks without requiring Codex.

@@ -29,6 +29,19 @@ impl Stream {
         }
     }
 
+    /// Detect confirmed disconnects without mistaking write half-close for cancellation.
+    /// TCP FIN alone cannot distinguish a closed client from one awaiting a response.
+    pub fn is_disconnected(&self) -> bool {
+        match self {
+            Self::Tcp(socket) => socket.take_error().is_ok_and(|error| error.is_some()),
+            #[cfg(unix)]
+            Self::Unix(socket) => {
+                use std::os::fd::AsRawFd;
+                system::peer_hung_up(socket.as_raw_fd()).unwrap_or(false)
+            }
+        }
+    }
+
     pub fn shutdown_write(&self) -> io::Result<()> {
         match self {
             Self::Tcp(socket) => socket.shutdown(std::net::Shutdown::Write),
@@ -146,28 +159,62 @@ fn linux_unix_peer(socket: &std::os::unix::net::UnixStream) -> String {
 
 impl Read for Stream {
     fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+        (&*self).read(bytes)
+    }
+}
+
+impl Read for &Stream {
+    fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
         match self {
-            Self::Tcp(socket) => socket.read(bytes),
+            Stream::Tcp(socket) => {
+                let mut view = socket;
+                view.read(bytes)
+            }
             #[cfg(unix)]
-            Self::Unix(socket) => socket.read(bytes),
+            Stream::Unix(socket) => {
+                let mut view = socket;
+                view.read(bytes)
+            }
         }
     }
 }
 
 impl Write for Stream {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        (&*self).write(bytes)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        (&*self).flush()
+    }
+}
+
+impl Write for &Stream {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
         match self {
-            Self::Tcp(socket) => socket.write(bytes),
+            Stream::Tcp(socket) => {
+                let mut view = socket;
+                view.write(bytes)
+            }
             #[cfg(unix)]
-            Self::Unix(socket) => socket.write(bytes),
+            Stream::Unix(socket) => {
+                let mut view = socket;
+                view.write(bytes)
+            }
         }
     }
 
     fn flush(&mut self) -> io::Result<()> {
         match self {
-            Self::Tcp(socket) => socket.flush(),
+            Stream::Tcp(socket) => {
+                let mut view = socket;
+                view.flush()
+            }
             #[cfg(unix)]
-            Self::Unix(socket) => socket.flush(),
+            Stream::Unix(socket) => {
+                let mut view = socket;
+                view.flush()
+            }
         }
     }
 }
@@ -642,5 +689,25 @@ impl zcall::server::Connection for Stream {
     }
     fn error_type(&self) -> &'static str {
         "zcalld_error"
+    }
+}
+
+// A borrowed I/O view keeps socket observation available while a framing writer
+// holds its Connection trait object. It does not duplicate or own the socket.
+impl zcall::server::Connection for &Stream {
+    fn set_read_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
+        Stream::set_read_timeout(self, timeout)
+    }
+    fn set_write_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
+        Stream::set_write_timeout(self, timeout)
+    }
+    fn shutdown_write(&self) -> io::Result<()> {
+        Stream::shutdown_write(self)
+    }
+    fn cancelled(&self) -> bool {
+        <Stream as zcall::server::Connection>::cancelled(self)
+    }
+    fn error_type(&self) -> &'static str {
+        <Stream as zcall::server::Connection>::error_type(self)
     }
 }

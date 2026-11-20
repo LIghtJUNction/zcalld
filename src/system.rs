@@ -45,6 +45,28 @@ mod platform {
         Ok(())
     }
 
+    pub(super) fn peer_hung_up(handle: SocketHandle) -> io::Result<bool> {
+        let mut descriptor = PollFd {
+            fd: handle,
+            events: 0,
+            revents: 0,
+        };
+        // Error/hangup flags are reported even without requested read events.
+        // Read EOF alone also describes a valid write half-close.
+        // SAFETY: one initialized pollfd and a nonblocking synchronous call.
+        let result = unsafe { poll(&mut descriptor, 1, 0) };
+        if result < 0 {
+            let error = io::Error::last_os_error();
+            return if error.kind() == io::ErrorKind::Interrupted {
+                Ok(false)
+            } else {
+                Err(error)
+            };
+        }
+        // POSIX POLLERR | POLLHUP | POLLNVAL on the supported Unix targets.
+        Ok(descriptor.revents & (0x08 | 0x10 | 0x20) != 0)
+    }
+
     pub(super) fn wait_readable(handles: &[SocketHandle]) -> io::Result<u32> {
         let mut descriptors = [PollFd {
             fd: -1,
@@ -139,6 +161,11 @@ mod platform {
 pub fn setup_signals() -> io::Result<()> {
     STOPPING.store(false, Ordering::Relaxed);
     platform::setup_signals()
+}
+
+#[cfg(unix)]
+pub fn peer_hung_up(handle: SocketHandle) -> io::Result<bool> {
+    platform::peer_hung_up(handle)
 }
 
 pub fn wait_readable(handles: &[SocketHandle]) -> io::Result<u32> {
