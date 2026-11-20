@@ -137,6 +137,37 @@ mod platform {
         }
     }
 
+    pub(super) fn tcp_reset(socket: &std::net::TcpStream) -> bool {
+        use std::os::windows::io::AsRawSocket;
+
+        let mut descriptor = PollFd {
+            fd: socket.as_raw_socket(),
+            events: 0x0100, // POLLRDNORM, not the Unix POLLIN value.
+            revents: 0,
+        };
+        // SAFETY: std initialized Winsock; this is one live WSAPOLLFD and a
+        // zero-timeout call. No socket mode, timeout or input bytes are changed.
+        let ready = unsafe { WSAPoll(&mut descriptor, 1, 0) };
+        if ready <= 0 || descriptor.revents & (0x0100 | 0x0001 | 0x0002) == 0 {
+            return false;
+        }
+        // Only normal read readiness or an error/hangup can reach this peek.
+        // The owning request worker has finished reading the request and no
+        // other reader owns this client socket, so readiness cannot be consumed
+        // between poll and peek. FIN (0 bytes) is not cancellation: a client may
+        // still be waiting for our response after shutting down its write half.
+        matches!(
+            socket.peek(&mut [0u8; 1]),
+            Err(error) if matches!(
+                error.kind(),
+                io::ErrorKind::ConnectionReset
+                    | io::ErrorKind::ConnectionAborted
+                    | io::ErrorKind::NotConnected
+                    | io::ErrorKind::BrokenPipe
+            )
+        )
+    }
+
     pub(super) fn wait_readable(handles: &[SocketHandle]) -> io::Result<u32> {
         // Windows POLLIN = POLLRDNORM | POLLRDBAND.
         let mut descriptors = [PollFd {
@@ -169,6 +200,11 @@ pub fn setup_signals() -> io::Result<()> {
 #[cfg(unix)]
 pub fn peer_hung_up(handle: SocketHandle) -> io::Result<bool> {
     platform::peer_hung_up(handle)
+}
+
+#[cfg(windows)]
+pub fn tcp_reset(socket: &std::net::TcpStream) -> bool {
+    platform::tcp_reset(socket)
 }
 
 pub fn wait_readable(handles: &[SocketHandle]) -> io::Result<u32> {

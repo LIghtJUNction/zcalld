@@ -33,6 +33,11 @@ impl Stream {
     /// TCP FIN alone cannot distinguish a closed client from one awaiting a response.
     pub fn is_disconnected(&self) -> bool {
         match self {
+            #[cfg(windows)]
+            Self::Tcp(socket) => {
+                socket.take_error().is_ok_and(|error| error.is_some()) || system::tcp_reset(socket)
+            }
+            #[cfg(not(windows))]
             Self::Tcp(socket) => socket.take_error().is_ok_and(|error| error.is_some()),
             #[cfg(unix)]
             Self::Unix(socket) => {
@@ -709,5 +714,102 @@ impl zcall::server::Connection for &Stream {
     }
     fn error_type(&self) -> &'static str {
         <Stream as zcall::server::Connection>::error_type(self)
+    }
+}
+
+#[cfg(all(test, windows))]
+mod tcp_windows_tests {
+    use super::Stream;
+    use std::{
+        io::{Read, Write},
+        net::{Shutdown, TcpListener, TcpStream},
+        os::windows::io::{AsRawSocket, RawSocket},
+        time::{Duration, Instant},
+    };
+
+    fn pair() -> (TcpStream, TcpStream) {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (server, _) = listener.accept().unwrap();
+        for socket in [&server, &client] {
+            socket
+                .set_read_timeout(Some(Duration::from_secs(1)))
+                .unwrap();
+            socket
+                .set_write_timeout(Some(Duration::from_secs(1)))
+                .unwrap();
+        }
+        (server, client)
+    }
+
+    #[test]
+    fn reset_is_observed_without_waiting_for_a_request_deadline() {
+        #[repr(C)]
+        struct Linger {
+            enabled: u16,
+            seconds: u16,
+        }
+        #[link(name = "ws2_32")]
+        unsafe extern "system" {
+            fn setsockopt(
+                socket: RawSocket,
+                level: i32,
+                option: i32,
+                value: *const u8,
+                len: i32,
+            ) -> i32;
+            fn WSAGetLastError() -> i32;
+        }
+
+        let (server, client) = pair();
+        let server = Stream::Tcp(server);
+        assert!(!server.is_disconnected());
+        let linger = Linger {
+            enabled: 1,
+            seconds: 0,
+        };
+        // SAFETY: this is the Windows two-u_short LINGER ABI for our own socket.
+        let result = unsafe {
+            setsockopt(
+                client.as_raw_socket(),
+                0xffff, // SOL_SOCKET
+                0x0080, // SO_LINGER
+                std::ptr::from_ref(&linger).cast(),
+                std::mem::size_of::<Linger>() as i32,
+            )
+        };
+        assert_eq!(result, 0, "SO_LINGER failed: {}", unsafe {
+            WSAGetLastError()
+        });
+        drop(client);
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !server.is_disconnected() {
+            assert!(Instant::now() < deadline, "TCP reset was not observed");
+            std::thread::yield_now();
+        }
+    }
+
+    #[test]
+    fn read_probe_preserves_request_bytes_and_write_half_close() {
+        let (server, mut client) = pair();
+        let mut server = Stream::Tcp(server);
+        assert!(!server.is_disconnected());
+        client.write_all(b"request").unwrap();
+        client.shutdown(Shutdown::Write).unwrap();
+        let Stream::Tcp(socket) = &server;
+        assert_eq!(socket.peek(&mut [0u8; 1]).unwrap(), 1);
+        for _ in 0..3 {
+            assert!(!server.is_disconnected());
+        }
+        let mut request = [0; 7];
+        server.read_exact(&mut request).unwrap();
+        assert_eq!(&request, b"request");
+        for _ in 0..3 {
+            assert!(!server.is_disconnected());
+        }
+        server.write_all(b"response").unwrap();
+        let mut response = [0; 8];
+        client.read_exact(&mut response).unwrap();
+        assert_eq!(&response, b"response");
     }
 }

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.4 — 2026-11-20
+
+- Detect Windows TCP resets during optional recovery without consuming request bytes or mistaking a write half-close for cancellation.
+- Add native loopback regressions for resets and half-close/data preservation; retain the existing recovery scenarios and time budgets.
+- Allow the complete Windows release checks to run as a commit-pinned candidate before tagging. Formal releases still require all five native targets.
+- Retain the failed 0.4.3 validation tag. It did not publish release assets because the Windows recovery cancellation check failed.
+
 ## 0.4.3 — 2026-11-20
 
 - Inspect the full Windows drive root before checking private desktop-plugin paths, preserving ancestor and reparse-point checks.
