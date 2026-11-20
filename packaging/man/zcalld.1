@@ -120,7 +120,16 @@ Request machine-readable output. Management commands already use JSON.
 .TP
 .B \-\-api-key-stdin
 Read a provider credential from standard input for supported provider operations.
+Keep an existing exclusive credential reference; give the provider a separate
+reference when the old one is shared by another provider, header or gateway token.
+Environment values continue to take precedence over saved credentials.
 Do not put credentials in shell arguments or history.
+.TP
+.BI "\-\-api-key-env " name
+Select an existing environment or saved credential for a provider.
+Cannot be combined with
+.B \-\-api-key-stdin
+in the same operation.
 .TP
 .B \-\-help
 Print the command overview.

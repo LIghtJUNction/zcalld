@@ -60,6 +60,178 @@ class ControlTests(unittest.TestCase):
         self.assertEqual(credentials.read_bytes(), old_credentials)
         self.assertEqual(self.config.read_bytes(), old_config)
 
+    def provider_env(self, name):
+        return next(p["api_key_env"] for p in self.cli("providers", "list")["providers"]
+                    if p["name"] == name)
+
+    def saved_credentials(self):
+        return dict((name.strip(), json.loads(value))
+                    for line in (self.directory / "credentials").read_text(encoding="utf-8").splitlines()
+                    if line and not line.startswith("#")
+                    for name, value in [line.split("=", 1)])
+
+    def test_provider_stdin_names_keep_separate_wire_credentials(self):
+        seen = []
+        class Upstream(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *args): pass
+            def do_GET(self):
+                seen.append(self.headers.get("Authorization"))
+                body = b'{"data":[]}'
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+        upstream = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Upstream)
+        thread = threading.Thread(target=upstream.serve_forever, daemon=True)
+        thread.start()
+        expected = {name: f"fixture-secret-{index}"
+                    for index, name in enumerate(("p-a", "p.a", "p_a", "P-A"))}
+        try:
+            for name, secret in expected.items():
+                self.cli("providers", "add", name, "--base-url",
+                         f"http://127.0.0.1:{upstream.server_port}/v1",
+                         "--api-key-stdin", input=secret)
+            for name, secret in expected.items():
+                self.cli("providers", "models", name)
+                self.assertEqual(seen[-1], f"Bearer {secret}", name)
+            names_before = {name: self.provider_env(name) for name in expected}
+            self.assertEqual(len(set(names_before.values())), len(expected))
+            expected["p.a"] = "fixture-rotated-secret"
+            self.cli("providers", "edit", "p.a", "--api-key-stdin",
+                     input=expected["p.a"])
+            for name, secret in expected.items():
+                self.cli("providers", "models", name)
+                self.assertEqual(seen[-1], f"Bearer {secret}", name)
+                self.assertEqual(self.provider_env(name), names_before[name])
+            listed = json.dumps(self.cli("providers", "list"))
+            for secret in expected.values():
+                self.assertNotIn(secret, listed)
+        finally:
+            upstream.shutdown()
+            upstream.server_close()
+            thread.join(timeout=2)
+
+    def test_provider_stdin_preserves_exclusive_existing_environment(self):
+        credentials = self.directory / "credentials"
+        for name, env_name in (("legacy", "ZCALLD_PROVIDER_LEGACY_KEY"),
+                               ("custom", "CUSTOM_PROVIDER_KEY")):
+            with self.subTest(name=name):
+                self.cli("providers", "add", name, "--base-url", "https://example.invalid/v1",
+                         "--api-key-env", env_name)
+                with credentials.open("a", encoding="utf-8") as stream:
+                    stream.write(f'{env_name}="fixture-old-{name}"\n')
+                credentials.chmod(0o600)
+                self.cli("providers", "edit", name, "--api-key-stdin",
+                         input=f"fixture-new-{name}")
+                self.assertEqual(self.provider_env(name), env_name)
+                self.assertEqual(self.saved_credentials()[env_name], f"fixture-new-{name}")
+        self.assertEqual(len(self.saved_credentials()), 2)
+
+    def test_provider_stdin_splits_legacy_shared_references(self):
+        initial_config = self.config.read_text(encoding="utf-8")
+        shared = "ZCALLD_PROVIDER_LEGACY_KEY"
+        credentials = self.directory / "credentials"
+        for reference in ("provider", "header", "gateway"):
+            with self.subTest(reference=reference):
+                text = initial_config + (
+                    "[provider legacy]\nbase_url = https://example.invalid/v1\n"
+                    f"api_key_env = {shared}\n")
+                if reference == "provider":
+                    text += ("[provider sibling]\nbase_url = https://example.invalid/v1\n"
+                             f"api_key_env = {shared}\n")
+                elif reference == "header":
+                    text += f"header_env.X-Fixture-Secret = {shared}\n"
+                else:
+                    text = text.replace("[server]\n", f"[server]\ntoken_env = {shared}\n")
+                self.config.write_text(text, encoding="utf-8", newline="\n")
+                credentials.write_text(f'{shared}="fixture-shared-secret"\n',
+                                       encoding="utf-8", newline="\n")
+                credentials.chmod(0o600)
+                self.cli("providers", "edit", "legacy", "--api-key-stdin",
+                         input="fixture-isolated-secret")
+                selected = self.provider_env("legacy")
+                self.assertNotEqual(selected, shared)
+                stored = self.saved_credentials()
+                self.assertEqual(stored[shared], "fixture-shared-secret")
+                self.assertEqual(stored[selected], "fixture-isolated-secret")
+                if reference == "provider":
+                    self.assertEqual(self.provider_env("sibling"), shared)
+                elif reference == "header":
+                    self.assertIn(f"header_env.X-Fixture-Secret = {shared}",
+                                  self.config.read_text(encoding="utf-8"))
+                else:
+                    self.assertIn(f"token_env = {shared}",
+                                  self.config.read_text(encoding="utf-8"))
+                self.cli("check")
+
+    def test_provider_stdin_does_not_claim_existing_credentials_or_references(self):
+        credentials = self.directory / "credentials"
+        def add(secret):
+            self.cli("providers", "add", "reserved", "--base-url",
+                     "https://example.invalid/v1", "--api-key-stdin", input=secret)
+            return self.provider_env("reserved")
+        first = add("fixture-orphan")
+        self.cli("providers", "remove", "reserved")
+        second = add("fixture-environment")
+        self.assertNotEqual(first, second)
+        self.cli("providers", "remove", "reserved")
+        credentials.write_text(f'{first}="fixture-orphan"\n', encoding="utf-8", newline="\n")
+        self.env[second] = "fixture-external-environment"
+        third = add("fixture-reference")
+        self.assertNotIn(third, (first, second))
+        self.cli("providers", "remove", "reserved")
+        self.cli("providers", "add", "other", "--base-url", "https://example.invalid/v1",
+                 "--api-key-env", third)
+        credentials.write_text(f'{first}="fixture-orphan"\n', encoding="utf-8", newline="\n")
+        fourth = add("fixture-new")
+        self.assertNotIn(fourth, (first, second, third))
+        self.assertEqual(self.saved_credentials(),
+                         {first: "fixture-orphan", fourth: "fixture-new"})
+        self.assertEqual(self.provider_env("other"), third)
+
+    def test_provider_stdin_rejects_explicit_environment_atomically(self):
+        before = self.config.read_bytes()
+        result = self.cli("providers", "add", "ambiguous", "--base-url",
+                          "https://example.invalid/v1", "--api-key-env", "CUSTOM_KEY",
+                          "--api-key-stdin", input="fixture-private-secret", ok=False)
+        self.assertIn("--api-key-env", result["error"])
+        self.assertIn("--api-key-stdin", result["error"])
+        self.assertNotIn("fixture-private-secret", json.dumps(result))
+        self.assertEqual(self.config.read_bytes(), before)
+        self.assertFalse((self.directory / "credentials").exists())
+        self.assertFalse((self.directory / "backups").exists())
+
+    def test_provider_stdin_rejects_invalid_credential_files_without_changes(self):
+        credentials = self.directory / "credentials"
+        before = self.config.read_bytes()
+        for content in (b'KEEP="fixture-private-secret"\n\xff\n',
+                        b'KEEP="fixture-private-secret"\nKEEP="duplicate"\n',
+                        b'KEEP="fixture-private-secret"\ninvalid line\n',
+                        b"#" + b"x" * (256 * 1024)):
+            with self.subTest(prefix=content[:4], length=len(content)):
+                credentials.write_bytes(content)
+                credentials.chmod(0o600)
+                result = self.cli("providers", "add", "new", "--base-url",
+                                  "https://example.invalid/v1", "--api-key-stdin",
+                                  input="fixture-new-secret", ok=False)
+                self.assertNotIn("fixture-private-secret", json.dumps(result))
+                self.assertNotIn("fixture-new-secret", json.dumps(result))
+                self.assertEqual(credentials.read_bytes(), content)
+                self.assertEqual(self.config.read_bytes(), before)
+                self.assertFalse((self.directory / "backups").exists())
+
+    def test_provider_stdin_rejects_credential_file_growth_past_limit(self):
+        credentials = self.directory / "credentials"
+        content = b"#" + b"x" * (256 * 1024 - 2) + b"\n"
+        credentials.write_bytes(content)
+        credentials.chmod(0o600)
+        before = self.config.read_bytes()
+        self.cli("providers", "add", "new", "--base-url", "https://example.invalid/v1",
+                 "--api-key-stdin", input="fixture-new-secret", ok=False)
+        self.assertEqual(credentials.read_bytes(), content)
+        self.assertEqual(self.config.read_bytes(), before)
+        self.assertFalse((self.directory / "backups").exists())
+
     def test_claude_apply_preserves_jsonc_and_revert_checks_external_edits(self):
         path = self.home / ".claude/settings.json"
         path.parent.mkdir()
