@@ -24,10 +24,13 @@ import sys
 import tempfile
 import time
 import uuid
+from urllib.parse import urlsplit
 
 JSON_LIMIT = 8 << 20
 BLOCK = 1 << 20
 UNIT = "zcalld.service"
+MCP_PATH = "/mcp/magpie/tools"
+MCP_PROTOCOL = "2025-06-18"
 BOOT_ID = Path("/proc/sys/kernel/random/boot_id").read_text().strip() if sys.platform == "linux" else ""
 
 
@@ -164,6 +167,49 @@ def settings_fingerprint(source):
     relevant = {k: v for k, v in value.items()
                 if k in ("lan", "lanKey", "pluginOptions") or k.startswith(("redact", "mask"))}
     return digest(relevant)
+
+
+def required_mcp(source):
+    """Only preserve an assigned, enabled Magpie-owned HTTP library endpoint."""
+    library = read_json(Path(source) / "library.json", {})
+    require(isinstance(library, dict), "MCP library must be an object")
+    entries = library.get("mcp") or []
+    require(isinstance(entries, list), "MCP library entries must be an array")
+    for entry in entries:
+        require(isinstance(entry, dict), "MCP library entry must be an object")
+        if any(entry.get(key) is True for key in ("disabled", "hidden", "offHere")):
+            continue
+        agents = entry.get("agents")
+        if agents is not None:
+            require(isinstance(agents, list) and all(isinstance(x, str) for x in agents),
+                    "MCP library agent assignments are invalid")
+            if not agents:
+                continue
+        if entry.get("transport") == "stdio" or not isinstance(entry.get("url"), str):
+            continue
+        try:
+            url = urlsplit(entry["url"])
+            selected = (url.scheme == "http" and url.hostname in ("127.0.0.1", "localhost", "::1")
+                        and url.port == 3425 and url.path == MCP_PATH
+                        and not url.query and not url.fragment and not url.username and not url.password)
+        except ValueError:
+            selected = False
+        if selected:
+            return True
+    return False
+
+
+def mcp_catalog(tools):
+    """Compare complete tool definitions, without making list order significant."""
+    require(isinstance(tools, list), "MCP tool catalog must be an array")
+    result = {}
+    for tool in tools:
+        require(isinstance(tool, dict) and isinstance(tool.get("name"), str) and tool["name"],
+                "MCP tool definition has no name")
+        require(tool["name"] not in result, "MCP tool catalog contains duplicate names")
+        result[tool["name"]] = tool
+    require(len(encoded(result)) <= JSON_LIMIT, "MCP tool catalog exceeds the metadata limit")
+    return result
 
 
 def config_values(path):
@@ -309,6 +355,88 @@ class System:
             require(reply.status == 200 and len(data) <= JSON_LIMIT, "local gateway metadata check failed")
             return json.loads(data)
 
+    def mcp(self, port, path=MCP_PATH, unix=None, protocol=MCP_PROTOCOL):
+        """Read protocol and tool metadata only; never send tools/call."""
+        require(path == MCP_PATH, "unexpected MCP verification path")
+        deadline = time.monotonic() + 15
+        session = None
+        negotiated = None
+
+        def post(method, request_id, params=None):
+            nonlocal session
+            require(method in ("initialize", "notifications/initialized", "ping", "tools/list"),
+                    "MCP verification cannot execute a tool")
+            remaining = deadline - time.monotonic()
+            require(remaining > 0, "local MCP metadata verification timed out")
+            connection = UnixHTTP(unix) if unix else http.client.HTTPConnection("127.0.0.1", port)
+            connection.timeout = min(3, remaining)
+            headers = {"Host": "localhost", "Content-Type": "application/json",
+                       "Accept": "application/json, text/event-stream"}
+            if negotiated:
+                headers["MCP-Protocol-Version"] = negotiated
+            if session:
+                headers["Mcp-Session-Id"] = session
+            request = {"jsonrpc": "2.0", "method": method}
+            if request_id is not None:
+                request["id"] = request_id
+            if params is not None:
+                request["params"] = params
+            with contextlib.closing(connection):
+                connection.request("POST", path, body=encoded(request), headers=headers)
+                with contextlib.closing(connection.getresponse()) as response:
+                    if request_id is None:
+                        require(response.status in (202, 204),
+                                "local MCP initialization notification was rejected")
+                    else:
+                        require(response.status == 200, "local MCP " + method + " HTTP request was rejected")
+                        require(response.getheader("Content-Type", "").split(";", 1)[0].strip().lower()
+                                == "application/json", "local MCP metadata requires a finite JSON response")
+                    body = response.read(JSON_LIMIT + 1)
+                    require(len(body) <= JSON_LIMIT, "local MCP metadata response is too large")
+                    if request_id is None:
+                        require(not body.strip(), "local MCP initialization notification returned a body")
+                        return None
+                    try:
+                        reply = json.loads(body)
+                    except (ValueError, UnicodeError):
+                        raise CutoverError("local MCP " + method + " returned invalid JSON") from None
+                    require(isinstance(reply, dict) and reply.get("jsonrpc") == "2.0"
+                            and reply.get("id") == request_id and "error" not in reply
+                            and isinstance(reply.get("result"), dict),
+                            "local MCP " + method + " JSON-RPC request was rejected")
+                    if method == "initialize":
+                        session = response.getheader("Mcp-Session-Id")
+                        require(session is None or (0 < len(session) <= 1024
+                                and all(0x21 <= ord(c) <= 0x7e for c in session)),
+                                "local MCP returned an invalid session identifier")
+                    return reply["result"]
+
+        initialized = post("initialize", "cutover-initialize", {
+            "protocolVersion": protocol, "capabilities": {},
+            "clientInfo": {"name": "zcalld-cutover", "version": "1"}})
+        negotiated = initialized.get("protocolVersion")
+        require(isinstance(negotiated, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", negotiated),
+                "local MCP returned no valid protocol version")
+        post("notifications/initialized", None)
+        require(post("ping", "cutover-ping") == {}, "local MCP ping returned an invalid result")
+        tools, cursors, cursor = [], set(), None
+        for page in range(128):
+            result = post("tools/list", "cutover-tools-" + str(page),
+                          {} if cursor is None else {"cursor": cursor})
+            require(isinstance(result.get("tools"), list), "local MCP returned no tool catalog")
+            tools.extend(result["tools"])
+            mcp_catalog(tools)
+            cursor = result.get("nextCursor")
+            if cursor is None:
+                break
+            require(isinstance(cursor, str) and cursor and cursor not in cursors,
+                    "local MCP tool pagination did not advance")
+            cursors.add(cursor)
+        else:
+            raise CutoverError("local MCP tool pagination exceeds the metadata limit")
+        return {"protocolVersion": negotiated,
+                "tools": [tool for _, tool in sorted(mcp_catalog(tools).items())]}
+
     def terminate(self, identity):
         require(same_process(identity), "recorded Magpie process changed; prepare a fresh transaction")
         require(hasattr(os, "pidfd_open") and hasattr(signal, "pidfd_send_signal"), "pidfd signaling is required")
@@ -450,7 +578,7 @@ class Transaction:
             require(old_unit.get("MainPID") == str(old["pid"]), "old unit does not own the selected Magpie main process")
         snapshot = Path(migration["snapshot"])
         topology = {}
-        for name in ("providers.json", "plugins.json", "caller-keys.json"):
+        for name in ("providers.json", "plugins.json", "caller-keys.json", "library.json"):
             if (source / name).exists():
                 require((snapshot / name).exists() and file_hash(source / name) == file_hash(snapshot / name), "Magpie configuration changed since migration; remigrate before cutover")
                 topology[name] = file_hash(source / name)
@@ -472,6 +600,10 @@ class Transaction:
         for binary in (args.binary, args.pluginctl):
             require(Path(binary).is_absolute() and os.access(binary, os.X_OK), "installed executables must be absolute and executable")
         require(is_prefix(config.parent / "usage.jsonl", source / "usage.jsonl"), "candidate usage is not an untouched prefix of Magpie usage")
+        mcp_required = required_mcp(source)
+        # This still addresses the verified old Magpie listener. No candidate
+        # daemon or Bun worker is started until apply has drained that process.
+        mcp = self.ops.mcp(3425) if mcp_required else None
         self.data = {"version": 1, "id": uuid.uuid4().hex[:16], "phase": "preparing",
                      "config": str(config), "source": str(source), "binary": args.binary,
                      "pluginctl": args.pluginctl, "timeout": args.timeout, "unix_socket": unix,
@@ -482,10 +614,14 @@ class Transaction:
                      "settings_hash": settings_fingerprint(source), "community_keys": sorted(initial),
                      "community_staged": {key: digest(value) for key, value in initial.items()},
                      "catalog_hash": digest(expected), "catalog_count": len(expected),
+                     "mcp_required": mcp_required, "mcp_hash": digest(mcp) if mcp else None,
+                     "mcp_tool_count": len(mcp["tools"]) if mcp else None,
                      "config_hash": file_hash(config), "changes": {}, "new_start_attempted": False}
         self.save_recovery()
         self.save()
         save_json(self.state / "expected-models.json", {"object": "list", "data": list(expected.values())})
+        if mcp is not None:
+            save_json(self.state / "expected-mcp.json", mcp)
         self.ops.run([args.binary, "check", "--config", str(config)], "validate staged configuration")
         self.save("prepared")
         self.event("prepared")
@@ -501,6 +637,10 @@ class Transaction:
         source = Path(self.data["source"])
         require(all(file_hash(source / name) == value for name, value in self.data["topology"].items()), "source topology changed after prepare")
         require(settings_fingerprint(source) == self.data["settings_hash"], "source privacy settings changed after prepare")
+        require(required_mcp(source) == self.data.get("mcp_required", False),
+                "retained MCP endpoint changed after preparation; prepare a fresh transaction")
+        if self.data.get("mcp_required"):
+            self.expected_mcp()
         require(same_process(self.data["old_process"]) and owns_listener(self.data["old_process"]["pid"], 3425), "old gateway identity or port ownership changed")
         require(self.ops.unit(UNIT).get("ActiveState") in ("inactive", "failed"), "new service started outside the transaction")
 
@@ -545,6 +685,21 @@ class Transaction:
         self.save("synchronized")
         self.ops.run([self.data["binary"], "check", "--config", self.data["config"]], "validate final credentials")
 
+    def expected_mcp(self):
+        expected = read_json(self.state / "expected-mcp.json")
+        require(digest(expected) == self.data.get("mcp_hash"),
+                "private MCP baseline changed after preparation")
+        return expected
+
+    def verify_mcp(self, unix=None):
+        if self.data.get("mcp_required"):
+            expected = self.expected_mcp()
+            current = self.ops.mcp(3425, unix=unix, protocol=expected["protocolVersion"])
+            require(current.get("protocolVersion") == expected["protocolVersion"],
+                    "served MCP protocol differs from the original endpoint")
+            require(digest(mcp_catalog(current.get("tools"))) == digest(mcp_catalog(expected["tools"])),
+                    "served MCP tool metadata differs from the original endpoint")
+
     def verify_new(self):
         expected = read_json(self.state / "expected-models.json")
         until = time.monotonic() + 30
@@ -559,10 +714,14 @@ class Transaction:
                 for unix in (None, self.data["unix_socket"]):
                     require(self.ops.get(3425, "/healthz", unix).get("status") == "ok", "gateway is not healthy")
                     require(digest(catalog(self.ops.get(3425, "/v1/models", unix))) == digest(catalog(expected)), "served model metadata differs from the staged catalog")
-                return
+                break
             except (OSError, ValueError, CutoverError, http.client.HTTPException):
                 require(time.monotonic() < until, "new service failed TCP/Unix/catalog verification")
                 time.sleep(0.2)
+        # Metadata rejection or mismatch is terminal once the listener is ready.
+        # Let apply use the existing drain/sync/restore rollback transaction.
+        for unix in (None, self.data["unix_socket"]):
+            self.verify_mcp(unix)
 
     def apply(self):
         self.check_prepared()
@@ -692,9 +851,10 @@ class Transaction:
             while True:
                 try:
                     require(set(catalog(self.ops.get(3425, "/v1/models"))) == expected, "old model IDs were not restored")
+                    self.verify_mcp()
                     break
                 except (OSError, ValueError, CutoverError, http.client.HTTPException):
-                    require(time.monotonic() < until, "Magpie did not recover its original model catalog")
+                    require(time.monotonic() < until, "Magpie did not recover its model/MCP metadata")
                     time.sleep(0.2)
             migration_path = self.candidate() / "migration.json"
             migration = read_json(migration_path)
@@ -779,6 +939,8 @@ def main():
         else:
             print(json.dumps({"phase": transaction.data.get("phase"),
                               "catalog_models": transaction.data.get("catalog_count"),
+                              "mcp_required": transaction.data.get("mcp_required", False),
+                              "mcp_tools": transaction.data.get("mcp_tool_count"),
                               "journal": str(transaction.path),
                               "recovery": transaction.data.get("recovery_file"),
                               "recovery_sha256": transaction.data.get("recovery_sha256")}))

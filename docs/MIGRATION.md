@@ -78,7 +78,7 @@ python3 scripts/cutover.py prepare \
   --state "$zcalld_cutover_state"
 ~~~
 
-The state directory must not exist yet. Preparation creates it with mode 0700 and writes journal files with mode 0600. It also saves a complete executable recovery.py copy with mode 0700 and records its SHA256 in the journal; moving or removing the source checkout does not remove the recovery program. It records the original launch, process identity, binary hashes, service state, catalog and credential fingerprints. The original launch environment can contain secrets: keep the whole journal private and do not commit it or attach it to a public issue.
+The state directory must not exist yet. Preparation creates it with mode 0700 and writes journal files with mode 0600. It also saves a complete executable recovery.py copy with mode 0700 and records its SHA256 in the journal; moving or removing the source checkout does not remove the recovery program. It records the original launch, process identity, binary hashes, service state, catalog and credential fingerprints. When an enabled, assigned library entry uses Magpie's exact local /mcp/magpie/tools endpoint on port 3425, it also saves the negotiated MCP protocol and complete tool definitions in private expected-mcp.json. An empty tool directory is a valid baseline. The original launch environment can contain secrets: keep the whole journal private and do not commit it or attach it to a public issue.
 
 If Magpie is already managed by a user service, add its exact unit with --old-unit. If a private native Codex owner manifest has been recorded, add --external-owners with its absolute path. That manifest identifies independent processes by boot ID, PID and start time. They are excluded from the old gateway subtree and are not stopped by the transaction.
 
@@ -88,11 +88,12 @@ Preparation checks all of the following:
 - The new user service is installed and inactive.
 - The candidate preserves TCP port 3425, explicitly trusts local callers and enables a Unix socket.
 - The live Magpie catalog and candidate catalog contain identical complete model objects, including metadata fields.
-- Source topology and relevant privacy settings still match the copied snapshot.
+- Source topology, including the MCP library, and relevant privacy settings still match the copied snapshot.
+- An assigned Magpie MCP entry completes initialization, ping and tool listing against the still-running original service. Other URLs, ports and paths are not probed or rebound.
 - Candidate community credentials have not been used or changed since import.
 - Runtime files and installed binaries exist, and the configuration check succeeds.
 
-Preparation writes the private journal and performs local checks. It leaves Magpie running. If preparation fails, correct the reported condition and use a new state directory; a failed preparation has not switched the service.
+Preparation writes the private journal and performs local checks. It leaves Magpie running and does not start a candidate daemon or compatibility worker. If preparation fails, correct the reported condition and use a new state directory; a failed preparation has not switched the service.
 
 Review the state before proceeding:
 
@@ -118,11 +119,11 @@ It records each transition before making the corresponding change:
 | old_stopped | Wait for the recorded gateway subtree, including its credential worker, to exit. Confirm that TCP 3425 is free. |
 | synchronized | Copy the final community authentication state and usage tail; run a fresh, local import-builtin using the installed helper. |
 | starting_new | Add a reversible user-service drop-in for the chosen binary and configuration, then start zcalld. |
-| active | Verify TCP and Unix health, socket ownership and mode 0600, and every catalog object's full metadata; enable the user service and mark the migration complete. |
+| active | Verify TCP and Unix health, socket ownership and mode 0600, every model object's full metadata and, when retained, the MCP protocol and complete tool definitions over both transports; then enable the user service and mark the migration complete. |
 
 The wait is bounded, with a default of 90 seconds and an optional preparation --timeout from 60 through 600 seconds. The script does not send a forced kill to the recorded gateway or credential workers. Its service drop-in uses KillMode=mixed, a 60-second stop timeout and SendSIGKILL=no so an incomplete drain remains visible.
 
-There is a short interruption between releasing and rebinding port 3425. Requests already in progress depend on the old application's shutdown behavior. The transaction does not replay them or send a test generation request. Its verification requests are limited to local health and model metadata.
+There is a short interruption between releasing and rebinding port 3425. Requests already in progress depend on the old application's shutdown behavior. The transaction does not replay them or send a test generation request. Its verification requests are limited to local health, model metadata and the retained MCP endpoint's initialization, initialized notification, ping and tools/list. They never execute tools/call. The MCP check follows session headers and catalog pagination, accepts empty catalogs and compares every tool definition independently of list order. It currently requires finite JSON metadata responses; an incompatible response, rejection, protocol change or tool metadata mismatch fails activation and enters rollback.
 
 A failed apply attempts rollback automatically. An interrupted apply is recovered with the explicit rollback command below; do not start a second transaction against the same partially switched state.
 
@@ -186,6 +187,6 @@ Run the isolated transaction tests with:
 python3 scripts/test-cutover.py
 ~~~
 
-These tests use temporary files and a fake service controller. They cover final source-state synchronization, a failed activation with automatic rollback, credential changes completed during drain, external Codex preservation, concurrent source changes, interrupted rollback recovery, credential changes while acquiring the handover lock, a private recovery copy, launch-file conflict detection and complete catalog comparisons. They do not stop a real service or access a real account.
+These tests use temporary files, a fake service controller and temporary loopback/Unix HTTP servers. They cover final source-state synchronization, a failed activation with automatic rollback, credential changes completed during drain, external Codex preservation, concurrent source changes, interrupted rollback recovery, credential changes while acquiring the handover lock, a private recovery copy, launch-file conflict detection and complete catalog comparisons. MCP fixtures cover preparation without starting the candidate, TCP/Unix parity with an empty catalog, full tool metadata and protocol mismatches, HTTP/JSON-RPC rejection with rollback, private baseline drift, session propagation, pagination, reply IDs and duplicate tool names. They do not stop a real service, access a real account or execute a tool.
 
 The migration implementation is in [src/migration.rs](../src/migration.rs); the packaged service definition is in [packaging/systemd/user/zcalld.service](../packaging/systemd/user/zcalld.service). The service transaction can validate local startup, permissions and catalog equivalence without exercising a remote provider. Record real provider availability separately when it has actually been checked.
