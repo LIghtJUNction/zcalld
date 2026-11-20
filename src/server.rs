@@ -637,7 +637,11 @@ pub fn models_json(config: &Config) -> &str {
 fn ingress(path: &str) -> Result<(Protocol, Option<String>, bool), String> {
     let protocol = match path {
         "/v1/chat/completions" | "/chat/completions" => Some(Protocol::OpenAiChat),
-        "/v1/responses" | "/responses" => Some(Protocol::OpenAiResponses),
+        // Codex's built-in ChatGPT provider keeps this prefix when its authority
+        // points to the local gateway. Run it through the same Responses pipeline.
+        "/v1/responses" | "/responses" | "/backend-api/codex/responses" => {
+            Some(Protocol::OpenAiResponses)
+        }
         "/v1/messages" | "/messages" => Some(Protocol::AnthropicMessages),
         "/v1/completions" | "/completions" => Some(Protocol::OpenAiCompletions),
         "/v1beta/interactions" | "/v1/interactions" | "/interactions" => {
@@ -904,7 +908,20 @@ impl Sink for Forward<'_, '_, '_, '_> {
             }
             if matches!(
                 key.to_ascii_lowercase().as_str(),
-                "retry-after" | "request-id" | "x-request-id"
+                "retry-after"
+                    | "request-id"
+                    | "x-request-id"
+                    | "x-codex-primary-used-percent"
+                    | "x-codex-primary-window-minutes"
+                    | "x-codex-primary-reset-at"
+                    | "x-codex-secondary-used-percent"
+                    | "x-codex-secondary-window-minutes"
+                    | "x-codex-secondary-reset-at"
+                    | "x-codex-credits-has-credits"
+                    | "x-codex-credits-unlimited"
+                    | "x-codex-credits-balance"
+                    | "x-codex-limit-name"
+                    | "x-codex-rate-limit-reached-type"
             ) {
                 self.writer.extra.push((key.to_string(), value.to_string()));
             }

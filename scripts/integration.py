@@ -23,6 +23,22 @@ UPSTREAM_KEY = "zcalld-test-provider-key"
 BINARY = Path("target/release/zcalld")
 PLUGIN_DIR: Path | None = None
 
+# The exact fields consumed by Codex's Responses rate-limit parser. These are
+# fixed synthetic values from the local mock, never an account's real quota.
+CODEX_HEADERS = {
+    "X-Codex-Primary-Used-Percent": "35",
+    "X-Codex-Primary-Window-Minutes": "300",
+    "X-Codex-Primary-Reset-At": "1900000000",
+    "X-Codex-Secondary-Used-Percent": "80",
+    "X-Codex-Secondary-Window-Minutes": "10080",
+    "X-Codex-Secondary-Reset-At": "1900600000",
+    "X-Codex-Credits-Has-Credits": "true",
+    "X-Codex-Credits-Unlimited": "false",
+    "X-Codex-Credits-Balance": "12.5",
+    "X-Codex-Limit-Name": "Codex",
+    "X-Codex-Rate-Limit-Reached-Type": "primary",
+}
+
 
 def free_port() -> int:
     with socket.socket() as sock:
@@ -115,16 +131,28 @@ class MockHandler(http.server.BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(raw)))
+        if self.path.endswith("/responses"):
+            self.send_codex_headers()
         for name, value in headers.items():
             self.send_header(name.replace("_", "-"), value)
         self.end_headers()
         self.wfile.write(raw)
         self.wfile.flush()
 
+    def send_codex_headers(self) -> None:
+        for name, value in CODEX_HEADERS.items():
+            self.send_header(name, value)
+        self.send_header("Set-Cookie", "upstream-session=private")
+        self.send_header("Authorization", "Bearer upstream-private")
+        self.send_header("ChatGPT-Account-Id", "private-account")
+        self.send_header("X-Codex-Private-Session", "private-session")
+
     def begin_stream(self) -> None:
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-cache")
+        if self.path.endswith("/responses"):
+            self.send_codex_headers()
         self.send_header("Connection", "close")
         self.end_headers()
         self.close_connection = True
@@ -454,6 +482,10 @@ class GatewayTests(unittest.TestCase):
     def test_each_protocol_ingress_uses_its_configured_upstream(self) -> None:
         cases = [
             ("/v1/responses", {"model": "responses", "input": "hello"}, "/v1/responses"),
+            ("/backend-api/codex/responses", {"model": "responses", "input": "hello"},
+             "/v1/responses"),
+            ("/backend-api/codex/responses?client=codex", {"model": "responses", "input": "hello"},
+             "/v1/responses"),
             ("/v1/messages", {"model": "cross", "max_tokens": 8,
                              "messages": [{"role": "user", "content": "hello"}]}, "/v1/messages"),
             ("/v1/completions", {"model": "completions", "prompt": "hello"}, "/v1/completions"),
@@ -469,6 +501,32 @@ class GatewayTests(unittest.TestCase):
                 self.assertEqual(status, 200, body)
                 self.assertEqual(self.mock.state.latest()["path"], expected_path)
                 json.loads(body)
+
+    def test_codex_quota_headers_reach_json_and_sse_clients_without_private_headers(self) -> None:
+        for path in ["/v1/responses", "/backend-api/codex/responses"]:
+            for stream in [False, True]:
+                with self.subTest(path=path, stream=stream):
+                    status, headers, body = self.gateway.request(
+                        "POST", path, {"model": "responses", "input": "hello", "stream": stream})
+                    self.assertEqual(status, 200, body)
+                    headers = {key.lower(): value for key, value in headers.items()}
+                    for name, value in CODEX_HEADERS.items():
+                        self.assertEqual(headers.get(name.lower()), value)
+                    for private in ["set-cookie", "authorization", "chatgpt-account-id",
+                                    "x-codex-private-session"]:
+                        self.assertNotIn(private, headers)
+
+    def test_codex_alias_preserves_authentication_and_exact_path_boundary(self) -> None:
+        path = "/backend-api/codex/responses"
+        payload = {"model": "responses", "input": "hello"}
+        before = self.mock.state.count("upstream-model")
+        self.assertEqual(self.gateway.request("POST", path, payload, auth=False)[0], 401)
+        self.assertEqual(self.gateway.request(
+            "POST", path, payload, headers={"Authorization": "Bearer wrong"})[0], 401)
+        for unknown in [path + "/extra", path + "/", "/backend-api/not-codex/responses"]:
+            with self.subTest(path=unknown):
+                self.assertEqual(self.gateway.request("POST", unknown, payload)[0], 404)
+        self.assertEqual(self.mock.state.count("upstream-model"), before)
 
     def test_same_protocol_preserves_provider_extensions_and_nested_model(self) -> None:
         request = post_body()
