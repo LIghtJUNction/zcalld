@@ -1,4 +1,5 @@
 //! Bounded stdio transport for optional local compatibility workers.
+pub mod helpers;
 pub mod json;
 use json::{Value, object};
 use std::{

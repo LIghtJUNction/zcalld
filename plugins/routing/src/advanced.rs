@@ -68,9 +68,14 @@ impl Evaluator {
             .get("rules_worker")
             .as_str()
             .map(PathBuf::from)
-            .or_else(|| std::env::var_os("ZCALLD_PLUGINCTL").map(PathBuf::from))
-            .unwrap_or_else(|| PathBuf::from("/usr/libexec/zcalld/zcalld-pluginctl"));
-        if !program.is_absolute() || !program.is_file() {
+            .or_else(|| std::env::var_os("ZCALLD_PLUGINCTL").map(PathBuf::from));
+        let program = if let Some(path) = program {
+            zcalld_compat_client::helpers::resolve_legacy(&path)
+        } else {
+            zcalld_compat_client::helpers::find(zcalld_compat_client::helpers::Helper::Pluginctl)
+                .ok_or(Error::InvalidArgument)?
+        };
+        if !zcalld_compat_client::helpers::executable(&program) {
             return Err(Error::InvalidArgument);
         }
         let config = object([(

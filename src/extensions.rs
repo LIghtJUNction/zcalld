@@ -8,6 +8,7 @@ use std::{
     path::{Path, PathBuf},
     process::Command,
 };
+use zcalld_compat_client::helpers::{self, Helper};
 pub fn root(config_path: &Path) -> Result<PathBuf, String> {
     let parent = config_path
         .parent()
@@ -24,33 +25,26 @@ pub fn root(config_path: &Path) -> Result<PathBuf, String> {
 }
 pub(crate) fn helper() -> Result<PathBuf, String> {
     if let Some(path) = std::env::var_os("ZCALLD_PLUGINCTL") {
-        let p = PathBuf::from(path);
-        if p.is_absolute() && p.is_file() {
-            return Ok(p);
-        }
-        return Err("ZCALLD_PLUGINCTL must name an absolute compatibility helper".into());
+        let path = helpers::resolve_legacy(Path::new(&path));
+        return if helpers::executable(&path) {
+            Ok(path)
+        } else {
+            Err("ZCALLD_PLUGINCTL must name an absolute executable compatibility helper".into())
+        };
     }
-    let file = format!("zcalld-pluginctl{}", std::env::consts::EXE_SUFFIX);
-    let mut candidates = vec![
-        Path::new("/usr/libexec/zcalld").join(&file),
+    let mut candidates = helpers::candidates(Helper::Pluginctl);
+    candidates.push(
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("extensions/compat/bin")
-            .join(&file),
-    ];
-    if let Ok(exe) = std::env::current_exe()
-        && let Some(dir) = exe.parent()
-    {
-        candidates.insert(0, dir.join("libexec/zcalld").join(&file));
-        if let Some(prefix) = dir.parent() {
-            candidates.insert(0, prefix.join("libexec/zcalld").join(&file));
-        }
-    }
-    for path in candidates {
-        if path.is_file() {
-            return Ok(path);
-        }
-    }
-    Err("community management requires the optional zcalld-pluginctl compatibility helper".into())
+            .join(Helper::Pluginctl.file_name()),
+    );
+    candidates
+        .into_iter()
+        .find(|path| helpers::executable(path))
+        .ok_or_else(|| {
+            "community management requires the optional zcalld-pluginctl compatibility helper"
+                .into()
+        })
 }
 pub fn run(args: &[String], config_path: &Path) -> Result<(), String> {
     let root = root(config_path)?;
@@ -221,7 +215,7 @@ pub fn privacy_plugin(config_path: &Path) -> Result<Option<PluginSpec>, String> 
     }
     Ok(Some(PluginSpec {
         path: library("redact")?,
-        config: state_json::read(&config)?.stringify(),
+        config: resolved_privacy_binding(state_json::read(&config)?).stringify(),
     }))
 }
 
@@ -269,48 +263,35 @@ pub(crate) fn privacy_settings_path(config_path: &Path) -> Result<PathBuf, Strin
 }
 
 fn privacy_worker() -> Result<PathBuf, String> {
-    fn executable(path: &Path) -> bool {
-        let valid = path.is_absolute() && path.is_file();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            valid && std::fs::metadata(path).is_ok_and(|m| m.permissions().mode() & 0o111 != 0)
-        }
-        #[cfg(not(unix))]
-        {
-            valid
-        }
-    }
     if let Some(path) = std::env::var_os("ZCALLD_PRIVACY_WORKER") {
-        let path = PathBuf::from(path);
-        return if executable(&path) {
+        let path = helpers::resolve_legacy(Path::new(&path));
+        return if helpers::executable(&path) {
             Ok(path)
         } else {
             Err("ZCALLD_PRIVACY_WORKER must name an absolute executable privacy worker; settings were not enabled".into())
         };
     }
-    let file = format!("zcalld-privacy{}", std::env::consts::EXE_SUFFIX);
-    let mut candidates = vec![
-        Path::new("/usr/libexec/zcalld").join(&file),
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("extensions/compat/bin")
-            .join(&file),
-    ];
+    let mut candidates = helpers::candidates(Helper::Privacy);
     if let Ok(helper) = helper()
         && let Some(dir) = helper.parent()
     {
-        candidates.insert(0, dir.join(&file));
+        candidates.insert(0, dir.join(Helper::Privacy.file_name()));
     }
-    if let Ok(exe) = std::env::current_exe()
-        && let Some(dir) = exe.parent()
-    {
-        candidates.insert(0, dir.join("libexec/zcalld").join(&file));
-        if let Some(prefix) = dir.parent() {
-            candidates.insert(0, prefix.join("libexec/zcalld").join(&file));
-        }
-    }
-    candidates.into_iter().find(|p| executable(p))
+    candidates.push(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("extensions/compat/bin")
+            .join(Helper::Privacy.file_name()),
+    );
+    candidates.into_iter().find(|path| helpers::executable(path))
         .ok_or_else(|| "privacy requires the optional zcalld-privacy worker from zcalld-compat; settings were not enabled".into())
+}
+
+fn resolved_privacy_binding(mut value: Value) -> Value {
+    if let Some(worker) = value.get("worker").as_str() {
+        let resolved = helpers::resolve_legacy(Path::new(worker));
+        value.set("worker", resolved.to_string_lossy().into_owned().into());
+    }
+    value
 }
 
 fn create_privacy_key(path: &Path) -> Result<(), String> {
@@ -560,7 +541,7 @@ pub(crate) fn enable_privacy(config_path: &Path, settings: &Value) -> Result<boo
             ),
         ])
     } else {
-        state_json::read(&binding_path)?
+        resolved_privacy_binding(state_json::read(&binding_path)?)
     };
     for field in ["worker", "key"] {
         let path = binding
@@ -620,9 +601,12 @@ pub(crate) fn privacy_configured(config_path: &Path) -> Result<bool, String> {
     };
     let binding = state_json::parse(spec.config.as_bytes())?;
     Ok(["worker", "settings", "key"].into_iter().all(|field| {
-        binding
-            .get(field)
-            .as_str()
-            .is_some_and(|p| Path::new(p).is_absolute() && Path::new(p).is_file())
+        binding.get(field).as_str().is_some_and(|p| {
+            if field == "worker" {
+                helpers::executable(Path::new(p))
+            } else {
+                Path::new(p).is_absolute() && Path::new(p).is_file()
+            }
+        })
     }))
 }

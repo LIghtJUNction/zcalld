@@ -32,6 +32,10 @@ BLOCK = 1 << 20
 UNIT = "zcalld.service"
 MCP_PATH = "/mcp/magpie/tools"
 MCP_PROTOCOL = "2025-06-18"
+LEGACY_HELPERS = {
+    "/usr/libexec/zcalld/zcalld-pluginctl": "/usr/lib/zcalld-compat/zcalld-pluginctl",
+    "/usr/libexec/zcalld/zcalld-privacy": "/usr/lib/zcalld-compat/zcalld-privacy",
+}
 BOOT_ID = Path("/proc/sys/kernel/random/boot_id").read_text().strip() if sys.platform == "linux" else ""
 
 
@@ -56,6 +60,31 @@ def regular(path):
     info = Path(path).lstat()
     require(stat.S_ISREG(info.st_mode), f"expected a regular file: {path}")
     return info
+
+
+def resolve_legacy_helper(value):
+    # Keep this recovery script self-contained; the daemon uses the same policy.
+    raw = os.fspath(value)
+    path = Path(raw)
+    replacement = LEGACY_HELPERS.get(raw)
+    if replacement is None:
+        return path
+    try:
+        path.lstat()
+        return path
+    except FileNotFoundError:
+        target = Path(replacement)
+        return target if target.is_file() and os.access(target, os.X_OK) else path
+    except OSError:
+        return path
+
+
+def default_pluginctl():
+    for value in ("/usr/lib/zcalld-compat/zcalld-pluginctl",
+                  "/usr/libexec/zcalld/zcalld-pluginctl"):
+        if Path(value).is_file() and os.access(value, os.X_OK):
+            return value
+    return "/usr/lib/zcalld-compat/zcalld-pluginctl"
 
 
 def read_json(path, default=None):
@@ -951,6 +980,7 @@ class Transaction:
         require(sys.platform == "linux" and os.getuid() != 0, "run as the Linux desktop user, without sudo")
         config = Path(args.config).resolve(strict=True)
         source = Path(args.source).resolve(strict=True)
+        args.pluginctl = str(resolve_legacy_helper(args.pluginctl))
         require(not config.parent.is_relative_to(source) and not source.is_relative_to(config.parent), "source and destination must be separate")
         require(not self.state.resolve().is_relative_to(source), "transaction journal must be outside the original Magpie directory")
         migration = read_json(config.parent / "migration.json")
@@ -1002,7 +1032,7 @@ class Transaction:
             for key in ("bun", "host", "pi"):
                 regular(Path(host[key]).resolve(strict=True))
         privacy = read_json(config.parent / "privacy/plugin.json")
-        regular(Path(privacy["worker"]).resolve(strict=True))
+        regular(resolve_legacy_helper(privacy["worker"]).resolve(strict=True))
         privacy_state = self.prepare_privacy(source, config.parent, snapshot)
         for binary in (args.binary, args.pluginctl):
             require(Path(binary).is_absolute() and os.access(binary, os.X_OK), "installed executables must be absolute and executable")
@@ -1320,7 +1350,7 @@ def main():
     prepare.add_argument("--config", required=True)
     prepare.add_argument("--source", default=str(Path.home() / ".config/magpie"))
     prepare.add_argument("--binary", default="/usr/bin/zcalld")
-    prepare.add_argument("--pluginctl", default="/usr/libexec/zcalld/zcalld-pluginctl")
+    prepare.add_argument("--pluginctl", default=default_pluginctl())
     prepare.add_argument("--magpie-pid", type=int, required=True)
     prepare.add_argument("--old-unit")
     prepare.add_argument("--external-owners")

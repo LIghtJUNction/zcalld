@@ -40,8 +40,14 @@ fn unavailable<T>(_: T) -> Error {
 }
 impl Redact {
     fn configured(&mut self, config: &str) -> Result<()> {
-        let value = json::parse(config.as_bytes()).map_err(|_| Error::InvalidArgument)?;
-        for key in ["worker", "settings", "key"] {
+        let mut value = json::parse(config.as_bytes()).map_err(|_| Error::InvalidArgument)?;
+        let worker = value.get("worker").as_str().ok_or(Error::InvalidArgument)?;
+        let worker = zcalld_compat_client::helpers::resolve_legacy(Path::new(worker));
+        if !zcalld_compat_client::helpers::executable(&worker) {
+            return Err(Error::InvalidArgument);
+        }
+        value.set("worker", worker.to_string_lossy().into_owned().into());
+        for key in ["settings", "key"] {
             let path = value.get(key).as_str().ok_or(Error::InvalidArgument)?;
             if !Path::new(path).is_absolute() || !Path::new(path).is_file() {
                 return Err(Error::InvalidArgument);
