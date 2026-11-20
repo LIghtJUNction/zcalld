@@ -1,11 +1,15 @@
 use std::{
     ffi::OsStr,
     io::{self, Read},
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::{Command, Stdio},
     thread,
     time::{Duration, Instant},
 };
+
+#[cfg(windows)]
+#[path = "process_windows.rs"]
+mod windows;
 
 pub fn executable(name: &str) -> Result<PathBuf, String> {
     let path = std::env::var_os("PATH")
@@ -65,6 +69,25 @@ pub fn command(program: impl AsRef<OsStr>) -> Command {
         cmd.creation_flags(0x08000000 | 0x00000200);
     }
     cmd
+}
+
+pub fn spawn_deferred(program: &Path, transaction: &Path) -> Result<(), String> {
+    let mut cmd = command(program);
+    cmd.args(["resume", "--transaction"])
+        .arg(transaction)
+        .args(["--wait-ms", "120000"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        windows::spawn(&cmd)
+    }
+    #[cfg(not(windows))]
+    {
+        cmd.spawn()
+            .map_err(|_| "cannot start verified deferred installer")?;
+        Ok(())
+    }
 }
 
 // Read the owned pipe without a blocking reader thread: a child retaining stdout

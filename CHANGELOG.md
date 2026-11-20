@@ -2,6 +2,7 @@
 
 ## 0.4.4 — 2026-11-20
 
+- Prevent the Windows deferred installer from retaining the invoking process's captured output handles while it waits for the old runtime to exit.
 - Initialize synthetic provider hosts before in-flight timeout assertions while preserving separate cold-initialization deadline coverage.
 - Keep Windows maintenance fixtures under the helper-owned private ACL and validate their state before gateway startup.
 - Pair Windows installer recovery with zcall-gui 0.1.5 and keep its strict private-file checks.
