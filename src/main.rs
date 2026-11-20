@@ -8,6 +8,7 @@ mod curl;
 mod digest;
 mod extensions;
 mod http;
+mod keys;
 mod maintenance;
 mod migration;
 mod plugin_http;
@@ -40,11 +41,14 @@ Gateway:
 
 Configuration:
   providers list|add|edit|remove|test|models
+  keys list|add|rotate|revoke
   routes list|set|remove
   groups list|set|remove
   agents list|apply|revert|catalog
   privacy show|set off|secrets|personal
   plugins list|inspect|install|enable|disable|remove|update|config|providers
+  plugins quota list
+  plugins quota refresh --account ACCOUNT_ID
   accounts list|import|use|enable|disable|remove|session
   profiles list|save|use
   library list|import|export|targets|apply|revert
@@ -68,7 +72,9 @@ Native configuration defaults:
   macOS:   $HOME/Library/Application Support/zcalld
   Windows: %APPDATA%/zcalld
 Local CLI connections prefer the private Unix socket when configured.
-Provider secrets use --api-key-stdin, never command-line arguments.
+Provider and caller secrets use --api-key-stdin, never command-line arguments.
+Caller key add/rotate require an ID and --api-key-stdin; add accepts
+--name NAME, --lan and --workspace ABSOLUTE_PATH. Saved changes require a restart.
 "#;
 
 fn main() -> ExitCode {

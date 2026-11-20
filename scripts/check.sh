@@ -9,6 +9,7 @@ cargo build --release --workspace --locked
 python3 scripts/integration.py
 python3 scripts/test-transport.py --binary target/release/zcalld
 ZCALLD_TEST_BINARY=target/release/zcalld python3 scripts/test-control.py
+ZCALLD_TEST_BINARY=target/release/zcalld python3 scripts/test-keys.py
 ZCALLD_TEST_BINARY=target/release/zcalld python3 scripts/test-library.py
 python3 scripts/test-cutover.py
 python3 scripts/release.py check
