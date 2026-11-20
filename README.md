@@ -2,7 +2,7 @@
 
 A native local AI gateway for Linux, macOS and Windows, built on [zcall](https://github.com/LIghtJUNction/zcall), [zconv](https://github.com/LIghtJUNction/zconv), [zplugin](https://github.com/LIghtJUNction/zplugin) and [zsys](https://github.com/LIghtJUNction/zsys).
 
-The CLI daemon owns transport, bounded queues, credentials and protocol conversion. Privacy, community providers and model-group decisions are optional plugins. [zcall-gui](https://github.com/LIghtJUNction/zcall-gui) is a separate native application built with [zui](https://github.com/LIghtJUNction/zui); closing it leaves the gateway running. There is no embedded browser in either application. The optional compatibility package supplies the Go privacy worker and a lazy Bun host for existing JavaScript community plugins.
+The CLI daemon owns transport, bounded queues, credentials and protocol conversion. Privacy, community providers and model-group decisions are optional plugins. [zcall-gui](https://github.com/LIghtJUNction/zcall-gui) is a separate native application built with [zui](https://github.com/LIghtJUNction/zui); closing it leaves the gateway running. There is no embedded browser in either application. The optional compatibility package supplies the Go privacy and advanced-rule workers and one lazy Bun host for existing JavaScript community plugins. [zcall-omarchy](https://github.com/LIghtJUNction/zcall-omarchy) is a second, independent frontend that uses Omarchy's native plugin and menu interfaces without another background gateway.
 
 ## Install
 
@@ -13,6 +13,7 @@ paru -S zcalld-bin
 # Source build alternative: paru -S zcalld
 paru -S zcalld-compat    # Privacy model, community plugins and subscription accounts
 paru -S zcall-gui       # Optional native desktop application
+paru -S zcall-omarchy   # Optional Omarchy bar and terminal menu frontend
 ```
 
 [Releases](https://github.com/LIghtJUNction/zcalld/releases) provide Linux x86_64/aarch64, Windows x86_64 and macOS Apple Silicon/Intel archives with platform-native plugin libraries. Linux and macOS use the system libcurl; the Windows archive includes its TLS transport DLLs. These are real operating-system dependencies, not an embedded browser runtime.
@@ -74,6 +75,7 @@ Protocol names are `chat`, `responses`, `anthropic`, `gemini`, `completions` and
 | `/v1/completions`, `/v1beta/interactions` | Additional protocol ingress |
 | `GET /v1/models` | Public routes with preserved catalog metadata |
 | `GET /healthz` | Readiness |
+| `POST /mcp/zcalld/tools`, `POST /mcp/magpie/tools` | Optional community-tool MCP; the legacy address remains valid |
 
 ## Management
 
@@ -87,17 +89,21 @@ zcalld agents detect --json
 zcalld agents apply claude --route group/work --json
 zcalld agents revert claude --json
 zcalld plugins list --json
+zcalld plugins mcp show --json
 zcalld accounts list --json
 zcalld privacy show --json
 zcalld profiles save work --json
 zcalld library list --json
+zcalld library targets --json
 zcalld usage summary --json
 zcalld update check --json
 ```
 
 Agent edits preserve unrelated fields and keep exact-byte backups. Revert refuses to overwrite later user edits unless explicitly forced. Account controls operate on the actual private compatibility-host store. Community packages must be deliberately enabled; trusted native libraries run inside the daemon process.
 
-Privacy runs before model-group classification. JSON and fragmented SSE responses restore masked values. If a required privacy worker is unavailable, requests fail closed before upstream generation. Group modes include order, smart, rotate, usage, pace, weight and drain; turn affinity is bounded. Explicit upstream 429/503 responses may select another member before downstream headers are committed, with at most four total attempts. An already-started stream or an ambiguous network failure is never replayed.
+The [agent library](docs/LIBRARY.md) manages MCP definitions, instruction sets and skill files separately from gateway providers. Preview/apply/revert keeps exact owned bytes and refuses conflicting user edits. [Community MCP](docs/MCP.md) uses the optional HTTP plugin interface and the same shared Bun process as community providers; initialize and ping do not start that process. Caller-key permissions remain separate from upstream credentials.
+
+Privacy runs before model-group classification. JSON and fragmented SSE responses restore masked values. If a required privacy worker is unavailable, requests fail closed before upstream generation. Group modes include order, smart, rotate, usage, pace, weight and drain; turn affinity is bounded. Explicit upstream 429/503 responses may select another member before downstream headers are committed, with at most four total attempts. An already-started stream or an ambiguous network failure is never replayed. [Advanced rules](docs/ROUTING.md) support IANA time zones, RE2 message conditions and trusted workspace conditions through a lazy optional worker; ordinary groups do not start it.
 
 ## Services
 
@@ -125,9 +131,9 @@ make release
 # Or: gh workflow run bump.yml -f bump=patch
 ```
 
-Use Rust 1.100.0, Python 3.11+, a native compiler and libcurl development libraries. Project Z libraries are actual Cargo patches pointing to pinned git submodules. The optional GUI and compatibility source repositories are also submodules; they keep independent releases.
+Use Rust 1.100.0, Python 3.11+, a native compiler and libcurl development libraries. Project Z libraries are actual Cargo patches pointing to pinned git submodules. The optional GUI, Omarchy frontend and compatibility repositories are also submodules; they keep independent releases.
 
-Day-to-day checks run locally. Formal release workflows validate five native targets, publish versioned archives plus SHA256SUMS, and update source/binary AUR recipes. Source archives recursively include the exact tracked submodule commits; private and untracked development files are excluded. The bump command updates workspace versions, dependency pins, lockfile and changelog as one recoverable operation.
+Day-to-day checks run locally. Formal release workflows validate five native targets, including real privacy, routing and community MCP worker calls, publish versioned archives plus SHA256SUMS, and update source/binary AUR recipes. Linux also runs the migration transaction and rollback fixtures before publication. Source archives recursively include the exact tracked submodule commits; private and untracked development files are excluded. The bump command updates workspace versions, dependency pins, lockfile and changelog as one recoverable operation.
 
 [RELEASING.md](docs/RELEASING.md) describes publishing and recovery. [PLUGINS.md](docs/PLUGINS.md) describes the SDK. [PERFORMANCE.md](docs/PERFORMANCE.md) contains measured daemon baselines, with versions and workload limitations. GUI renderer and native-platform evidence live in its own repository. No client pricing table, subscription tier or paid feature gate is built into these projects.
 
