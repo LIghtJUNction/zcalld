@@ -28,11 +28,20 @@ The earlier transport fixture explicitly overrode every built-in provider to `/v
 
 ## Quota response metadata
 
-The gateway forwards eleven explicitly allowed response headers: the primary and secondary used-percent, window-minutes and reset-at fields; credits-has-credits, credits-unlimited and credits-balance; limit-name; and rate-limit-reached-type, each under the `x-codex-` prefix. Other private or unrelated response headers do not become allowed because of their prefix.
+Codex can report both its default allowance and separate model allowances in the same upstream response. zcalld preserves the default `x-codex` family and named families such as `x-codex-bengalfox` and `x-codex-other-v2`. The [Codex 0.170.0 header parser](https://github.com/openai/codex/blob/rust-v0.170.0/codex-rs/codex-api/src/rate_limits.rs) discovers a named family from its primary-used-percent header and normalizes its ID by replacing hyphens with underscores.
 
-[Codex 0.170.0 parses these headers into rate-limit snapshots](https://github.com/openai/codex/blob/rust-v0.170.0/codex-rs/codex-api/src/rate_limits.rs). The installed-client fixture sends synthetic window and credit values from the fake upstream and verifies their exact values in the real client's `TokenCount` rollout events after HTTP/SSE completion. Those rollout files exist only in its disposable private home. No WebSocket-only `codex.rate_limits` event is injected into the SSE body.
+| Field | Forwarding rule |
+| --- | --- |
+| Primary and secondary used-percent, window-minutes, reset-at | Default family and named Codex families |
+| Limit name | Default family and named Codex families |
+| Credits has-credits, unlimited, balance | The three shared `x-codex-credits-*` fields |
+| Rate-limit-reached type | The fixed `x-codex-rate-limit-reached-type` field |
 
-This proves response metadata reaches the client and is parsed. It does not prove that the interactive status bar shows account quota: that UI also uses the separate account-usage API. This change does not add account-usage or Codex model-catalog endpoints, and the fixture makes no real quota or account request.
+A named family consists of nonempty ASCII letter/digit segments separated by single hyphens. Matching ignores header-name case and preserves the upstream values. Unrecognized suffixes, empty family segments, private headers and non-Codex families remain excluded. The filter does not allocate a lowercase copy of each name; the existing 16 KiB upstream-header bound applies to all accepted and rejected fields together.
+
+The same response path preserves these fields for JSON, SSE and upstream 429/503 responses. The HTTP regression checks two named families, mixed-case names, exact numeric strings, shared credits and rejected private fields. The installed-client fixture uses separate default and named-family cases under both API-key and ChatGPT authentication. Codex records the last rate-limit update in each completed TokenCount rollout event, so each family is asserted independently against exact synthetic values.
+
+These fixtures use disposable private homes and local synthetic providers. They do not read the user's Codex settings or contact a real account. The interactive status bar also uses the separate account-usage API; response-header forwarding does not add that endpoint or change its display rules.
 
 ## Compressed HTTP requests
 
