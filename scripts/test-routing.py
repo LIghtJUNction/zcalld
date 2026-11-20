@@ -67,6 +67,14 @@ class Routing(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix='zcalld-routing-')
         self.root = Path(self.temp.name).resolve()
+        self.environment = {
+            key: value for key, value in os.environ.items()
+            if not key.startswith(('ZCALLD_', 'CODEX_', 'XDG_'))
+        }
+        self.environment.update(
+            HOME=str(self.root), USERPROFILE=str(self.root),
+            XDG_CONFIG_HOME=str(self.root / '.config'),
+            APPDATA=str(self.root / 'AppData/Roaming'))
         self.mock = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Mock)
         self.mock.daemon_threads = True
         self.mock.records = []
@@ -106,7 +114,7 @@ class Routing(unittest.TestCase):
             f'[plugin routing]\npath={self.args.routing_plugin}\nconfig={self.groups}\n', encoding="utf-8", newline="\n")
 
     def start(self):
-        environment = os.environ.copy()
+        environment = self.environment.copy()
         environment.pop('NOTIFY_SOCKET', None)
         self.process = subprocess.Popen([str(self.args.binary), 'serve', '--config', str(self.config)],
                                         stdout=self.log, stderr=self.log, env=environment)
@@ -220,6 +228,80 @@ class Routing(unittest.TestCase):
         status, _ = self.call({'model': 'group/test', 'messages': [{'role': 'user', 'content': 'fixture'}]})
         self.assertEqual(status, 500)
         self.assertEqual(len(self.mock.records), 1)
+
+
+    def prepare_managed_group(self):
+        # Use the CLI's routing.json binding and the exact library under test.
+        explicit = (f'[plugin routing]\npath={self.args.routing_plugin}\n'
+                    f'config={self.groups}\n')
+        config = self.config.read_text(encoding='utf-8')
+        self.assertIn(explicit, config)
+        config = config.replace(explicit, '')
+        config = config.replace(
+            '[route second]\nprovider=mock\n',
+            f'[provider retained]\nbase_url=http://127.0.0.1:{self.mock.server_port}/v1\n'
+            'protocol=chat\nauth=none\n[route second]\nprovider=retained\n')
+        self.config.write_text(config, encoding='utf-8', newline='\n')
+        self.groups.unlink()
+        self.groups = self.root / 'routing.json'
+        self.state['groups'][0]['original'] = {}
+        self.groups.write_text(json.dumps(self.state), encoding='utf-8', newline='\n')
+        self.environment['ZCALLD_PLUGIN_ROUTING_PLUGIN'] = str(self.args.routing_plugin)
+
+    def control(self, *args):
+        return subprocess.run(
+            [str(self.args.binary), *args, '--config', str(self.config), '--json'],
+            capture_output=True, text=True, encoding='utf-8',
+            env=self.environment, timeout=20, check=False)
+
+    def managed_files(self):
+        return (self.config.read_bytes(), self.groups.read_bytes(),
+                sorted(str(path.relative_to(self.root)) for path in self.root.rglob('*')))
+
+    def assert_group_removal_rejected(self, *args):
+        self.prepare_managed_group()
+        before = self.managed_files()
+        result = self.control(*args)
+        after = self.managed_files()
+
+        # Start after the edit so this request uses persisted state, not a live
+        # gateway's previous route table.
+        self.start()
+        status, body = self.call({
+            'model': 'group/test',
+            'messages': [{'role': 'user', 'content': 'managed group fixture'}],
+        })
+        self.assertEqual(status, 200,
+                         f'CLI exit {result.returncode}: {result.stdout}; HTTP {status}: {body!r}')
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('group/test', json.loads(result.stdout)['error'])
+        self.assertEqual(after, before)
+        generated = [value for path, value in self.mock.records
+                     if path.endswith('/chat/completions')]
+        self.assertEqual([value['model'] for value in generated], ['upstream-first'])
+
+    def test_group_cli_route_removal_preserves_http(self):
+        self.assert_group_removal_rejected('routes', 'remove', 'first')
+
+    def test_group_cli_provider_removal_preserves_http(self):
+        self.assert_group_removal_rejected('providers', 'remove', 'mock')
+
+    def test_group_cli_reassignment_releases_provider(self):
+        self.prepare_managed_group()
+        for command in (
+                ('groups', 'set', 'group/test', '--members', 'second'),
+                ('providers', 'remove', 'mock')):
+            result = self.control(*command)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.start()
+        status, body = self.call({
+            'model': 'group/test',
+            'messages': [{'role': 'user', 'content': 'reassigned group fixture'}],
+        })
+        self.assertEqual(status, 200, body)
+        generated = [value for path, value in self.mock.records
+                     if path.endswith('/chat/completions')]
+        self.assertEqual([value['model'] for value in generated], ['upstream-second'])
 
 
 if __name__ == '__main__':

@@ -50,6 +50,21 @@ A definition file can provide `members`, `mode` or `routing`, and the original g
 
 The complete candidate rule configuration is validated before either the INI file or `routing.json` is replaced. An invalid time zone, unsupported regular expression, unknown condition, or malformed member list fails the command and leaves both existing files intact. The Magpie migration planner performs the same validation and reports a compatibility gap instead of silently dropping an unknown rule.
 
+## Change or remove members
+
+A managed group owns its public route name in both `config.conf` and `routing.json`. Use `groups set` and `groups remove` to change that entry. Ordinary `routes set/remove` commands and the route created by `providers add/edit --model` reject a group-name collision.
+
+Deleting a route that a group still references is also rejected. `providers remove` checks every route it would delete, including group entries and members, before saving anything. The error names the affected group. Change its members first:
+
+```sh
+zcalld groups set group/work --members careful
+zcalld routes remove fast
+```
+
+Updating an existing direct member's provider or upstream model remains supported. If its old provider is still recorded on the group's public route, run `groups set` again with the intended members to refresh that entry before removing the old provider. To remove the group completely, use `zcalld groups remove group/work`; its former members can then be removed when no other group references them.
+
+Rejected edits leave configuration files, saved credentials and backups unchanged and do not consume `--api-key-stdin`. Missing `routing.json`, an empty object and an empty group list remain valid. Unreadable JSON or malformed group/member fields must be repaired before a route-changing command proceeds. These checks protect the CLI operations described here; direct file edits and profile switching have separate behavior.
+
 ## Rule evaluation
 
 All conditions inside one rule are combined with AND. The first matching ordinary rule provides its preferred member order. A rule can combine the existing `tokens`, `images`, `effort`, `agents`, `intent` and `compact` fields with the advanced fields described here.

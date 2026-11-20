@@ -617,6 +617,224 @@ class ControlTests(unittest.TestCase):
         self.cli("groups", "remove", "group/work")
         self.assertNotIn("group/work", [r["name"] for r in self.cli("routes", "list")["routes"]])
 
+    def assert_management_rejected_unchanged(self, *args, config=None, secret=None):
+        selected = self.config if config is None else config
+        before = self.directory_state(selected.parent)
+        with tempfile.TemporaryFile() as source:
+            if secret is not None:
+                source.write(secret.encode("utf-8"))
+                source.seek(0)
+            result = subprocess.run(
+                [str(BINARY), *args, "--config", str(selected), "--json"],
+                stdin=source, text=True, capture_output=True, env=self.env,
+                timeout=20, check=False, encoding="utf-8")
+            consumed = source.tell()
+        self.assertNotEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertEqual(self.directory_state(selected.parent), before)
+        if secret is not None:
+            self.assertEqual(consumed, 0, "rejected management edit consumed credential stdin")
+            self.assertNotIn(secret.strip(), result.stderr + result.stdout)
+        return json.loads(result.stdout)
+
+    def test_group_integrity_rejects_member_route_removal(self):
+        cases = [
+            ("plain", "group/work", "fixture/model"),
+            ("quotes", 'group/"quoted"', 'member/"quoted"'),
+            ("unicode-space", "group/工作 台", "member/输入 模型"),
+        ]
+        original = self.config.read_bytes()
+        for label, group, member in cases:
+            with self.subTest(case=label), tempfile.TemporaryDirectory(dir=self.home) as temporary:
+                config = Path(temporary) / "config.conf"
+                config.write_bytes(original)
+                if member != "fixture/model":
+                    self.cli("routes", "set", member, "--provider", "fixture",
+                             "--model", "m", config=config)
+                self.cli("groups", "set", group, "--members", member, config=config)
+                error = self.assert_management_rejected_unchanged(
+                    "routes", "remove", member, config=config)
+                self.assertIn(group, error["error"])
+
+    def test_group_integrity_rejects_direct_group_route_edits(self):
+        original = self.config.read_bytes()
+        commands = [
+            ("remove", ("routes", "remove", "group/work")),
+            ("replace", ("routes", "set", "group/work", "--provider", "fixture",
+                         "--model", "replacement")),
+        ]
+        for label, command in commands:
+            with self.subTest(case=label), tempfile.TemporaryDirectory(dir=self.home) as temporary:
+                config = Path(temporary) / "config.conf"
+                config.write_bytes(original)
+                self.cli("groups", "set", "group/work", "--members",
+                         "fixture/model", config=config)
+                error = self.assert_management_rejected_unchanged(*command, config=config)
+                self.assertIn("group/work", error["error"])
+
+    def test_group_integrity_provider_route_conflicts_leave_stdin_unread(self):
+        original = self.config.read_bytes()
+        for action, provider in [("add", "fresh"), ("edit", "fixture")]:
+            for route_option in ("explicit", "default"):
+                with self.subTest(action=action, route=route_option):
+                    with tempfile.TemporaryDirectory(dir=self.home) as temporary:
+                        directory = Path(temporary)
+                        config = directory / "config.conf"
+                        config.write_bytes(original)
+                        group = "group/work" if route_option == "explicit" else f"{provider}/new-model"
+                        self.cli("groups", "set", group, "--members", "fixture/model", config=config)
+                        credentials = directory / "credentials"
+                        credentials.write_text('KEEP="fixture-existing-secret"\n',
+                                               encoding="utf-8", newline="\n")
+                        credentials.chmod(0o600)
+                        arguments = ["providers", action, provider, "--base-url",
+                                     "https://example.invalid/v1", "--model", "new-model",
+                                     "--api-key-stdin"]
+                        if route_option == "explicit":
+                            arguments.extend(["--route", group])
+                        error = self.assert_management_rejected_unchanged(
+                            *arguments, config=config, secret="fixture-unconsumed-secret\n")
+                        self.assertIn(group, error["error"])
+                        self.assertNotIn("fixture-existing-secret", json.dumps(error))
+
+    def test_group_integrity_provider_removal_checks_members_and_placeholder(self):
+        original = self.config.read_bytes()
+        for dependency in ("member-only", "placeholder-only", "member-and-placeholder"):
+            with self.subTest(dependency=dependency):
+                with tempfile.TemporaryDirectory(dir=self.home) as temporary:
+                    config = Path(temporary) / "config.conf"
+                    config.write_bytes(original)
+                    self.cli("providers", "add", "other", "--base-url",
+                             "https://example.invalid/v1", "--model", "other", config=config)
+                    members = ("other/other,fixture/model" if dependency == "member-only"
+                               else "fixture/model")
+                    self.cli("groups", "set", "group/work", "--members", members, config=config)
+                    if dependency == "placeholder-only":
+                        self.cli("routes", "set", "fixture/model", "--provider", "other",
+                                 "--model", "moved", config=config)
+                        rows = {row["name"]: row for row in
+                                self.cli("routes", "list", config=config)["routes"]}
+                        self.assertEqual(rows["fixture/model"]["provider"], "other")
+                        self.assertEqual(rows["group/work"]["provider"], "fixture")
+                    error = self.assert_management_rejected_unchanged(
+                        "providers", "remove", "fixture", config=config)
+                    self.assertIn("group/work", error["error"])
+
+    def test_group_integrity_allows_member_updates_and_unrelated_edits(self):
+        self.cli("groups", "set", "group/work", "--members", "fixture/model")
+        routing = self.directory / "routing.json"
+        before = routing.read_bytes()
+        self.cli("providers", "add", "other", "--base-url", "https://example.invalid/v1")
+        self.cli("routes", "set", "fixture/model", "--provider", "other", "--model", "revised")
+        route = next(row for row in self.cli("routes", "list")["routes"]
+                     if row["name"] == "fixture/model")
+        self.assertEqual((route["provider"], route["model"]), ("other", "revised"))
+        self.cli("providers", "edit", "other", "--model", "updated", "--route", "fixture/model")
+        self.cli("providers", "edit", "fixture", "--base-url", "https://example.invalid/v2")
+        self.cli("routes", "set", "unused", "--provider", "other", "--model", "unused")
+        self.cli("routes", "remove", "unused")
+        self.cli("providers", "add", "unrelated", "--base-url",
+                 "https://example.invalid/v1", "--model", "unused")
+        self.cli("providers", "remove", "unrelated")
+        rows = {row["name"]: row for row in self.cli("routes", "list")["routes"]}
+        self.assertEqual(rows["fixture/model"]["model"], "updated")
+        self.assertIn("group/work", rows)
+        self.assertNotIn("unused", rows)
+        self.assertNotIn("unrelated/unused", rows)
+        self.assertEqual(routing.read_bytes(), before)
+        self.check_config()
+
+    def test_group_integrity_allows_removal_after_group_reconfiguration(self):
+        self.cli("providers", "add", "other", "--base-url",
+                 "https://example.invalid/v1", "--model", "other")
+        self.cli("providers", "add", "retained", "--base-url",
+                 "https://example.invalid/v1", "--model", "retained")
+        self.cli("groups", "set", "group/work", "--members", "fixture/model,other/other")
+        self.cli("groups", "set", "group/work", "--members", "other/other")
+        self.cli("routes", "remove", "fixture/model")
+        self.cli("providers", "remove", "fixture")
+        self.check_config()
+        self.cli("groups", "remove", "group/work")
+        self.cli("routes", "remove", "other/other")
+        self.cli("providers", "remove", "other")
+        self.assertEqual(self.cli("groups", "list")["groups"], [])
+        self.assertEqual([row["name"] for row in self.cli("routes", "list")["routes"]],
+                         ["retained/retained"])
+        self.assertEqual([row["name"] for row in self.cli("providers", "list")["providers"]],
+                         ["retained"])
+        self.check_config()
+
+    def test_group_integrity_rejects_malformed_routing_before_mutation(self):
+        cases = [
+            ("syntax", "{"),
+            ("root-array", "[]"),
+            ("root-null", "null"),
+            ("groups-object", '{"groups":{}}'),
+            ("groups-null", '{"groups":null}'),
+            ("group-not-object", '{"groups":["group/work"]}'),
+            ("group-no-name", '{"groups":[{"members":[{"model":"fixture/model"}]}]}'),
+            ("members-object", '{"groups":[{"name":"group/work","members":{}}]}'),
+            ("members-empty", '{"groups":[{"name":"group/work","members":[]}]}'),
+            ("member-string", '{"groups":[{"name":"group/work","members":["fixture/model"]}]}'),
+            ("member-empty-model", '{"groups":[{"name":"group/work","members":[{"model":""}]}]}'),
+            ("member-number-model", '{"groups":[{"name":"group/work","members":[{"model":7}]}]}'),
+            ("member-no-model", '{"groups":[{"name":"group/work","members":[{}]}]}'),
+        ]
+        commands = [
+            ("route-remove", ("routes", "remove", "fixture/model"), None),
+            ("route-set", ("routes", "set", "group/work", "--provider", "fixture",
+                           "--model", "replacement"), None),
+            ("provider-remove", ("providers", "remove", "fixture"), None),
+            ("provider-model", ("providers", "edit", "fixture", "--model", "replacement",
+                                "--route", "group/work", "--api-key-stdin"),
+             "fixture-unconsumed-secret\n"),
+        ]
+        original = self.config.read_bytes()
+        for label, state in cases:
+            for command_label, command, secret in commands:
+                with self.subTest(state=label, command=command_label):
+                    with tempfile.TemporaryDirectory(dir=self.home) as temporary:
+                        directory = Path(temporary)
+                        config = directory / "config.conf"
+                        config.write_bytes(original)
+                        (directory / "routing.json").write_text(state, encoding="utf-8", newline="\n")
+                        self.assert_management_rejected_unchanged(
+                            *command, config=config, secret=secret)
+
+    def test_group_integrity_rejects_malformed_state_in_group_edits(self):
+        cases = [
+            (("groups", "set", "group/work", "--members", "fixture/model"), "[]"),
+            (("groups", "remove", "group/work"),
+             '{"groups":[{"name":"group/work","members":[]}]}'),
+        ]
+        original = self.config.read_bytes()
+        for command, state in cases:
+            with self.subTest(command=command), tempfile.TemporaryDirectory(dir=self.home) as temporary:
+                directory = Path(temporary)
+                config = directory / "config.conf"
+                config.write_bytes(original)
+                (directory / "routing.json").write_text(state, encoding="utf-8", newline="\n")
+                self.assert_management_rejected_unchanged(*command, config=config)
+
+    def test_group_integrity_accepts_absent_and_empty_routing(self):
+        original = self.config.read_bytes()
+        for label, state in [("absent", None), ("empty-object", "{}"), ("empty-groups", '{"groups":[]}')]:
+            with self.subTest(state=label), tempfile.TemporaryDirectory(dir=self.home) as temporary:
+                directory = Path(temporary)
+                config = directory / "config.conf"
+                config.write_bytes(original)
+                routing = directory / "routing.json"
+                if state is not None:
+                    routing.write_text(state, encoding="utf-8", newline="\n")
+                self.cli("providers", "add", "fresh", "--base-url",
+                         "https://example.invalid/v1", "--model", "new", config=config)
+                self.cli("routes", "set", "unused", "--provider", "fixture",
+                         "--model", "unused", config=config)
+                self.cli("routes", "remove", "unused", config=config)
+                self.cli("providers", "remove", "fresh", config=config)
+                self.check_config(config)
+                self.assertEqual(routing.read_text(encoding="utf-8") if routing.exists() else None,
+                                 state)
+
     def test_profile_without_credentials_clears_stale_private_state(self):
         self.cli("profiles", "save", "empty")
         credentials = self.directory / "credentials"

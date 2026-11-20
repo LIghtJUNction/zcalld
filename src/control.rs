@@ -656,6 +656,7 @@ fn providers(context: &Context, args: &[String]) -> Result<(), String> {
                 if !valid_name(&route) {
                     return Err("route name contains unsupported characters".into());
                 }
+                crate::maintenance::check_group_route_mutation(context, [route.as_str()], false)?;
                 text = ini_set(&text, &format!("route {route}"), "provider", name)?;
                 text = ini_set(&text, &format!("route {route}"), "model", model)?;
             }
@@ -722,6 +723,13 @@ fn providers(context: &Context, args: &[String]) -> Result<(), String> {
                 .filter(|(s, v)| s.starts_with("route ") && v.get("provider") == Some(name))
                 .map(|(s, _)| s)
                 .collect();
+            crate::maintenance::check_group_route_mutation(
+                context,
+                routes
+                    .iter()
+                    .filter_map(|section| section.strip_prefix("route ")),
+                true,
+            )?;
             text = ini_remove(&text, &section);
             for r in &routes {
                 text = ini_remove(&text, r);
