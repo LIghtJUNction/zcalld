@@ -593,7 +593,7 @@ fn unknown(values: &Section, section: &str) -> Result<(), String> {
         Ok(())
     }
 }
-fn valid_env_name(name: &str) -> bool {
+pub(crate) fn valid_env_name(name: &str) -> bool {
     !name.is_empty()
         && !name.as_bytes()[0].is_ascii_digit()
         && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
@@ -634,7 +634,9 @@ fn resolve_secret(
     Ok(value)
 }
 
-fn read_credentials(path: &Path) -> Result<String, String> {
+pub(crate) const MAX_CREDENTIALS_BYTES: usize = 256 * 1024;
+
+pub(crate) fn read_credentials(path: &Path) -> Result<String, String> {
     use std::io::Read;
     let file = match fs::File::open(path) {
         Ok(file) => file,
@@ -655,16 +657,16 @@ fn read_credentials(path: &Path) -> Result<String, String> {
         }
     }
     let mut text = String::new();
-    file.take(256 * 1024 + 1)
+    file.take((MAX_CREDENTIALS_BYTES + 1) as u64)
         .read_to_string(&mut text)
         .map_err(|_| "credentials file must contain UTF-8 text".to_string())?;
-    if text.len() > 256 * 1024 {
+    if text.len() > MAX_CREDENTIALS_BYTES {
         return Err("credentials file exceeds 256 KiB".into());
     }
     Ok(text)
 }
 
-fn parse_credentials(text: &str) -> Result<BTreeMap<String, String>, String> {
+pub(crate) fn parse_credentials(text: &str) -> Result<BTreeMap<String, String>, String> {
     let mut values = BTreeMap::new();
     for (index, line) in text.lines().enumerate() {
         let line = line.trim();

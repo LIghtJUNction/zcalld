@@ -507,6 +507,51 @@ pub fn gateway_token(context: &Context) -> Result<String, String> {
     Ok(c.token.unwrap_or_else(|| "zcalld".into()))
 }
 
+/// Keep an exclusive existing reference; otherwise allocate a private slot.
+/// Raw name bytes distinguish punctuation and case without a hash collision.
+fn provider_credential_env(
+    text: &str,
+    name: &str,
+    credentials: &BTreeMap<String, String>,
+) -> String {
+    let section = format!("provider {name}");
+    let parsed = sections(text);
+    let mut referenced = std::collections::BTreeSet::new();
+    for (other_section, fields) in &parsed {
+        for (field, value) in fields {
+            if (field.ends_with("_env") || field.starts_with("header_env."))
+                && !(other_section == &section && field == "api_key_env")
+            {
+                referenced.insert(value.as_str());
+            }
+        }
+    }
+    if let Some(existing) = ini_get(text, &section, "api_key_env")
+        && config::valid_env_name(&existing)
+        && !referenced.contains(existing.as_str())
+    {
+        return existing;
+    }
+
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    let mut base = String::from("ZCALLD_PROVIDER_");
+    for byte in name.bytes() {
+        base.push(char::from(HEX[usize::from(byte >> 4)]));
+        base.push(char::from(HEX[usize::from(byte & 15)]));
+    }
+    base.push_str("_KEY");
+    let mut selected = base.clone();
+    let mut suffix = 2usize;
+    while credentials.contains_key(&selected)
+        || referenced.contains(selected.as_str())
+        || std::env::var_os(&selected).is_some()
+    {
+        selected = format!("{base}_{suffix}");
+        suffix += 1;
+    }
+    selected
+}
+
 fn providers(context: &Context, args: &[String]) -> Result<(), String> {
     let action = args.first().map(String::as_str).unwrap_or("list");
     let mut text = config_text(context)?;
@@ -552,6 +597,9 @@ fn providers(context: &Context, args: &[String]) -> Result<(), String> {
                     "provider name must use letters, digits, dash, dot or underscore".into(),
                 );
             }
+            if flag(args, "--api-key-stdin") && option(args, "--api-key-env")?.is_some() {
+                return Err("use either --api-key-env or --api-key-stdin, not both".into());
+            }
             let mut pending_credentials = None;
             let section = format!("provider {name}");
             let old = sections(&text)
@@ -578,10 +626,7 @@ fn providers(context: &Context, args: &[String]) -> Result<(), String> {
             text = ini_set(&text, &section, "base_url", &url)?;
             text = ini_set(&text, &section, "protocol", &protocol)?;
             if let Some(env) = option(args, "--api-key-env")? {
-                if env.is_empty()
-                    || !env.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
-                    || env.as_bytes()[0].is_ascii_digit()
-                {
+                if !config::valid_env_name(env) {
                     return Err("invalid environment variable name".into());
                 }
                 text = ini_set(&text, &section, "api_key_env", env)?;
@@ -596,19 +641,21 @@ fn providers(context: &Context, args: &[String]) -> Result<(), String> {
                 if key.is_empty() || key.len() > 16384 || key.chars().any(char::is_control) {
                     return Err("key must be a nonempty single line up to 16 KiB".into());
                 }
-                let env = format!(
-                    "ZCALLD_PROVIDER_{}_KEY",
-                    name.to_ascii_uppercase().replace(['-', '.'], "_")
-                );
                 let path = context.directory.join("credentials");
-                let previous = fs::read_to_string(&path).unwrap_or_default();
+                let previous = config::read_credentials(&path)?;
+                let credentials = config::parse_credentials(&previous)?;
+                let env = provider_credential_env(&text, name, &credentials);
                 let mut lines: Vec<String> = previous
                     .lines()
                     .filter(|l| !l.split_once('=').is_some_and(|(k, _)| k.trim() == env))
                     .map(String::from)
                     .collect();
                 lines.push(format!("{env}={}", http::quote(key)));
-                pending_credentials = Some((path, lines.join("\n") + "\n"));
+                let content = lines.join("\n") + "\n";
+                if content.len() > config::MAX_CREDENTIALS_BYTES {
+                    return Err("credentials file exceeds 256 KiB".into());
+                }
+                pending_credentials = Some((path, content));
                 text = ini_set(&text, &section, "api_key_env", &env)?;
             }
             if let Some(model) = option(args, "--model")? {
