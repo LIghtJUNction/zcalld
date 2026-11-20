@@ -115,6 +115,8 @@ Provider add/edit validates the effective base URL and protocol together before 
 
 Managed model groups own their public route names. Direct route edits and provider model options cannot overwrite or remove a group route. Removing a member route, or a provider that still supplies a group route or member, is rejected before credential input, backups or file writes. First update the group's members with `groups set`, or remove the group with `groups remove`. These route-changing commands also reject malformed `routing.json` instead of treating it as an empty group list.
 
+Group definition files preserve member `weight` and `off` settings and literal route names, including commas. Explicit settings replace the selected member's values; omitted settings keep them. Invalid new weights or disabled-state values fail before files or backups change. See the [group configuration examples](docs/ROUTING.md).
+
 Agent edits preserve unrelated fields and keep exact-byte backups. Revert refuses to overwrite later user edits unless explicitly forced. Account controls operate on the actual private compatibility-host store. Community packages must be deliberately enabled; trusted native libraries run inside the daemon process.
 
 The [agent library](docs/LIBRARY.md) manages MCP definitions, instruction sets and skill files separately from gateway providers. Preview/apply/revert keeps exact owned bytes and refuses conflicting user edits. [Community MCP](docs/MCP.md) uses the optional HTTP plugin interface and the same shared Bun process as community providers; initialize and ping do not start that process. Caller-key permissions remain separate from upstream credentials.

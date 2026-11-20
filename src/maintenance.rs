@@ -385,29 +385,24 @@ fn groups(context: &Context, args: &[String]) -> Result<(), String> {
             {
                 return Err("unsupported routing mode".into());
             }
-            let file_members = if !file.get("members").as_array().is_empty() {
-                file.get("members").as_array()
+            let definitions = if let Some(names) = control::option(args, "--members")? {
+                names.split(',').map(str::trim).map(Value::from).collect()
+            } else if !file.get("members").as_array().is_empty() {
+                file.get("members").as_array().to_vec()
             } else if definition.is_some() {
                 previous
                     .as_ref()
                     .map(|value| value.get("members").as_array())
                     .unwrap_or(&[])
+                    .iter()
+                    .map(|member| member.get("model").clone())
+                    .collect()
             } else {
-                &[]
+                Vec::new()
             };
-            let from_file = file_members
-                .iter()
-                .map(|value| {
-                    value
-                        .as_str()
-                        .or_else(|| value.get("model").as_str())
-                        .ok_or("group members must be route names or member objects")
-                })
-                .collect::<Result<Vec<_>, _>>()?
-                .join(",");
-            let names = control::option(args, "--members")?
-                .or_else(|| (!from_file.is_empty()).then_some(from_file.as_str()))
-                .ok_or("--members or a definition file must name configured routes")?;
+            if definitions.is_empty() {
+                return Err("--members or a definition file must name configured routes".into());
+            }
             let configured = crate::config::Config::load(&context.path)?;
             if previous.is_none() && configured.routes.iter().any(|r| r.name == *name) {
                 return Err("a non-group route already uses this name".into());
@@ -416,7 +411,12 @@ fn groups(context: &Context, args: &[String]) -> Result<(), String> {
             let mut members = Vec::new();
             let mut seen = std::collections::BTreeSet::new();
             let mut first = None;
-            for model in names.split(',').map(str::trim) {
+            for definition in &definitions {
+                // JSON members already carry exact route names and optional settings.
+                let model = definition
+                    .as_str()
+                    .or_else(|| definition.get("model").as_str())
+                    .ok_or("group members must be route names or member objects")?;
                 if model == name
                     || entries
                         .iter()
@@ -447,6 +447,25 @@ fn groups(context: &Context, args: &[String]) -> Result<(), String> {
                     .find(|m| m.get("model").as_str() == Some(model))
                     .cloned()
                     .unwrap_or_else(|| object([("model", model.into()), ("weight", 1u64.into())]));
+                if let Some(fields) = definition.as_object() {
+                    if let Some(weight) = fields.get("weight") {
+                        if !weight
+                            .as_u64()
+                            .is_some_and(|value| (1..=10000).contains(&value))
+                        {
+                            return Err(
+                                "group member weight must be an integer from 1 to 10000".into()
+                            );
+                        }
+                        member.set("weight", weight.clone());
+                    }
+                    if let Some(off) = fields.get("off") {
+                        if off.as_bool().is_none() {
+                            return Err("group member off must be a boolean".into());
+                        }
+                        member.set("off", off.clone());
+                    }
+                }
                 if let Some(metadata) = catalog
                     .get("data")
                     .as_array()

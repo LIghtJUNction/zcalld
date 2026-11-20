@@ -617,6 +617,94 @@ class ControlTests(unittest.TestCase):
         self.cli("groups", "remove", "group/work")
         self.assertNotIn("group/work", [r["name"] for r in self.cli("routes", "list")["routes"]])
 
+    def test_group_definition_applies_member_weights_and_disabled_state(self):
+        self.cli("routes", "set", "other", "--provider", "fixture", "--model", "other")
+        definition = self.home / "group.json"
+        definition.write_text(json.dumps({
+            "routing": "weight",
+            "members": [{"model": "fixture/model", "weight": 3},
+                        {"model": "other", "weight": 1, "off": True}],
+        }), encoding="utf-8")
+        self.cli("groups", "set", "group/work", "--file", str(definition))
+        group = self.cli("groups", "list")["groups"][0]
+        self.assertEqual(group["mode"], "weight")
+        self.assertEqual([member["weight"] for member in group["members"]], [3, 1])
+        self.assertTrue(group["members"][1]["off"])
+
+    def test_group_definition_updates_member_options_and_keeps_omitted_values(self):
+        self.cli("routes", "set", "other", "--provider", "fixture", "--model", "other")
+        self.cli("groups", "set", "group/work", "--members", "fixture/model,other",
+                 "--mode", "weight")
+        routing = self.directory / "routing.json"
+        state = json.loads(routing.read_text(encoding="utf-8"))
+        state["groups"][0]["members"][0].update(weight=7, off=True)
+        state["groups"][0]["members"][1].update(weight=2, off=True)
+        routing.write_text(json.dumps(state), encoding="utf-8")
+        definition = self.home / "group.json"
+        definition.write_text(json.dumps({
+            "members": [{"model": "fixture/model", "weight": 10000, "off": False}, "other"],
+        }), encoding="utf-8")
+        self.cli("groups", "set", "group/work", "--file", str(definition))
+        group = self.cli("groups", "list")["groups"][0]
+        self.assertEqual(group["mode"], "weight")
+        self.assertEqual([member["weight"] for member in group["members"]], [10000, 2])
+        self.assertEqual([member["off"] for member in group["members"]], [False, True])
+        # Imported legacy weights are clamped by the runtime. A mode-only edit
+        # must retain them without treating old state as newly supplied options.
+        group["members"][0]["weight"] = 10001
+        state["groups"] = [group]
+        routing.write_text(json.dumps(state), encoding="utf-8")
+        definition.write_text(json.dumps({"mode": "rotate"}), encoding="utf-8")
+        self.cli("groups", "set", "group/work", "--file", str(definition))
+        updated = self.cli("groups", "list")["groups"][0]
+        self.assertEqual(updated["mode"], "rotate")
+        self.assertEqual(updated["members"], group["members"])
+
+    def test_group_definition_keeps_literal_member_names(self):
+        for route in ("alias", "fixture/model,alias"):
+            self.cli("routes", "set", route, "--provider", "fixture", "--model", "literal")
+        definition = self.home / "group.json"
+        for member in ("fixture/model,alias", {"model": "fixture/model,alias", "weight": 3}):
+            with self.subTest(member=member):
+                definition.write_text(json.dumps({"members": [member]}), encoding="utf-8")
+                self.cli("groups", "set", "group/literal", "--file", str(definition))
+                group = self.cli("groups", "list")["groups"][0]
+                self.assertEqual([value["model"] for value in group["members"]],
+                                 ["fixture/model,alias"])
+                self.check_config()
+
+    def test_group_definition_rejects_invalid_member_options_without_writes(self):
+        self.cli("groups", "set", "group/work", "--members", "fixture/model")
+        definition = self.home / "group.json"
+        for field, values in (
+            ("weight", [0, -1, 1.5, 10001, True, "3", None]),
+            ("off", [0, 1, "false", None]),
+        ):
+            for value in values:
+                with self.subTest(field=field, value=value):
+                    definition.write_text(json.dumps({
+                        "members": [{"model": "fixture/model", field: value}],
+                    }), encoding="utf-8")
+                    error = self.assert_management_rejected_unchanged(
+                        "groups", "set", "group/work", "--file", str(definition))
+                    self.assertIn(field, error["error"])
+
+    def test_group_definition_cli_options_override_file_members(self):
+        self.cli("routes", "set", "other", "--provider", "fixture", "--model", "other")
+        definition = self.home / "group.json"
+        definition.write_text(json.dumps({
+            "mode": "weight",
+            "members": [{"model": "fixture/model", "weight": 9, "off": True}],
+        }), encoding="utf-8")
+        self.cli("groups", "set", "group/work", "--file", str(definition),
+                 "--members", "fixture/model,other", "--mode", "order")
+        group = self.cli("groups", "list")["groups"][0]
+        self.assertEqual(group["mode"], "order")
+        self.assertEqual([member["model"] for member in group["members"]],
+                         ["fixture/model", "other"])
+        self.assertEqual([member["weight"] for member in group["members"]], [1, 1])
+        self.assertTrue(all(not member.get("off", False) for member in group["members"]))
+
     def assert_management_rejected_unchanged(self, *args, config=None, secret=None):
         selected = self.config if config is None else config
         before = self.directory_state(selected.parent)

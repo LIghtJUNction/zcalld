@@ -48,6 +48,22 @@ systemctl --user restart zcalld.service
 
 A definition file can provide `members`, `mode` or `routing`, and the original group settings `rules`, `affinity`, `effort`, `classifier`, `levels`, `intentSure` and `effortMaps`. Original settings may also appear under an `original` object. An existing group's omitted members and mode are retained. Explicit `--members` and `--mode` options override the file. Each rule's `use` and `more` routes must belong to that group; nested groups are rejected.
 
+Members can be route-name strings or objects with a `model` route name, an integer `weight` from 1 to 10000, and a boolean `off`. Explicit object settings update the member; omitted settings retain its existing values, and a new member starts with weight 1. The following definition selects `fast` three times for each `careful` selection and keeps `backup` disabled:
+
+```json
+{
+  "mode": "weight",
+  "affinity": "none",
+  "members": [
+    {"model": "fast", "weight": 3},
+    {"model": "careful", "weight": 1},
+    {"model": "backup", "off": true}
+  ]
+}
+```
+
+These routes must already exist. JSON member names are used literally, including commas; the CLI `--members` option retains its comma-separated syntax. A mode-only file edit preserves saved member settings, including imported legacy values. Invalid explicitly supplied weights or `off` values are rejected before configuration files or backups change.
+
 The complete candidate rule configuration is validated before either the INI file or `routing.json` is replaced. An invalid time zone, unsupported regular expression, unknown condition, or malformed member list fails the command and leaves both existing files intact. The Magpie migration planner performs the same validation and reports a compatibility gap instead of silently dropping an unknown rule.
 
 ## Change or remove members
@@ -64,6 +80,10 @@ zcalld routes remove fast
 Updating an existing direct member's provider or upstream model remains supported. If its old provider is still recorded on the group's public route, run `groups set` again with the intended members to refresh that entry before removing the old provider. To remove the group completely, use `zcalld groups remove group/work`; its former members can then be removed when no other group references them.
 
 Rejected edits leave configuration files, saved credentials and backups unchanged and do not consume `--api-key-stdin`. Missing `routing.json`, an empty object and an empty group list remain valid. Unreadable JSON or malformed group/member fields must be repaired before a route-changing command proceeds. These checks protect the CLI operations described here; direct file edits and profile switching have separate behavior.
+
+## Fallback across aliases
+
+After a complete upstream 429 or 503 refusal, fallback skips public route aliases that point to an already attempted provider, protocol and upstream model. It continues to the next eligible member without sending another request to that target. Skipped aliases do not consume or extend the limit of four actual generation attempts. Recovery is considered only after the retry controller reports that its candidates are exhausted; an interrupted stream or an ambiguous transport failure is never replayed.
 
 ## Rule evaluation
 

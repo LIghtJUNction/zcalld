@@ -429,13 +429,53 @@ fn handle(socket: &mut Stream, config: &Config, plugins: &mut Plugins, client: &
             );
             return;
         }
-        let next = match plugins.retry(
-            protocol_id(source),
-            outcome.status as u32,
-            &selected,
-            input,
-            config.max_body,
-        ) {
+        // Different public routes may name the same actual upstream. Advance
+        // past those aliases without repeating a generation or spending its
+        // attempt budget. The configured route count bounds a faulty controller.
+        let mut previous_model = selected.clone();
+        let mut next = Err("retry plugin did not select an unattempted model".to_string());
+        for _ in 0..config.routes.len() {
+            if STOPPING.load(Ordering::Relaxed) || Instant::now() >= deadline {
+                send_rejection(
+                    socket,
+                    plugins,
+                    rejected,
+                    config.max_response,
+                    source,
+                    &mut events,
+                );
+                return;
+            }
+            let plan = match plugins.retry(
+                protocol_id(source),
+                outcome.status as u32,
+                &previous_model,
+                input,
+                config.max_body,
+            ) {
+                Ok(Some(plan)) => plan,
+                result => {
+                    next = result;
+                    break;
+                }
+            };
+            let Some(next_route) = config.route(&plan.model) else {
+                next = Err("retry plugin selected an unknown model".into());
+                break;
+            };
+            let (next_protocol, _, _) = config.providers[next_route.provider].for_protocol(source);
+            if attempted.iter().any(|(provider, protocol, model)| {
+                *provider == next_route.provider
+                    && *protocol == next_protocol
+                    && *model == next_route.model
+            }) {
+                previous_model = plan.model;
+                continue;
+            }
+            next = Ok(Some(plan));
+            break;
+        }
+        let next = match next {
             Ok(Some(next)) => next,
             Ok(None) => {
                 // Only a complete refusal and an exhausted retry controller
@@ -497,17 +537,7 @@ fn handle(socket: &mut Stream, config: &Config, plugins: &mut Plugins, client: &
                 return;
             }
         };
-        let Some(next_route) = config.route(&next.model) else {
-            let _ = http::error(socket, 503, "retry plugin selected an unknown model");
-            return;
-        };
-        let (next_protocol, _, _) = config.providers[next_route.provider].for_protocol(source);
-        if attempted.iter().any(|(provider, protocol, model)| {
-            *provider == next_route.provider
-                && *protocol == next_protocol
-                && *model == next_route.model
-        }) || Instant::now() >= deadline
-        {
+        if Instant::now() >= deadline {
             send_rejection(
                 socket,
                 plugins,

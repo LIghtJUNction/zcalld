@@ -25,6 +25,8 @@ class Recovery(unittest.TestCase):
         self.log = tempfile.TemporaryFile()
         self.settings = {}
         self.count = 2
+        self.aliases = {}
+        self.group_definition = None
         self.explicit = True
         self.timeout = 2500
         self.environment = {
@@ -41,7 +43,7 @@ class Recovery(unittest.TestCase):
 
     def start(self):
         (self.root / "settings.json").write_text(json.dumps(self.settings), encoding="utf-8")
-        groups = self.root / "groups.json"
+        groups = self.root / ("routing.json" if self.group_definition is not None else "groups.json")
         groups.write_text(json.dumps({"groups": [{
             "name": "group/test", "mode": "order", "original": {},
             "members": [{"model": f"route-{i}"} for i in range(self.count)],
@@ -53,12 +55,25 @@ class Recovery(unittest.TestCase):
                        "protocol=chat\nauth=none\nplugin=fixture\n")
             if self.explicit:
                 config += f"plugin_account=configured-account-{index}\n"
-            config += (f"[route route-{index}]\nprovider=provider-{index}\nmodel=model-{index}\n")
+            target = self.aliases.get(index, index)
+            config += (f"[route route-{index}]\nprovider=provider-{target}\nmodel=model-{target}\n")
         config += "[route group/test]\nprovider=provider-0\nmodel=model-0\n"
-        config += (f"[plugin fixture]\npath={self.args.fixture_plugin}\nconfig={self.root}\n"
-                   f"[plugin routing]\npath={self.args.routing_plugin}\nconfig={groups}\n")
+        config += f"[plugin fixture]\npath={self.args.fixture_plugin}\nconfig={self.root}\n"
+        if self.group_definition is None:
+            config += f"[plugin routing]\npath={self.args.routing_plugin}\nconfig={groups}\n"
+        else:
+            self.environment["ZCALLD_PLUGIN_ROUTING_PLUGIN"] = str(self.args.routing_plugin)
         self.config = self.root / "config.conf"
         self.config.write_text(config, encoding="utf-8", newline="\n")
+        if self.group_definition is not None:
+            definition = self.root / "group-definition.json"
+            definition.write_text(json.dumps(self.group_definition), encoding="utf-8")
+            result = subprocess.run(
+                [str(self.args.binary), "groups", "set", "group/test", "--file",
+                 str(definition), "--config", str(self.config), "--json"],
+                capture_output=True, text=True, encoding="utf-8",
+                env=self.environment, timeout=20, check=False)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.process = subprocess.Popen(
             [str(self.args.binary), "serve", "--config", str(self.config)],
             stdout=self.log, stderr=self.log, env=self.environment)
@@ -121,6 +136,67 @@ class Recovery(unittest.TestCase):
         self.start()
         self.assertEqual(self.call()[0], 200)
         self.assertEqual([v["model"] for v in self.fetches()], ["model-0", "model-1"])
+        self.assertEqual(self.rows("recovery.log"), [])
+
+    def test_cli_group_definition_applies_weights_to_real_requests(self):
+        self.settings["before"] = {"model-0": 200, "model-1": 200}
+        self.group_definition = {
+            "routing": "weight", "affinity": "none",
+            "members": [{"model": "route-0", "weight": 3},
+                        {"model": "route-1", "weight": 1}],
+        }
+        self.start()
+        for _ in range(4):
+            status, body = self.call()
+            self.assertEqual(status, 200, body)
+        self.assertEqual([v["model"] for v in self.fetches()],
+                         ["model-0", "model-0", "model-0", "model-1"])
+        self.assertEqual(self.rows("recovery.log"), [])
+
+    def test_cli_group_definition_never_sends_to_disabled_member(self):
+        self.settings["before"] = {"model-0": 200, "model-1": 200}
+        self.group_definition = {
+            "mode": "order", "affinity": "none",
+            "members": [{"model": "route-0", "off": True},
+                        {"model": "route-1", "off": False}],
+        }
+        self.start()
+        status, body = self.call()
+        self.assertEqual(status, 200, body)
+        self.assertEqual([v["model"] for v in self.fetches()], ["model-1"])
+        self.assertEqual(self.rows("recovery.log"), [])
+
+    def test_duplicate_upstream_alias_is_skipped_before_a_healthy_backup(self):
+        self.count = 3
+        self.aliases[1] = 0
+        self.settings["before"] = {"model-2": 200}
+        self.start()
+        status, body = self.call()
+        self.assertEqual(status, 200, body)
+        self.assertEqual([v["model"] for v in self.fetches()], ["model-0", "model-2"])
+        self.assertEqual(self.rows("recovery.log"), [])
+
+    def test_duplicate_alias_does_not_prevent_recovery_after_real_candidates(self):
+        self.count = 3
+        self.aliases[1] = 0
+        self.start()
+        status, body = self.call()
+        self.assertEqual(status, 200, body)
+        self.assertEqual([v["model"] for v in self.fetches()],
+                         ["model-0", "model-2", "model-0"])
+        metadata = json.loads(self.rows("recovery.log")[0])
+        self.assertEqual([row["route"] for row in metadata["attempts"]],
+                         ["route-0", "route-2"])
+        self.assertEqual(self.rows("request.log"), ["request"])
+
+    def test_skipped_alias_does_not_consume_or_extend_generation_attempt_budget(self):
+        self.count = 6
+        self.aliases[1] = 0
+        self.settings["before"] = {"model-5": 200}
+        self.start()
+        self.assertEqual(self.call()[0], 429)
+        self.assertEqual([v["model"] for v in self.fetches()],
+                         ["model-0", "model-2", "model-3", "model-4"])
         self.assertEqual(self.rows("recovery.log"), [])
 
     def test_recovery_resumes_exact_earlier_route_without_replaying_request_hooks(self):
