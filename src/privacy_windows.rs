@@ -556,6 +556,13 @@ mod tests {
             fs::write(&existing, b"old").unwrap();
             fs::write(&nested, b"nested").unwrap();
         }
+        let inherited_directory = File::options()
+            .access_mode(0x0002_0000)
+            .custom_flags(0x0200_0000 | 0x0020_0000)
+            .open(&child_dir)
+            .unwrap();
+        assert_private_grants(&inherited_directory, 0x13);
+        assert!(check_private(&inherited_directory).is_err());
         for parent in [&directory.path, &child_dir] {
             let new = parent.join("new.json");
             fs::write(&new, b"new").unwrap();
@@ -573,10 +580,15 @@ mod tests {
             set_acl(&directory.file, flags, "SY");
             check_private(&directory.file).unwrap();
         }
-        for flags in ["OI", "CI", "OICINP", "OICIIO", "ID"] {
+        for flags in ["OI", "CI", "OICINP", "OICIIO"] {
             set_acl(&directory.file, flags, "SY");
             assert!(check_private(&directory.file).is_err(), "accepted {flags}");
         }
+        // Protected assignment makes supplied ID ACEs explicit. Check the stored
+        // ACL; actual inherited child ACEs are rejected in the propagation test.
+        set_acl(&directory.file, "ID", "SY");
+        assert_private_grants(&directory.file, 0);
+        check_private(&directory.file).unwrap();
         set_acl(&directory.file, "OICI", "WD");
         assert!(check_private(&directory.file).is_err());
     }
@@ -596,7 +608,10 @@ mod tests {
         assert_private_grants(&file, 0);
         check_private(&file).unwrap();
         set_acl(&file, "OICI", "SY");
-        assert!(check_private(&file).is_err());
+        // Noncontainer assignment may normalize the requested propagation flags.
+        // Require an explicit readback of the expected ACL, not input SDDL alone.
+        assert_private_grants(&file, 0);
+        check_private(&file).unwrap();
         protect(&file).unwrap();
         check_private(&file).unwrap();
         assert_private_grants(&file, 0);
