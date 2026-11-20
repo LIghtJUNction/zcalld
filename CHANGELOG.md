@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.1 — 2026-11-20
+
+- fix: initialize generated builtin plugins without invoking helper exports
+
 ## 0.2.0 — 2026-11-20
 
 - Add native Linux, macOS and Windows releases, local agent detection, and per-user systemd, launchd or scheduled-task controls. Linux and macOS management clients prefer a private Unix socket while existing TCP clients retain their address.
