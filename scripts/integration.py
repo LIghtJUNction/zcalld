@@ -415,7 +415,9 @@ class GatewayTests(unittest.TestCase):
         for headers, expected in [
             ({"Origin": "https://untrusted.invalid"}, 403),
             ({"Content-Type": "text/plain"}, 415),
-            ({"Content-Encoding": "gzip"}, 415),
+            ({"Content-Encoding": "gzip"}, 400),  # Plain JSON is not a gzip frame.
+            ({"Content-Encoding": "zstd"}, 400),
+            ({"Content-Encoding": "br"}, 415),
         ]:
             with self.subTest(headers=headers):
                 self.assertEqual(self.gateway.request("POST", "/v1/chat/completions",

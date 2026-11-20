@@ -1,0 +1,217 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-20",
+  "kind": "real_client_offline_transport_regression",
+  "client": {
+    "name": "Codex CLI",
+    "version": "0.170.0",
+    "binary_sha256": "880819aab735adcf16f36cd628940b9f1e652a36c01d10a5d32f83cc84902971",
+    "reviewed_ref": "rust-v0.170.0"
+  },
+  "source_evidence": [
+    {
+      "url": "https://github.com/openai/codex/blob/rust-v0.170.0/codex-rs/core/src/client.rs",
+      "blob_sha": "5913d07c70efe46806837a1266a43ca4b9d3f844",
+      "facts": [
+        "HTTP426 selects HTTP fallback during prewarm and normal WebSocket connect.",
+        "HTTP400 does not select that fallback.",
+        "With the compression feature enabled, the built-in OpenAI provider uses zstd for Codex-backend authentication.",
+        "Fallback updates shared ModelClient state and clears its cached WebSocket session."
+      ]
+    },
+    {
+      "url": "https://github.com/openai/codex/blob/rust-v0.170.0/codex-rs/model-provider-info/src/lib.rs",
+      "blob_sha": "feeea5fea4b031f7238a4412ef31378cf89a5c97",
+      "facts": [
+        "The built-in OpenAI provider supports WebSockets and requires authentication.",
+        "The custom-provider supports_websockets field defaults to false."
+      ]
+    }
+  ],
+  "fixture": {
+    "path": "scripts/test-codex-transport.py",
+    "sha256": "f951f2c119c33097abd17a04230588cf9d6750814dfa0b88bbe5e8f0bdb561a1",
+    "invocation": "python3 scripts/test-codex-transport.py --codex /path/to/codex --binary /path/to/zcalld --output /private/receipt.json",
+    "platform": "Linux x86_64",
+    "network": "separate bubblewrap network namespace",
+    "home": "new isolated fixture tree",
+    "credentials": "generated fake values only",
+    "real_provider_requests": 0,
+    "fixture_replays": 0,
+    "tests_passed": 7,
+    "tests_skipped": 0
+  },
+  "tested_gateway": {
+    "binary_sha256": "5b0cbfe3225bfbc1d7319caaad3e881f9e9ba12c8f046fa050b5c34b2923a2af",
+    "build_stage": "hotfix build before the version bump",
+    "base_revision": "226764bd980419bfd123bf297b891e09ccdc94c1"
+  },
+  "regression_before_decoder": {
+    "binary_sha256": "a3bd70ce2ef9872616b46459ffbf2de3d26413f3d9efeb0177b2acefd1713d38",
+    "handshake_status": 426,
+    "chatgpt_post_encoding": "zstd",
+    "post_statuses": [
+      415,
+      415,
+      415,
+      415,
+      415,
+      415
+    ],
+    "upstream_posts": 0,
+    "meaning": "Changing only the handshake status still rejected the compressed HTTP fallback."
+  },
+  "cases": [
+    {
+      "name": "mock_custom_400",
+      "passed": true,
+      "auth_shape": "custom",
+      "expected_completion": false,
+      "completed": false,
+      "exact_ok": false,
+      "client_exit_code": 1,
+      "handshake_statuses": [
+        400,
+        400
+      ],
+      "post_statuses": [],
+      "post_content_encodings": [],
+      "retry_policy": "http_0_stream_0",
+      "tool_outputs": false
+    },
+    {
+      "name": "mock_custom_426",
+      "passed": true,
+      "auth_shape": "custom",
+      "expected_completion": true,
+      "completed": true,
+      "exact_ok": true,
+      "client_exit_code": 0,
+      "handshake_statuses": [
+        426
+      ],
+      "post_statuses": [
+        200
+      ],
+      "post_content_encodings": [
+        "identity"
+      ],
+      "retry_policy": "http_0_stream_0",
+      "tool_outputs": false
+    },
+    {
+      "name": "mock_api_key_426",
+      "passed": true,
+      "auth_shape": "api_key",
+      "expected_completion": true,
+      "completed": true,
+      "exact_ok": true,
+      "client_exit_code": 0,
+      "handshake_statuses": [
+        426
+      ],
+      "post_statuses": [
+        200
+      ],
+      "post_content_encodings": [
+        "identity"
+      ],
+      "retry_policy": "builtin_defaults",
+      "tool_outputs": false
+    },
+    {
+      "name": "mock_chatgpt_400",
+      "passed": true,
+      "auth_shape": "chatgpt",
+      "expected_completion": false,
+      "completed": false,
+      "exact_ok": false,
+      "client_exit_code": 1,
+      "handshake_statuses": [
+        400,
+        400
+      ],
+      "post_statuses": [],
+      "post_content_encodings": [],
+      "retry_policy": "builtin_defaults",
+      "tool_outputs": false
+    },
+    {
+      "name": "mock_chatgpt_426",
+      "passed": true,
+      "auth_shape": "chatgpt",
+      "expected_completion": true,
+      "completed": true,
+      "exact_ok": true,
+      "client_exit_code": 0,
+      "handshake_statuses": [
+        426
+      ],
+      "post_statuses": [
+        200
+      ],
+      "post_content_encodings": [
+        "zstd"
+      ],
+      "retry_policy": "builtin_defaults",
+      "tool_outputs": false
+    },
+    {
+      "name": "gateway_api_key_426",
+      "passed": true,
+      "auth_shape": "api_key",
+      "expected_completion": true,
+      "completed": true,
+      "exact_ok": true,
+      "client_exit_code": 0,
+      "handshake_statuses": [
+        426
+      ],
+      "post_statuses": [
+        200
+      ],
+      "post_content_encodings": [
+        "identity"
+      ],
+      "retry_policy": "builtin_defaults",
+      "tool_outputs": false,
+      "upstream_posts": 1,
+      "upstream_content_encodings": [
+        "identity"
+      ],
+      "caller_authorization_forwarded": false
+    },
+    {
+      "name": "gateway_chatgpt_426",
+      "passed": true,
+      "auth_shape": "chatgpt",
+      "expected_completion": true,
+      "completed": true,
+      "exact_ok": true,
+      "client_exit_code": 0,
+      "handshake_statuses": [
+        426
+      ],
+      "post_statuses": [
+        200
+      ],
+      "post_content_encodings": [
+        "zstd"
+      ],
+      "retry_policy": "builtin_defaults",
+      "tool_outputs": false,
+      "upstream_posts": 1,
+      "upstream_content_encodings": [
+        "identity"
+      ],
+      "caller_authorization_forwarded": false
+    }
+  ],
+  "limits": [
+    "The gateway signals HTTP/SSE fallback; this test does not claim WebSocket frame support.",
+    "The SSE response is fixed local fixture data, not a live model or account check.",
+    "The real-client execution here covers Linux only; native release platform gates are separate.",
+    "Built-in client retry defaults are preserved. Each successful case observed one generation POST.",
+    "Model-catalog discovery is outside this fixture and receives a local 404 response."
+  ]
+}

@@ -48,7 +48,8 @@ The test suite covers all six simple request and complete-response formats, Anth
 | Worker stack address space | 2 MiB per thread; committed RSS measured separately |
 | Request line | 2 KiB |
 | HTTP headers | 16 KiB, at most 64 fields |
-| Request body | 4 MiB default, 16 MiB configuration ceiling |
+| Request body, encoded and decoded separately | 4 MiB default, 16 MiB configuration ceiling |
+| Incoming zstd / gzip history | 8 MiB / 32 KiB per active decoder |
 | Response body | 16 MiB default and ceiling |
 | Header/body receive deadline | 10 seconds default |
 | Upstream connection timeout | 10 seconds default |
@@ -61,6 +62,8 @@ The test suite covers all six simple request and complete-response formats, Anth
 Long generations occupy workers. Raising `workers` increases active concurrency and the possible aggregate working set. The acceptor and workers are fixed; the gateway does not create one thread for every request. Queued sockets have not yet allocated request-body buffers. Conversion temporarily retains source and target buffers, so active-request RSS is higher than idle RSS.
 
 ## Transport and failure semantics
+
+Complete body-free WebSocket handshakes receive HTTP 426 so Codex can select HTTP/SSE. Incoming gzip/zstd is decoded with bounded native codecs before protocol inspection and privacy. The original receive deadline continues through decoding. Malformed upgrades and invalid compression remain explicit errors; see [the client transport contract](CODEX_TRANSPORT.md).
 
 libcurl connection caches are per worker. Request upload uses read/seek callbacks; the seek hook rejects rewinding after any upload bytes have been consumed. This prevents libcurl's reused-connection recovery from silently replaying a generation POST. Optional group routing may retry only a complete explicit 429/503 refusal before downstream headers are committed. The refusal buffer is capped at 64 KiB; an oversized response is forwarded as received. At most four attempts share one deadline and never repeat a provider/protocol/model tuple. Privacy, middleware and classification run once; the retry hook only selects a new member and patches model/effort. A started stream, HTTP 500 or uncertain network failure is not replayed. Upstream redirects are returned without following them or forwarding credentials to a new location.
 

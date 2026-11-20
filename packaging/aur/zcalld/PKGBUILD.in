@@ -6,7 +6,7 @@ pkgdesc='Compact Linux AI gateway built on zcall with native zplugin extensions'
 arch=('x86_64' 'aarch64')
 url='https://github.com/@REPOSITORY@'
 license=('MIT')
-depends=('glibc' 'libgcc' 'curl')
+depends=('glibc' 'libgcc' 'curl' 'zstd' 'zlib')
 makedepends=('cargo')
 checkdepends=('python')
 optdepends=('systemd: system and user service management' 'zcalld-compat>=0.1.5: privacy, audit history, OAuth accounts and community plugins' 'zcall-gui: optional native desktop interface' 'libsecret: configure Zed credentials through Secret Service')

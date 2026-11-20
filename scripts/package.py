@@ -115,6 +115,8 @@ def native_archive(args, output):
         licenses = stage / 'share/licenses/zcalld'
         licenses.mkdir(parents=True)
         shutil.copy2(ROOT / 'LICENSE', licenses / 'LICENSE')
+        for codec_license in (ROOT / 'packaging/licenses').glob('*.txt'):
+            shutil.copy2(codec_license, licenses / codec_license.name)
         manual = stage / 'share/man/man1'
         manual.mkdir(parents=True)
         shutil.copy2(ROOT / 'packaging/man/zcalld.1', manual / 'zcalld.1')
@@ -138,6 +140,10 @@ def native_archive(args, output):
             license_root = Path(os.environ['LIBCURL_LICENSE_DIR'])
             for copyright_file in license_root.glob('*/copyright'):
                 shutil.copy2(copyright_file, licenses / (copyright_file.parent.name + '.txt'))
+            codec_licenses = os.environ.get('CODEC_LICENSE_DIR')
+            if codec_licenses:
+                for copyright_file in Path(codec_licenses).glob('*/copyright'):
+                    shutil.copy2(copyright_file, licenses / (copyright_file.parent.name + '.txt'))
             name = output / (stem + '.zip')
             with zipfile.ZipFile(name, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
                 for path in sorted(stage.rglob('*')):

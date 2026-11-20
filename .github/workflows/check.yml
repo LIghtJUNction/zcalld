@@ -18,7 +18,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libcurl4-openssl-dev pkg-config shellcheck
+          sudo apt-get install -y --no-install-recommends libcurl4-openssl-dev libzstd-dev zlib1g-dev pkg-config shellcheck
           rustup toolchain install 1.100.0 --profile minimal --component rustfmt,clippy
       - name: Verify the workspace and local HTTP gateway
         run: ./scripts/check.sh

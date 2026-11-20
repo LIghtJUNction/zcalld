@@ -59,11 +59,21 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libcurl4-openssl-dev pkg-config shellcheck
+          sudo apt-get install -y --no-install-recommends libcurl4-openssl-dev libzstd-dev zlib1g-dev pkg-config shellcheck
           rustup toolchain install 1.100.0 --profile minimal --component rustfmt,clippy
       - name: Install native toolchain
         if: runner.os != 'Linux'
         run: rustup toolchain install 1.100.0 --profile minimal --component rustfmt,clippy
+      - name: Prepare the macOS static request decoder
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: '1'
+        run: |
+          brew list --versions zstd >/dev/null || brew install zstd
+          codec_root="$(brew --prefix zstd)"
+          test -f "$codec_root/lib/libzstd.a"
+          printf 'RUSTFLAGS=-L native=%s/lib\n' "$codec_root" >> "$GITHUB_ENV"
       - name: Check out the pinned Windows transport build
         if: runner.os == 'Windows'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -78,12 +88,17 @@ jobs:
         run: |
           & ./_release/vcpkg/bootstrap-vcpkg.bat -disableMetrics
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          & ./_release/vcpkg/vcpkg.exe install 'curl[core,ssl]:x64-windows' --disable-metrics
+          & ./_release/vcpkg/vcpkg.exe install 'curl[core,ssl]:x64-windows' 'zstd:x64-windows-static-md' 'zlib:x64-windows-static-md' --disable-metrics
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           $root = Join-Path $pwd '_release/vcpkg/installed/x64-windows'
-          "RUSTFLAGS=-L native=$root/lib" >> $env:GITHUB_ENV
+          $codecs = Join-Path $pwd '_release/vcpkg/installed/x64-windows-static-md'
+          if (!(Test-Path "$codecs/lib/zstd.lib") -or !(Test-Path "$codecs/lib/zlib.lib")) {
+            throw 'Static request decoder libraries were not produced'
+          }
+          "RUSTFLAGS=-L native=$codecs/lib -L native=$root/lib" >> $env:GITHUB_ENV
           "LIBCURL_DLL_DIR=$root/bin" >> $env:GITHUB_ENV
           "LIBCURL_LICENSE_DIR=$root/share" >> $env:GITHUB_ENV
+          "CODEC_LICENSE_DIR=$codecs/share" >> $env:GITHUB_ENV
           "$root/bin" >> $env:GITHUB_PATH
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
@@ -132,6 +147,7 @@ jobs:
           fi
           python3 scripts/test-control.py
           python3 scripts/test-library.py
+          python3 scripts/test-transport.py --binary "$ZCALLD_TEST_BINARY"
           python3 scripts/test-native-runtime.py --binary "$ZCALLD_TEST_BINARY"
       - name: Verify native privacy, routing, MCP and builtin provider workers
         shell: bash

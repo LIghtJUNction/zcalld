@@ -16,7 +16,7 @@ paru -S zcall-gui       # Optional native desktop application
 paru -S zcall-omarchy   # Optional Omarchy bar and terminal menu frontend
 ```
 
-[Releases](https://github.com/LIghtJUNction/zcalld/releases) provide Linux x86_64/aarch64, Windows x86_64 and macOS Apple Silicon/Intel archives with platform-native plugin libraries. Linux and macOS use the system libcurl; the Windows archive includes its TLS transport DLLs. These are real operating-system dependencies, not an embedded browser runtime.
+[Releases](https://github.com/LIghtJUNction/zcalld/releases) provide Linux x86_64/aarch64, Windows x86_64 and macOS Apple Silicon/Intel archives with platform-native plugin libraries. Linux and macOS use the system libcurl; the Windows archive includes its TLS transport DLLs. Incoming gzip/zstd requests use native codecs: distribution libraries on Linux, static zstd plus system zlib on macOS, and static codecs on Windows. These are real operating-system dependencies, not an embedded browser runtime.
 
 ```sh
 zcalld init
@@ -131,7 +131,7 @@ make release
 # Or: gh workflow run bump.yml -f bump=patch
 ```
 
-Use Rust 1.100.0, Python 3.11+, a native compiler and libcurl development libraries. Project Z libraries are actual Cargo patches pointing to pinned git submodules. The optional GUI, Omarchy frontend and compatibility repositories are also submodules; they keep independent releases.
+Use Rust 1.100.0, Python 3.11+, a native compiler, and libcurl, zstd and zlib development libraries. On macOS, add the Homebrew zstd library directory to RUSTFLAGS so the static archive can be found. The native release workflow provides the exact Windows static-codec build recipe. Project Z libraries are actual Cargo patches pointing to pinned git submodules. The optional GUI, Omarchy frontend and compatibility repositories are also submodules; they keep independent releases.
 
 Day-to-day checks run locally. Formal release workflows validate five native targets, including real privacy, routing and community MCP worker calls, publish versioned archives plus SHA256SUMS, and update source/binary AUR recipes. Linux also runs the migration transaction and rollback fixtures before publication. Source archives recursively include the exact tracked submodule commits; private and untracked development files are excluded. The bump command updates workspace versions, dependency pins, lockfile and changelog as one recoverable operation.
 
@@ -140,3 +140,7 @@ Day-to-day checks run locally. Formal release workflows validate five native tar
 [Deployment acceptance, 2026-11-20](docs/DEPLOYMENT-2026-11-20.md) records the installed 0.2.4 gateway with 0.1.5-2 compatibility workers: migration preservation, real JSON/SSE generation, package provenance and full-process-tree memory including swap. Its scope differs from the historical minimal-daemon benchmark.
 
 MIT licensed. Magpie compatibility code retains upstream notices in the optional compatibility repository.
+
+## Codex transport compatibility
+
+Responses clients that negotiate WebSocket transport can fall back to HTTP/SSE through the gateway. See [the negotiation contract and local validation](docs/CODEX_TRANSPORT.md) for the supported boundary.
