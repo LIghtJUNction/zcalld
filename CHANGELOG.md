@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.4.4 — 2026-11-20
+
+- Read installation journals from validated file snapshots during atomic state replacement, retaining owner, permission, type and hard-link checks.
+- Prevent the Windows deferred installer from retaining the invoking process's captured output handles while it waits for the old runtime to exit.
+- Initialize synthetic provider hosts before in-flight timeout assertions while preserving separate cold-initialization deadline coverage.
+- Keep Windows maintenance fixtures under the helper-owned private ACL and validate their state before gateway startup.
+- Pair Windows installer recovery with zcall-gui 0.1.5 and keep its strict private-file checks.
+- Refresh the zcall submodule and locked commit for cold-runner version preparation; library runtime code is unchanged.
+
+- Detect Windows TCP resets during optional recovery without consuming request bytes or mistaking a write half-close for cancellation.
+- Add native loopback regressions for resets and half-close/data preservation; retain the existing recovery scenarios and time budgets.
+- Allow the complete Windows release checks to run as a commit-pinned candidate before tagging. Formal releases still require all five native targets.
+- Synchronize the synthetic Windows sign-in failure with the test observer before cleanup using a byte-exact acknowledgement, preserving strict child-exit assertions and production helper behavior.
+- Preserve the provider fixture's no-Bun environment on Windows while staging the same runtime DLL set as the official archive.
+- Preserve inherited private access when protecting existing Windows desktop directories; keep regular-file ACLs strict and validate the real minimal-rights handles.
+- Retain the failed 0.4.3 validation tag. It did not publish release assets because the Windows recovery cancellation check failed.
+
 ## 0.4.3 — 2026-11-20
 
 - Inspect the full Windows drive root before checking private desktop-plugin paths, preserving ancestor and reparse-point checks.

@@ -242,6 +242,10 @@ class CodexPolicyTests(base.BuiltinFetchTests):
         self.policy({"codex_no_credits": True})
         self.mock(usage_delay_ms=1000)
         self.start()
+        self.warm_local_tools()
+        self.assertEqual(len(self.recorded("host_started")), 1)
+        self.assertEqual(self.recorded("usage"), [])
+        self.assertEqual(self.recorded("generation"), [])
         started = time.monotonic()
         self.assertEqual(self.generate()[0], 502)
         self.assertLess(time.monotonic() - started, 2)
@@ -251,6 +255,7 @@ class CodexPolicyTests(base.BuiltinFetchTests):
         self.assertEqual(len(self.recorded("usage")), 1)
         self.assertEqual(len(self.recorded("usage_aborted")), 1)
         self.assertEqual(self.recorded("generation"), [])
+        self.assertEqual(len(self.recorded("host_started")), 1)
 
     def test_policy_metadata_usage_is_readable_while_generation_is_held(self):
         self.state["codex_http"] = {"enabled": True,

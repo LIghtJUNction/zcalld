@@ -730,16 +730,7 @@ pub fn spawn_resume(transaction: &Path) -> Result<Value, String> {
     if hash::sha256_file(&source, expected.size)? != expected.sha256 {
         return Err("deferred helper checksum mismatch".into());
     }
-    let mut command = process::command(source);
-    command
-        .args(["resume", "--transaction"])
-        .arg(&store.directory)
-        .args(["--wait-ms", "120000"])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
-    command
-        .spawn()
-        .map_err(|_| "cannot start verified deferred installer")?;
+    process::spawn_deferred(&source, &store.directory)?;
     let mut out = store.outcome();
     out.set("helper_started", true.into());
     Ok(out)

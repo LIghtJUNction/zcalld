@@ -146,7 +146,9 @@ class WeeklyMaintenanceTests(unittest.TestCase):
                 "models": {"fixture-mini": {"name": "Fixture"}}}}}}
         self.write(self.ext / "registry.json", self.registry)
         maintenance = self.ext / "maintenance"
-        maintenance.mkdir(mode=0o700)
+        # Inherit the private DACL installed by import-builtin on Windows.
+        # CPython 0700 creates a new DACL with Administrators and Owner Rights.
+        maintenance.mkdir(mode=0o777 if os.name == "nt" else 0o700)
         self.state = {"version": 1, "policy": {"enabled": False,
             "enabled_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now - 3600)),
             "accounts": {self.account: {"weekly_warmup": False, "weekly_reset": True,
@@ -203,6 +205,10 @@ class WeeklyMaintenanceTests(unittest.TestCase):
         self.write(self.ext / "maintenance/state.json", self.state)
         self.write(self.ext / "registry.json", self.registry)
         self.write(self.root / "options.json", self.options)
+        status = self.helper("maintenance", "status")
+        self.assertEqual(status["enabled"], enabled)
+        self.assertEqual(status["accounts"], 1)
+        self.assertTrue(status["local_only"])
 
     def events(self, kind=None):
         path = self.root / "events.jsonl"

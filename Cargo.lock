@@ -40,14 +40,14 @@ checksum = "a2c754d6c33795a1c324727428e5a7dedb5b06195f9890bdbcba760d3e246563"
 [[package]]
 name = "zcall"
 version = "0.4.0"
-source = "git+https://github.com/LIghtJUNction/zcall.git#564ede15db66530a6dbb78e8b1f4a85998b6f0d8"
+source = "git+https://github.com/LIghtJUNction/zcall.git#317c52f101f112c6af671a629d8406305a168e4a"
 dependencies = [
  "zconv",
 ]
 
 [[package]]
 name = "zcalld"
-version = "0.4.3"
+version = "0.4.4"
 dependencies = [
  "zcall",
  "zcalld-compat-client",
@@ -59,21 +59,21 @@ dependencies = [
 
 [[package]]
 name = "zcalld-compat-client"
-version = "0.4.3"
+version = "0.4.4"
 dependencies = [
  "zconv",
 ]
 
 [[package]]
 name = "zcalld-installer"
-version = "0.4.3"
+version = "0.4.4"
 dependencies = [
  "zconv",
 ]
 
 [[package]]
 name = "zcalld-plugin-aliases"
-version = "0.4.3"
+version = "0.4.4"
 dependencies = [
  "zcalld-plugin-api",
  "zplugin",
@@ -81,14 +81,14 @@ dependencies = [
 
 [[package]]
 name = "zcalld-plugin-api"
-version = "0.4.3"
+version = "0.4.4"
 dependencies = [
  "zplugin",
 ]
 
 [[package]]
 name = "zcalld-plugin-community"
-version = "0.4.3"
+version = "0.4.4"
 dependencies = [
  "zcalld-compat-client",
  "zcalld-plugin-api",
@@ -97,7 +97,7 @@ dependencies = [
 
 [[package]]
 name = "zcalld-plugin-desktop"
-version = "0.4.3"
+version = "0.4.4"
 dependencies = [
  "zcalld-compat-client",
  "zcalld-plugin-api",
@@ -108,7 +108,7 @@ dependencies = [
 
 [[package]]
 name = "zcalld-plugin-policy"
-version = "0.4.3"
+version = "0.4.4"
 dependencies = [
  "zcalld-plugin-api",
  "zplugin",
@@ -116,7 +116,7 @@ dependencies = [
 
 [[package]]
 name = "zcalld-plugin-redact"
-version = "0.4.3"
+version = "0.4.4"
 dependencies = [
  "zcalld-compat-client",
  "zcalld-plugin-api",
@@ -125,7 +125,7 @@ dependencies = [
 
 [[package]]
 name = "zcalld-plugin-routing"
-version = "0.4.3"
+version = "0.4.4"
 dependencies = [
  "zcalld-compat-client",
  "zcalld-plugin-api",
