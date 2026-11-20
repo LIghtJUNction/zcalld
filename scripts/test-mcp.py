@@ -67,7 +67,8 @@ class MCPTests(unittest.TestCase):
 
     def helper(self, *args):
         run = subprocess.run([str(self.pluginctl), "--root", str(self.ext), *args],
-                             capture_output=True, text=True, timeout=20, encoding="utf-8")
+                             capture_output=True, text=True, timeout=20, encoding="utf-8",
+                             env=getattr(self, "env", None))
         self.assertEqual(run.returncode, 0, run.stderr)
         return json.loads(run.stdout)
 
@@ -87,7 +88,8 @@ class MCPTests(unittest.TestCase):
         self.logs.append(log)
         options = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt" else {}
         process = subprocess.Popen([str(self.binary), "serve", "--config", str(self.config)],
-                                   stdin=subprocess.DEVNULL, stdout=log, stderr=log, **options)
+                                   stdin=subprocess.DEVNULL, stdout=log, stderr=log,
+                                   env=getattr(self, "env", None), **options)
         self.processes.append(process)
         end = time.monotonic() + 8
         while time.monotonic() < end:
@@ -160,6 +162,72 @@ class MCPTests(unittest.TestCase):
         status, _, body = self.http("POST", body={"jsonrpc": "2.0", "method": "notifications/initialized"})
         self.assertEqual((status, body), (202, b""))
         self.assertFalse(self.counts("loads.log"))
+
+    def test_generated_builtin_bundle_lists_empty_tools_without_accounts(self):
+        # Exercise the helper's embedded resources, not a default-only wrapper
+        # around createCodex: that wrapper concealed the loader/export mismatch.
+        allowed = ("PATH", "SystemRoot", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT",
+                   "LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH")
+        self.env = {key: os.environ[key] for key in allowed if key in os.environ}
+        for key in ("HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "XDG_CONFIG_HOME",
+                    "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME", "CODEX_HOME",
+                    "TMP", "TEMP", "TMPDIR"):
+            directory = self.root / ("isolated-" + key.lower())
+            directory.mkdir(mode=0o700, exist_ok=True)
+            self.env[key] = str(directory)
+        source = self.root / "empty-magpie"
+        source.mkdir(mode=0o700)
+        (source / "logins.json").write_bytes(b"[]")
+        (source / "logins.json").chmod(0o600)
+        imported = self.helper("import-builtin", "--source", str(source))
+        self.assertEqual(imported["builtin_accounts"], 0)
+        self.assertEqual(imported["network_requests"], 0)
+        bundles = list((self.ext / "runtime" / "builtin").iterdir())
+        self.assertEqual(len(bundles), 1)
+        bundle = bundles[0]
+        entries = ("codex", "copilot", "codeassist", "antigravity")
+        for name in entries:
+            self.assertTrue((bundle / (name + ".mjs")).is_file())
+        registry_path = self.ext / "registry.json"
+        registry = json.loads(registry_path.read_bytes())
+        registry["plugins"] = [
+            {"name": "builtin-" + name, "kind": "community", "enabled": True,
+             "source": "builtin-" + name, "path": str(bundle / (name + ".mjs"))}
+            for name in entries
+        ]
+        registry_path.write_text(json.dumps(registry), encoding="utf-8", newline="\n")
+        auth_path = self.ext / "plugin-auth.json"
+        self.assertEqual(json.loads(auth_path.read_bytes()), {})
+        config = json.loads(self.host_config.read_bytes())
+        real_host = Path(config["host"]).as_uri()
+        guard = self.root / "no-network-host.mjs"
+        network_log = self.root / "network-attempts.log"
+        guard.write_text(
+            "import fs from 'node:fs'; import net from 'node:net'; import tls from 'node:tls';\n"
+            f"const blocked=()=>{{fs.appendFileSync({json.dumps(str(network_log))},'attempt\\n');"
+            "throw new Error('fixture forbids outbound network')};\n"
+            "globalThis.fetch=blocked; globalThis.WebSocket=class{constructor(){blocked()}};\n"
+            "net.Socket.prototype.connect=blocked; net.connect=net.createConnection=tls.connect=blocked;\n"
+            "Bun.connect=Bun.listen=Bun.serve=blocked;\n"
+            f"await import({json.dumps(real_host)});\n", encoding="utf-8", newline="\n")
+        config["host"] = str(guard)
+        self.host_config.write_text(json.dumps(config), encoding="utf-8", newline="\n")
+        process = self.start()
+        status, headers, initialized = self.rpc("initialize", {"protocolVersion": "2025-06-18"})
+        self.assertEqual(status, 200)
+        protocol = initialized["result"]["protocolVersion"]
+        session = next(v for k, v in headers.items() if k.lower() == "mcp-session-id")
+        negotiated = {"MCP-Protocol-Version": protocol, "Mcp-Session-Id": session}
+        notification = self.http("POST", body={"jsonrpc": "2.0", "method": "notifications/initialized"},
+                                 headers=negotiated)
+        self.assertEqual(notification[0], 202)
+        self.assertEqual(self.rpc("ping", headers=negotiated)[0], 200)
+        status, _, listed = self.rpc("tools/list", headers=negotiated)
+        self.assertEqual(status, 200, listed)
+        self.assertEqual(listed, {"jsonrpc": "2.0", "id": 1, "result": {"tools": []}})
+        self.stop(process)
+        self.assertEqual(json.loads(auth_path.read_bytes()), {})
+        self.assertFalse(network_log.exists(), "builtin initialization attempted outbound network")
 
     def test_real_installed_tool_list_call_and_unknown_error(self):
         self.start()
