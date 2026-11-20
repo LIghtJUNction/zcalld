@@ -45,6 +45,31 @@ mod platform {
         Ok(())
     }
 
+    pub(super) fn peer_hung_up(handle: SocketHandle) -> io::Result<bool> {
+        let mut descriptor = PollFd {
+            fd: handle,
+            // Darwin implements poll through kqueue and registers no socket
+            // filter for events=0. Request only EVFILT_WRITE via POLLOUT:
+            // its EOF proves that the peer cannot receive a response.
+            // EVFILT_READ's EOF also occurs on a valid write half-close.
+            events: 0x04, // POLLOUT
+            revents: 0,
+        };
+        // Ignore ordinary writability; only error/hangup flags cancel.
+        // SAFETY: one initialized pollfd and a nonblocking synchronous call.
+        let result = unsafe { poll(&mut descriptor, 1, 0) };
+        if result < 0 {
+            let error = io::Error::last_os_error();
+            return if error.kind() == io::ErrorKind::Interrupted {
+                Ok(false)
+            } else {
+                Err(error)
+            };
+        }
+        // POSIX POLLERR | POLLHUP | POLLNVAL on the supported Unix targets.
+        Ok(descriptor.revents & (0x08 | 0x10 | 0x20) != 0)
+    }
+
     pub(super) fn wait_readable(handles: &[SocketHandle]) -> io::Result<u32> {
         let mut descriptors = [PollFd {
             fd: -1,
@@ -141,6 +166,11 @@ pub fn setup_signals() -> io::Result<()> {
     platform::setup_signals()
 }
 
+#[cfg(unix)]
+pub fn peer_hung_up(handle: SocketHandle) -> io::Result<bool> {
+    platform::peer_hung_up(handle)
+}
+
 pub fn wait_readable(handles: &[SocketHandle]) -> io::Result<u32> {
     if handles.is_empty() || handles.len() > 2 {
         return Err(io::Error::new(
@@ -177,4 +207,43 @@ pub fn notify(message: &str) -> io::Result<()> {
 #[cfg(not(target_os = "linux"))]
 pub fn notify(_message: &str) -> io::Result<()> {
     Ok(())
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::{
+        io::{Read, Write},
+        net::Shutdown,
+        os::{fd::AsRawFd, unix::net::UnixStream},
+    };
+
+    #[test]
+    fn unix_hangup_distinguishes_write_shutdown_from_full_close() {
+        let (mut server, mut client) = UnixStream::pair().unwrap();
+        assert!(!peer_hung_up(server.as_raw_fd()).unwrap());
+        client.shutdown(Shutdown::Write).unwrap();
+        assert!(!peer_hung_up(server.as_raw_fd()).unwrap());
+        server.write_all(b"response").unwrap();
+        let mut response = [0; 8];
+        client.read_exact(&mut response).unwrap();
+        assert_eq!(&response, b"response");
+        drop(client);
+        assert!(peer_hung_up(server.as_raw_fd()).unwrap());
+    }
+
+    #[test]
+    fn unix_hangup_probe_keeps_pending_request_bytes() {
+        let (mut server, mut client) = UnixStream::pair().unwrap();
+        client.write_all(b"request").unwrap();
+        client.shutdown(Shutdown::Write).unwrap();
+        for _ in 0..3 {
+            assert!(!peer_hung_up(server.as_raw_fd()).unwrap());
+        }
+        let mut request = [0; 7];
+        server.read_exact(&mut request).unwrap();
+        assert_eq!(&request, b"request");
+        drop(client);
+        assert!(peer_hung_up(server.as_raw_fd()).unwrap());
+    }
 }

@@ -35,8 +35,8 @@ class ControlTests(unittest.TestCase):
     def tearDown(self):
         self.temporary.cleanup()
 
-    def cli(self, *args, input=None, ok=True):
-        result = subprocess.run([str(BINARY), *args, "--config", str(self.config), "--json"],
+    def cli(self, *args, input=None, ok=True, config=None):
+        result = subprocess.run([str(BINARY), *args, "--config", str(self.config if config is None else config), "--json"],
                                 input=input, text=True, capture_output=True, env=self.env,
                                 timeout=20, check=False, encoding="utf-8")
         if ok:
@@ -59,6 +59,462 @@ class ControlTests(unittest.TestCase):
                  "--route", "bad[section]", input="another-private-secret", ok=False)
         self.assertEqual(credentials.read_bytes(), old_credentials)
         self.assertEqual(self.config.read_bytes(), old_config)
+
+    def check_config(self, config=None):
+        result = subprocess.run(
+            [str(BINARY), "check", "--config", str(self.config if config is None else config)],
+            capture_output=True, text=True, env=self.env, timeout=20,
+            check=False, encoding="utf-8")
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+
+    @staticmethod
+    def directory_state(directory):
+        return {str(path.relative_to(directory)): path.read_bytes() if path.is_file() else None
+                for path in directory.rglob("*")}
+
+    def test_config_consistency_endpoint_errors_preserve_input_and_files(self):
+        complete = "http://127.0.0.1:39999/v1/chat/completions"
+        original = self.config.read_text(encoding="utf-8").replace(
+            "base_url = http://127.0.0.1:39999/v1\n", f"base_url = {complete}\n")
+        invalid = [("--base-url", url) for url in (
+            "http://", "http://127.0.0.1:65536/v1",
+            "http://127.0.0.1:39999/v1/bad%2G",
+            "http://127.0.0.1:39999/v1/has space",
+        )]
+        invalid.append(("--base-url", complete, "--protocol", "anthropic"))
+        cases = [(action, name, options)
+                 for action, name in (("add", "new"), ("edit", "fixture"))
+                 for options in invalid]
+        cases.append(("edit", "fixture", ("--protocol", "anthropic")))
+        for action, name, options in cases:
+            with self.subTest(action=action, options=options):
+                with tempfile.TemporaryDirectory(dir=self.home) as temporary:
+                    directory = Path(temporary)
+                    config = directory / "config.conf"
+                    config.write_text(original, encoding="utf-8", newline="\n")
+                    if action == "edit":
+                        credentials = directory / "credentials"
+                        credentials.write_bytes(b'KEEP="fixture-existing-secret"\n')
+                        credentials.chmod(0o600)
+                        (directory / "backups").mkdir()
+                        (directory / "backups/keep").write_bytes(b"existing-backup")
+                    self.check_config(config)
+                    before = self.directory_state(directory)
+                    with tempfile.TemporaryFile() as source:
+                        source.write(b"fixture-unconsumed-secret\n")
+                        source.seek(0)
+                        result = subprocess.run(
+                            [str(BINARY), "providers", action, name, *options,
+                             "--api-key-stdin", "--config", str(config), "--json"],
+                            stdin=source, text=True, capture_output=True,
+                            env=self.env, timeout=20, check=False, encoding="utf-8")
+                        self.assertEqual(source.tell(), 0, result.stderr + result.stdout)
+                    self.assertNotEqual(result.returncode, 0, result.stderr + result.stdout)
+                    self.assertIn("error", json.loads(result.stdout))
+                    self.assertEqual(self.directory_state(directory), before)
+                    for secret in ("fixture-existing-secret", "fixture-unconsumed-secret"):
+                        self.assertNotIn(secret, result.stdout + result.stderr)
+
+    def test_config_consistency_endpoint_accepts_matching_values(self):
+        original = self.config.read_bytes()
+        endpoint = "http://127.0.0.1:39999/v1/messages"
+        for action, name in (("add", "new"), ("edit", "fixture")):
+            for url in (endpoint, endpoint + "   "):
+                with self.subTest(action=action, base_url=url):
+                    with tempfile.TemporaryDirectory(dir=self.home) as temporary:
+                        config = Path(temporary) / "config.conf"
+                        config.write_bytes(original)
+                        self.cli("providers", action, name, "--base-url", url,
+                                 "--protocol", "anthropic", "--api-key-stdin",
+                                 input="fixture-valid-secret", config=config)
+                        self.check_config(config)
+                        provider = next(row for row in self.cli(
+                            "providers", "list", config=config)["providers"]
+                            if row["name"] == name)
+                        self.assertEqual(provider["base_url"], endpoint)
+                        self.assertEqual(provider["protocol"], "anthropic")
+
+    def test_config_consistency_preserves_selected_provider_identity(self):
+        names = [
+            ('"quoted"', "quoted"), ("'quoted'", "quoted"),
+            ('"unfinished', "sibling"), ("'unfinished", "sibling"),
+            (" quoted", "quoted"), ("internal name", "sibling"),
+            (r"path\name", "sibling"),
+        ]
+        for selected, sibling in names:
+            for action in ("route", "group"):
+                with self.subTest(provider=selected, action=action):
+                    with tempfile.TemporaryDirectory(dir=self.home) as temporary:
+                        config = Path(temporary) / "config.conf"
+                        config.write_text(
+                            "[server]\nlisten = 127.0.0.1:39415\nunix_socket = none\n"
+                            f"[provider {sibling}]\nbase_url = http://127.0.0.1:39998/v1\n"
+                            "auth = none\n"
+                            f"[provider {selected}]\nbase_url = http://127.0.0.1:39999/v1\n"
+                            "auth = none\n"
+                            f'[route seed]\nprovider = "{selected}"\nmodel = m\n',
+                            encoding="utf-8", newline="\n")
+                        self.check_config(config)
+                        target = "added" if action == "route" else "group/added"
+                        if action == "route":
+                            self.cli("routes", "set", target, "--provider", selected,
+                                     "--model", "m", config=config)
+                        else:
+                            self.cli("groups", "set", target, "--members", "seed",
+                                     "--mode", "rotate", config=config)
+                        routes = self.cli("routes", "list", config=config)["routes"]
+                        self.assertEqual(next(row["provider"] for row in routes
+                                              if row["name"] == target), selected)
+                        self.check_config(config)
+
+    def test_config_consistency_updates_spaced_section_headers(self):
+        cases = [
+            ("provider fixture", ("providers", "edit", "fixture", "--base-url",
+                                  "https://example.invalid/v2"),
+             "providers", "fixture", "base_url", "https://example.invalid/v2"),
+            ("route fixture/model", ("routes", "set", "fixture/model",
+                                    "--provider", "fixture", "--model", "edited"),
+             "routes", "fixture/model", "model", "edited"),
+        ]
+        for section, command, collection, name, field, expected in cases:
+            for pattern in ("[ {} ]", "\t[  {}  ]\t", "\u2003[\u2003{}\u2003]\u2003"):
+                with self.subTest(section=section, pattern=pattern):
+                    with tempfile.TemporaryDirectory(dir=self.home) as temporary:
+                        config = Path(temporary) / "config.conf"
+                        header = pattern.format(section)
+                        original = self.config.read_text(encoding="utf-8").replace(
+                            f"[{section}]", header) + "# keep unrelated comment\n"
+                        config.write_text(original, encoding="utf-8", newline="\n")
+                        self.check_config(config)
+                        self.cli(*command, config=config)
+                        self.check_config(config)
+                        rows = [row for row in self.cli(collection, "list", config=config)[collection]
+                                if row["name"] == name]
+                        self.assertEqual(len(rows), 1)
+                        self.assertEqual(rows[0][field], expected)
+                        written = config.read_text(encoding="utf-8")
+                        self.assertIn(header, written)
+                        self.assertIn("auth = none\n", written)
+                        self.assertIn("# keep unrelated comment\n", written)
+
+    def test_config_consistency_removes_spaced_section_headers(self):
+        original = self.config.read_text(encoding="utf-8")
+        for action in ("routes", "providers"):
+            for pattern in ("[ {} ]", "\t[  {}  ]\t", "\u2003[\u2003{}\u2003]\u2003"):
+                with self.subTest(action=action, pattern=pattern):
+                    with tempfile.TemporaryDirectory(dir=self.home) as temporary:
+                        config = Path(temporary) / "config.conf"
+                        config.write_text(
+                            original + pattern.format("provider unused") + "\n"
+                            "base_url = https://example.invalid/v1\nauth = none\n"
+                            + pattern.format("route unused/model") + "\n"
+                            "provider = unused\nmodel = m\n",
+                            encoding="utf-8", newline="\n")
+                        self.check_config(config)
+                        target = "unused/model" if action == "routes" else "unused"
+                        self.cli(action, "remove", target, config=config)
+                        routes = self.cli("routes", "list", config=config)["routes"]
+                        self.assertEqual([row["name"] for row in routes], ["fixture/model"])
+                        providers = self.cli("providers", "list", config=config)["providers"]
+                        expected = {"fixture", "unused"} if action == "routes" else {"fixture"}
+                        self.assertEqual({row["name"] for row in providers}, expected)
+                        self.check_config(config)
+
+    def test_model_validation_rejects_unloadable_values_atomically(self):
+        invalid = [
+            ("empty", ""), ("whitespace", "   "),
+            ("double-quoted-empty", '""'), ("single-quoted-empty", "''"),
+            ("unclosed-double-quote", '"unfinished'),
+            ("unclosed-single-quote", "'unfinished"),
+            ("ascii-over-limit", "m" * 513),
+            ("utf8-over-limit", "é" * 257),
+            ("quoted-over-limit", '"' + "m" * 513 + '"'),
+        ]
+        commands = [
+            ("provider-add", ("providers", "add", "new", "--base-url",
+                              "https://example.invalid/v1", "--api-key-stdin",
+                              "--route", "validated")),
+            ("provider-edit", ("providers", "edit", "fixture", "--api-key-stdin",
+                               "--route", "validated")),
+            ("route-set", ("routes", "set", "validated", "--provider", "fixture")),
+        ]
+        original = self.config.read_bytes()
+        for action, command in commands:
+            for label, model in invalid:
+                with self.subTest(action=action, model=label):
+                    with tempfile.TemporaryDirectory(dir=self.home) as temporary:
+                        directory = Path(temporary)
+                        config = directory / "config.conf"
+                        config.write_bytes(original)
+                        credentials = directory / "credentials"
+                        credentials.write_bytes(b'KEEP="fixture-existing-secret"\n')
+                        credentials.chmod(0o600)
+                        (directory / "backups").mkdir()
+                        (directory / "backups/keep").write_bytes(b"existing-backup")
+                        before = self.directory_state(directory)
+                        result = self.cli(*command, "--model", model, config=config,
+                                          input="fixture-replacement-secret", ok=False)
+                        self.assertEqual(self.directory_state(directory), before)
+                        self.assertNotIn("fixture-existing-secret", json.dumps(result))
+                        self.assertNotIn("fixture-replacement-secret", json.dumps(result))
+
+    def test_model_validation_does_not_create_credentials(self):
+        before = self.directory_state(self.directory)
+        self.cli("providers", "add", "new", "--base-url", "https://example.invalid/v1",
+                 "--api-key-stdin", "--model", "", input="fixture-new-secret", ok=False)
+        self.assertEqual(self.directory_state(self.directory), before)
+
+    def test_model_validation_leaves_stdin_unread(self):
+        cases = [
+            ("empty-model", ("--model", "", "--route", "validated")),
+            ("long-model", ("--model", "m" * 513, "--route", "validated")),
+            ("unclosed-model", ("--model", '"unfinished', "--route", "validated")),
+            ("missing-model", ("--model",)),
+            ("duplicate-model", ("--model", "m", "--model", "n")),
+            ("invalid-route", ("--model", "m", "--route", "bad[section]")),
+            ("long-route", ("--model", "m", "--route", "r" * 513)),
+            ("missing-route", ("--model", "m", "--route")),
+            ("duplicate-route", ("--model", "m", "--route", "one", "--route", "two")),
+            ("leading-tab", ("--model", "\tm", "--route", "validated")),
+            ("trailing-newline", ("--model", "m\n", "--route", "validated")),
+            ("internal-control", ("--model", "m\x85n", "--route", "validated")),
+        ]
+        original = self.config.read_bytes()
+        for label, arguments in cases:
+            with self.subTest(case=label):
+                with tempfile.TemporaryDirectory(dir=self.home) as temporary:
+                    directory = Path(temporary)
+                    config = directory / "config.conf"
+                    config.write_bytes(original)
+                    before = self.directory_state(directory)
+                    with tempfile.TemporaryFile() as source:
+                        source.write(b"fixture-unconsumed-secret\n")
+                        source.seek(0)
+                        result = subprocess.run(
+                            [str(BINARY), "providers", "edit", "fixture", "--api-key-stdin",
+                             *arguments, "--config", str(config), "--json"],
+                            stdin=source, text=True, capture_output=True, env=self.env,
+                            timeout=20, check=False, encoding="utf-8")
+                        self.assertEqual(source.tell(), 0, result.stderr + result.stdout)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertEqual(self.directory_state(directory), before)
+
+    def test_model_validation_accepts_parsed_byte_limits(self):
+        cases = [
+            ("ascii-limit", "m" * 512, "m" * 512),
+            ("utf8-limit", "é" * 256, "é" * 256),
+            ("outer-whitespace", "  " + "m" * 512 + "  ", "m" * 512),
+            ("quoted-spaces", '" x "', " x "),
+            ("quoted-whitespace", '"   "', "   "),
+            ("literal-quotes", "'\"\"'", '""'),
+            ("literal-backslash", r'"model\path"', r"model\path"),
+        ]
+        commands = [
+            ("provider-add", ("providers", "add", "new", "--base-url",
+                              "https://example.invalid/v1", "--route", "validated")),
+            ("provider-edit", ("providers", "edit", "fixture", "--route", "validated")),
+            ("route-set", ("routes", "set", "validated", "--provider", "fixture")),
+        ]
+        for action, command in commands:
+            for label, raw, expected in cases:
+                with self.subTest(action=action, model=label):
+                    self.cli(*command, "--model", raw)
+                    routes = self.cli("routes", "list")["routes"]
+                    self.assertEqual(next(r["model"] for r in routes
+                                          if r["name"] == "validated"), expected)
+                    check = subprocess.run([str(BINARY), "check", "--config", str(self.config)],
+                                           capture_output=True, text=True, env=self.env,
+                                           timeout=20, check=False, encoding="utf-8")
+                    self.assertEqual(check.returncode, 0, check.stderr + check.stdout)
+
+    def test_model_validation_preserves_group_model_values(self):
+        original = self.config.read_text(encoding="utf-8")
+        for raw, expected in [("'\"\"'", '""'), ('" x "', " x "),
+                              ('"""', '"'), ('"   "', "   ")]:
+            with self.subTest(raw=raw):
+                self.config.write_text(original.replace("model = model\n", f"model = {raw}\n"),
+                                       encoding="utf-8", newline="\n")
+                self.cli("groups", "set", "group/validated",
+                         "--members", "fixture/model", "--mode", "rotate")
+                routes = self.cli("routes", "list")["routes"]
+                self.assertEqual(next(r["model"] for r in routes
+                                      if r["name"] == "group/validated"), expected)
+                check = subprocess.run([str(BINARY), "check", "--config", str(self.config)],
+                                       capture_output=True, text=True, env=self.env,
+                                       timeout=20, check=False, encoding="utf-8")
+                self.assertEqual(check.returncode, 0, check.stderr + check.stdout)
+
+    def provider_env(self, name):
+        return next(p["api_key_env"] for p in self.cli("providers", "list")["providers"]
+                    if p["name"] == name)
+
+    def saved_credentials(self):
+        return dict((name.strip(), json.loads(value))
+                    for line in (self.directory / "credentials").read_text(encoding="utf-8").splitlines()
+                    if line and not line.startswith("#")
+                    for name, value in [line.split("=", 1)])
+
+    def test_provider_stdin_names_keep_separate_wire_credentials(self):
+        seen = []
+        class Upstream(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *args): pass
+            def do_GET(self):
+                seen.append(self.headers.get("Authorization"))
+                body = b'{"data":[]}'
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+        upstream = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Upstream)
+        thread = threading.Thread(target=upstream.serve_forever, daemon=True)
+        thread.start()
+        expected = {name: f"fixture-secret-{index}"
+                    for index, name in enumerate(("p-a", "p.a", "p_a", "P-A"))}
+        try:
+            for name, secret in expected.items():
+                self.cli("providers", "add", name, "--base-url",
+                         f"http://127.0.0.1:{upstream.server_port}/v1",
+                         "--api-key-stdin", input=secret)
+            for name, secret in expected.items():
+                self.cli("providers", "models", name)
+                self.assertEqual(seen[-1], f"Bearer {secret}", name)
+            names_before = {name: self.provider_env(name) for name in expected}
+            self.assertEqual(len(set(names_before.values())), len(expected))
+            expected["p.a"] = "fixture-rotated-secret"
+            self.cli("providers", "edit", "p.a", "--api-key-stdin",
+                     input=expected["p.a"])
+            for name, secret in expected.items():
+                self.cli("providers", "models", name)
+                self.assertEqual(seen[-1], f"Bearer {secret}", name)
+                self.assertEqual(self.provider_env(name), names_before[name])
+            listed = json.dumps(self.cli("providers", "list"))
+            for secret in expected.values():
+                self.assertNotIn(secret, listed)
+        finally:
+            upstream.shutdown()
+            upstream.server_close()
+            thread.join(timeout=2)
+
+    def test_provider_stdin_preserves_exclusive_existing_environment(self):
+        credentials = self.directory / "credentials"
+        for name, env_name in (("legacy", "ZCALLD_PROVIDER_LEGACY_KEY"),
+                               ("custom", "CUSTOM_PROVIDER_KEY")):
+            with self.subTest(name=name):
+                self.cli("providers", "add", name, "--base-url", "https://example.invalid/v1",
+                         "--api-key-env", env_name)
+                with credentials.open("a", encoding="utf-8") as stream:
+                    stream.write(f'{env_name}="fixture-old-{name}"\n')
+                credentials.chmod(0o600)
+                self.cli("providers", "edit", name, "--api-key-stdin",
+                         input=f"fixture-new-{name}")
+                self.assertEqual(self.provider_env(name), env_name)
+                self.assertEqual(self.saved_credentials()[env_name], f"fixture-new-{name}")
+        self.assertEqual(len(self.saved_credentials()), 2)
+
+    def test_provider_stdin_splits_legacy_shared_references(self):
+        initial_config = self.config.read_text(encoding="utf-8")
+        shared = "ZCALLD_PROVIDER_LEGACY_KEY"
+        credentials = self.directory / "credentials"
+        for reference in ("provider", "header", "gateway"):
+            with self.subTest(reference=reference):
+                text = initial_config + (
+                    "[provider legacy]\nbase_url = https://example.invalid/v1\n"
+                    f"api_key_env = {shared}\n")
+                if reference == "provider":
+                    text += ("[provider sibling]\nbase_url = https://example.invalid/v1\n"
+                             f"api_key_env = {shared}\n")
+                elif reference == "header":
+                    text += f"header_env.X-Fixture-Secret = {shared}\n"
+                else:
+                    text = text.replace("[server]\n", f"[server]\ntoken_env = {shared}\n")
+                self.config.write_text(text, encoding="utf-8", newline="\n")
+                credentials.write_text(f'{shared}="fixture-shared-secret"\n',
+                                       encoding="utf-8", newline="\n")
+                credentials.chmod(0o600)
+                self.cli("providers", "edit", "legacy", "--api-key-stdin",
+                         input="fixture-isolated-secret")
+                selected = self.provider_env("legacy")
+                self.assertNotEqual(selected, shared)
+                stored = self.saved_credentials()
+                self.assertEqual(stored[shared], "fixture-shared-secret")
+                self.assertEqual(stored[selected], "fixture-isolated-secret")
+                if reference == "provider":
+                    self.assertEqual(self.provider_env("sibling"), shared)
+                elif reference == "header":
+                    self.assertIn(f"header_env.X-Fixture-Secret = {shared}",
+                                  self.config.read_text(encoding="utf-8"))
+                else:
+                    self.assertIn(f"token_env = {shared}",
+                                  self.config.read_text(encoding="utf-8"))
+                self.cli("check")
+
+    def test_provider_stdin_does_not_claim_existing_credentials_or_references(self):
+        credentials = self.directory / "credentials"
+        def add(secret):
+            self.cli("providers", "add", "reserved", "--base-url",
+                     "https://example.invalid/v1", "--api-key-stdin", input=secret)
+            return self.provider_env("reserved")
+        first = add("fixture-orphan")
+        self.cli("providers", "remove", "reserved")
+        second = add("fixture-environment")
+        self.assertNotEqual(first, second)
+        self.cli("providers", "remove", "reserved")
+        credentials.write_text(f'{first}="fixture-orphan"\n', encoding="utf-8", newline="\n")
+        self.env[second] = "fixture-external-environment"
+        third = add("fixture-reference")
+        self.assertNotIn(third, (first, second))
+        self.cli("providers", "remove", "reserved")
+        self.cli("providers", "add", "other", "--base-url", "https://example.invalid/v1",
+                 "--api-key-env", third)
+        credentials.write_text(f'{first}="fixture-orphan"\n', encoding="utf-8", newline="\n")
+        fourth = add("fixture-new")
+        self.assertNotIn(fourth, (first, second, third))
+        self.assertEqual(self.saved_credentials(),
+                         {first: "fixture-orphan", fourth: "fixture-new"})
+        self.assertEqual(self.provider_env("other"), third)
+
+    def test_provider_stdin_rejects_explicit_environment_atomically(self):
+        before = self.config.read_bytes()
+        result = self.cli("providers", "add", "ambiguous", "--base-url",
+                          "https://example.invalid/v1", "--api-key-env", "CUSTOM_KEY",
+                          "--api-key-stdin", input="fixture-private-secret", ok=False)
+        self.assertIn("--api-key-env", result["error"])
+        self.assertIn("--api-key-stdin", result["error"])
+        self.assertNotIn("fixture-private-secret", json.dumps(result))
+        self.assertEqual(self.config.read_bytes(), before)
+        self.assertFalse((self.directory / "credentials").exists())
+        self.assertFalse((self.directory / "backups").exists())
+
+    def test_provider_stdin_rejects_invalid_credential_files_without_changes(self):
+        credentials = self.directory / "credentials"
+        before = self.config.read_bytes()
+        for content in (b'KEEP="fixture-private-secret"\n\xff\n',
+                        b'KEEP="fixture-private-secret"\nKEEP="duplicate"\n',
+                        b'KEEP="fixture-private-secret"\ninvalid line\n',
+                        b"#" + b"x" * (256 * 1024)):
+            with self.subTest(prefix=content[:4], length=len(content)):
+                credentials.write_bytes(content)
+                credentials.chmod(0o600)
+                result = self.cli("providers", "add", "new", "--base-url",
+                                  "https://example.invalid/v1", "--api-key-stdin",
+                                  input="fixture-new-secret", ok=False)
+                self.assertNotIn("fixture-private-secret", json.dumps(result))
+                self.assertNotIn("fixture-new-secret", json.dumps(result))
+                self.assertEqual(credentials.read_bytes(), content)
+                self.assertEqual(self.config.read_bytes(), before)
+                self.assertFalse((self.directory / "backups").exists())
+
+    def test_provider_stdin_rejects_credential_file_growth_past_limit(self):
+        credentials = self.directory / "credentials"
+        content = b"#" + b"x" * (256 * 1024 - 2) + b"\n"
+        credentials.write_bytes(content)
+        credentials.chmod(0o600)
+        before = self.config.read_bytes()
+        self.cli("providers", "add", "new", "--base-url", "https://example.invalid/v1",
+                 "--api-key-stdin", input="fixture-new-secret", ok=False)
+        self.assertEqual(credentials.read_bytes(), content)
+        self.assertEqual(self.config.read_bytes(), before)
+        self.assertFalse((self.directory / "backups").exists())
 
     def test_claude_apply_preserves_jsonc_and_revert_checks_external_edits(self):
         path = self.home / ".claude/settings.json"
@@ -161,6 +617,312 @@ class ControlTests(unittest.TestCase):
         self.cli("groups", "remove", "group/work")
         self.assertNotIn("group/work", [r["name"] for r in self.cli("routes", "list")["routes"]])
 
+    def test_group_definition_applies_member_weights_and_disabled_state(self):
+        self.cli("routes", "set", "other", "--provider", "fixture", "--model", "other")
+        definition = self.home / "group.json"
+        definition.write_text(json.dumps({
+            "routing": "weight",
+            "members": [{"model": "fixture/model", "weight": 3},
+                        {"model": "other", "weight": 1, "off": True}],
+        }), encoding="utf-8")
+        self.cli("groups", "set", "group/work", "--file", str(definition))
+        group = self.cli("groups", "list")["groups"][0]
+        self.assertEqual(group["mode"], "weight")
+        self.assertEqual([member["weight"] for member in group["members"]], [3, 1])
+        self.assertTrue(group["members"][1]["off"])
+
+    def test_group_definition_updates_member_options_and_keeps_omitted_values(self):
+        self.cli("routes", "set", "other", "--provider", "fixture", "--model", "other")
+        self.cli("groups", "set", "group/work", "--members", "fixture/model,other",
+                 "--mode", "weight")
+        routing = self.directory / "routing.json"
+        state = json.loads(routing.read_text(encoding="utf-8"))
+        state["groups"][0]["members"][0].update(weight=7, off=True)
+        state["groups"][0]["members"][1].update(weight=2, off=True)
+        routing.write_text(json.dumps(state), encoding="utf-8")
+        definition = self.home / "group.json"
+        definition.write_text(json.dumps({
+            "members": [{"model": "fixture/model", "weight": 10000, "off": False}, "other"],
+        }), encoding="utf-8")
+        self.cli("groups", "set", "group/work", "--file", str(definition))
+        group = self.cli("groups", "list")["groups"][0]
+        self.assertEqual(group["mode"], "weight")
+        self.assertEqual([member["weight"] for member in group["members"]], [10000, 2])
+        self.assertEqual([member["off"] for member in group["members"]], [False, True])
+        # Imported legacy weights are clamped by the runtime. A mode-only edit
+        # must retain them without treating old state as newly supplied options.
+        group["members"][0]["weight"] = 10001
+        state["groups"] = [group]
+        routing.write_text(json.dumps(state), encoding="utf-8")
+        definition.write_text(json.dumps({"mode": "rotate"}), encoding="utf-8")
+        self.cli("groups", "set", "group/work", "--file", str(definition))
+        updated = self.cli("groups", "list")["groups"][0]
+        self.assertEqual(updated["mode"], "rotate")
+        self.assertEqual(updated["members"], group["members"])
+
+    def test_group_definition_keeps_literal_member_names(self):
+        for route in ("alias", "fixture/model,alias"):
+            self.cli("routes", "set", route, "--provider", "fixture", "--model", "literal")
+        definition = self.home / "group.json"
+        for member in ("fixture/model,alias", {"model": "fixture/model,alias", "weight": 3}):
+            with self.subTest(member=member):
+                definition.write_text(json.dumps({"members": [member]}), encoding="utf-8")
+                self.cli("groups", "set", "group/literal", "--file", str(definition))
+                group = self.cli("groups", "list")["groups"][0]
+                self.assertEqual([value["model"] for value in group["members"]],
+                                 ["fixture/model,alias"])
+                self.check_config()
+
+    def test_group_definition_rejects_invalid_member_options_without_writes(self):
+        self.cli("groups", "set", "group/work", "--members", "fixture/model")
+        definition = self.home / "group.json"
+        for field, values in (
+            ("weight", [0, -1, 1.5, 10001, True, "3", None]),
+            ("off", [0, 1, "false", None]),
+        ):
+            for value in values:
+                with self.subTest(field=field, value=value):
+                    definition.write_text(json.dumps({
+                        "members": [{"model": "fixture/model", field: value}],
+                    }), encoding="utf-8")
+                    error = self.assert_management_rejected_unchanged(
+                        "groups", "set", "group/work", "--file", str(definition))
+                    self.assertIn(field, error["error"])
+
+    def test_group_definition_cli_options_override_file_members(self):
+        self.cli("routes", "set", "other", "--provider", "fixture", "--model", "other")
+        definition = self.home / "group.json"
+        definition.write_text(json.dumps({
+            "mode": "weight",
+            "members": [{"model": "fixture/model", "weight": 9, "off": True}],
+        }), encoding="utf-8")
+        self.cli("groups", "set", "group/work", "--file", str(definition),
+                 "--members", "fixture/model,other", "--mode", "order")
+        group = self.cli("groups", "list")["groups"][0]
+        self.assertEqual(group["mode"], "order")
+        self.assertEqual([member["model"] for member in group["members"]],
+                         ["fixture/model", "other"])
+        self.assertEqual([member["weight"] for member in group["members"]], [1, 1])
+        self.assertTrue(all(not member.get("off", False) for member in group["members"]))
+
+    def assert_management_rejected_unchanged(self, *args, config=None, secret=None):
+        selected = self.config if config is None else config
+        before = self.directory_state(selected.parent)
+        with tempfile.TemporaryFile() as source:
+            if secret is not None:
+                source.write(secret.encode("utf-8"))
+                source.seek(0)
+            result = subprocess.run(
+                [str(BINARY), *args, "--config", str(selected), "--json"],
+                stdin=source, text=True, capture_output=True, env=self.env,
+                timeout=20, check=False, encoding="utf-8")
+            consumed = source.tell()
+        self.assertNotEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertEqual(self.directory_state(selected.parent), before)
+        if secret is not None:
+            self.assertEqual(consumed, 0, "rejected management edit consumed credential stdin")
+            self.assertNotIn(secret.strip(), result.stderr + result.stdout)
+        return json.loads(result.stdout)
+
+    def test_group_integrity_rejects_member_route_removal(self):
+        cases = [
+            ("plain", "group/work", "fixture/model"),
+            ("quotes", 'group/"quoted"', 'member/"quoted"'),
+            ("unicode-space", "group/工作 台", "member/输入 模型"),
+        ]
+        original = self.config.read_bytes()
+        for label, group, member in cases:
+            with self.subTest(case=label), tempfile.TemporaryDirectory(dir=self.home) as temporary:
+                config = Path(temporary) / "config.conf"
+                config.write_bytes(original)
+                if member != "fixture/model":
+                    self.cli("routes", "set", member, "--provider", "fixture",
+                             "--model", "m", config=config)
+                self.cli("groups", "set", group, "--members", member, config=config)
+                error = self.assert_management_rejected_unchanged(
+                    "routes", "remove", member, config=config)
+                self.assertIn(group, error["error"])
+
+    def test_group_integrity_rejects_direct_group_route_edits(self):
+        original = self.config.read_bytes()
+        commands = [
+            ("remove", ("routes", "remove", "group/work")),
+            ("replace", ("routes", "set", "group/work", "--provider", "fixture",
+                         "--model", "replacement")),
+        ]
+        for label, command in commands:
+            with self.subTest(case=label), tempfile.TemporaryDirectory(dir=self.home) as temporary:
+                config = Path(temporary) / "config.conf"
+                config.write_bytes(original)
+                self.cli("groups", "set", "group/work", "--members",
+                         "fixture/model", config=config)
+                error = self.assert_management_rejected_unchanged(*command, config=config)
+                self.assertIn("group/work", error["error"])
+
+    def test_group_integrity_provider_route_conflicts_leave_stdin_unread(self):
+        original = self.config.read_bytes()
+        for action, provider in [("add", "fresh"), ("edit", "fixture")]:
+            for route_option in ("explicit", "default"):
+                with self.subTest(action=action, route=route_option):
+                    with tempfile.TemporaryDirectory(dir=self.home) as temporary:
+                        directory = Path(temporary)
+                        config = directory / "config.conf"
+                        config.write_bytes(original)
+                        group = "group/work" if route_option == "explicit" else f"{provider}/new-model"
+                        self.cli("groups", "set", group, "--members", "fixture/model", config=config)
+                        credentials = directory / "credentials"
+                        credentials.write_text('KEEP="fixture-existing-secret"\n',
+                                               encoding="utf-8", newline="\n")
+                        credentials.chmod(0o600)
+                        arguments = ["providers", action, provider, "--base-url",
+                                     "https://example.invalid/v1", "--model", "new-model",
+                                     "--api-key-stdin"]
+                        if route_option == "explicit":
+                            arguments.extend(["--route", group])
+                        error = self.assert_management_rejected_unchanged(
+                            *arguments, config=config, secret="fixture-unconsumed-secret\n")
+                        self.assertIn(group, error["error"])
+                        self.assertNotIn("fixture-existing-secret", json.dumps(error))
+
+    def test_group_integrity_provider_removal_checks_members_and_placeholder(self):
+        original = self.config.read_bytes()
+        for dependency in ("member-only", "placeholder-only", "member-and-placeholder"):
+            with self.subTest(dependency=dependency):
+                with tempfile.TemporaryDirectory(dir=self.home) as temporary:
+                    config = Path(temporary) / "config.conf"
+                    config.write_bytes(original)
+                    self.cli("providers", "add", "other", "--base-url",
+                             "https://example.invalid/v1", "--model", "other", config=config)
+                    members = ("other/other,fixture/model" if dependency == "member-only"
+                               else "fixture/model")
+                    self.cli("groups", "set", "group/work", "--members", members, config=config)
+                    if dependency == "placeholder-only":
+                        self.cli("routes", "set", "fixture/model", "--provider", "other",
+                                 "--model", "moved", config=config)
+                        rows = {row["name"]: row for row in
+                                self.cli("routes", "list", config=config)["routes"]}
+                        self.assertEqual(rows["fixture/model"]["provider"], "other")
+                        self.assertEqual(rows["group/work"]["provider"], "fixture")
+                    error = self.assert_management_rejected_unchanged(
+                        "providers", "remove", "fixture", config=config)
+                    self.assertIn("group/work", error["error"])
+
+    def test_group_integrity_allows_member_updates_and_unrelated_edits(self):
+        self.cli("groups", "set", "group/work", "--members", "fixture/model")
+        routing = self.directory / "routing.json"
+        before = routing.read_bytes()
+        self.cli("providers", "add", "other", "--base-url", "https://example.invalid/v1")
+        self.cli("routes", "set", "fixture/model", "--provider", "other", "--model", "revised")
+        route = next(row for row in self.cli("routes", "list")["routes"]
+                     if row["name"] == "fixture/model")
+        self.assertEqual((route["provider"], route["model"]), ("other", "revised"))
+        self.cli("providers", "edit", "other", "--model", "updated", "--route", "fixture/model")
+        self.cli("providers", "edit", "fixture", "--base-url", "https://example.invalid/v2")
+        self.cli("routes", "set", "unused", "--provider", "other", "--model", "unused")
+        self.cli("routes", "remove", "unused")
+        self.cli("providers", "add", "unrelated", "--base-url",
+                 "https://example.invalid/v1", "--model", "unused")
+        self.cli("providers", "remove", "unrelated")
+        rows = {row["name"]: row for row in self.cli("routes", "list")["routes"]}
+        self.assertEqual(rows["fixture/model"]["model"], "updated")
+        self.assertIn("group/work", rows)
+        self.assertNotIn("unused", rows)
+        self.assertNotIn("unrelated/unused", rows)
+        self.assertEqual(routing.read_bytes(), before)
+        self.check_config()
+
+    def test_group_integrity_allows_removal_after_group_reconfiguration(self):
+        self.cli("providers", "add", "other", "--base-url",
+                 "https://example.invalid/v1", "--model", "other")
+        self.cli("providers", "add", "retained", "--base-url",
+                 "https://example.invalid/v1", "--model", "retained")
+        self.cli("groups", "set", "group/work", "--members", "fixture/model,other/other")
+        self.cli("groups", "set", "group/work", "--members", "other/other")
+        self.cli("routes", "remove", "fixture/model")
+        self.cli("providers", "remove", "fixture")
+        self.check_config()
+        self.cli("groups", "remove", "group/work")
+        self.cli("routes", "remove", "other/other")
+        self.cli("providers", "remove", "other")
+        self.assertEqual(self.cli("groups", "list")["groups"], [])
+        self.assertEqual([row["name"] for row in self.cli("routes", "list")["routes"]],
+                         ["retained/retained"])
+        self.assertEqual([row["name"] for row in self.cli("providers", "list")["providers"]],
+                         ["retained"])
+        self.check_config()
+
+    def test_group_integrity_rejects_malformed_routing_before_mutation(self):
+        cases = [
+            ("syntax", "{"),
+            ("root-array", "[]"),
+            ("root-null", "null"),
+            ("groups-object", '{"groups":{}}'),
+            ("groups-null", '{"groups":null}'),
+            ("group-not-object", '{"groups":["group/work"]}'),
+            ("group-no-name", '{"groups":[{"members":[{"model":"fixture/model"}]}]}'),
+            ("members-object", '{"groups":[{"name":"group/work","members":{}}]}'),
+            ("members-empty", '{"groups":[{"name":"group/work","members":[]}]}'),
+            ("member-string", '{"groups":[{"name":"group/work","members":["fixture/model"]}]}'),
+            ("member-empty-model", '{"groups":[{"name":"group/work","members":[{"model":""}]}]}'),
+            ("member-number-model", '{"groups":[{"name":"group/work","members":[{"model":7}]}]}'),
+            ("member-no-model", '{"groups":[{"name":"group/work","members":[{}]}]}'),
+        ]
+        commands = [
+            ("route-remove", ("routes", "remove", "fixture/model"), None),
+            ("route-set", ("routes", "set", "group/work", "--provider", "fixture",
+                           "--model", "replacement"), None),
+            ("provider-remove", ("providers", "remove", "fixture"), None),
+            ("provider-model", ("providers", "edit", "fixture", "--model", "replacement",
+                                "--route", "group/work", "--api-key-stdin"),
+             "fixture-unconsumed-secret\n"),
+        ]
+        original = self.config.read_bytes()
+        for label, state in cases:
+            for command_label, command, secret in commands:
+                with self.subTest(state=label, command=command_label):
+                    with tempfile.TemporaryDirectory(dir=self.home) as temporary:
+                        directory = Path(temporary)
+                        config = directory / "config.conf"
+                        config.write_bytes(original)
+                        (directory / "routing.json").write_text(state, encoding="utf-8", newline="\n")
+                        self.assert_management_rejected_unchanged(
+                            *command, config=config, secret=secret)
+
+    def test_group_integrity_rejects_malformed_state_in_group_edits(self):
+        cases = [
+            (("groups", "set", "group/work", "--members", "fixture/model"), "[]"),
+            (("groups", "remove", "group/work"),
+             '{"groups":[{"name":"group/work","members":[]}]}'),
+        ]
+        original = self.config.read_bytes()
+        for command, state in cases:
+            with self.subTest(command=command), tempfile.TemporaryDirectory(dir=self.home) as temporary:
+                directory = Path(temporary)
+                config = directory / "config.conf"
+                config.write_bytes(original)
+                (directory / "routing.json").write_text(state, encoding="utf-8", newline="\n")
+                self.assert_management_rejected_unchanged(*command, config=config)
+
+    def test_group_integrity_accepts_absent_and_empty_routing(self):
+        original = self.config.read_bytes()
+        for label, state in [("absent", None), ("empty-object", "{}"), ("empty-groups", '{"groups":[]}')]:
+            with self.subTest(state=label), tempfile.TemporaryDirectory(dir=self.home) as temporary:
+                directory = Path(temporary)
+                config = directory / "config.conf"
+                config.write_bytes(original)
+                routing = directory / "routing.json"
+                if state is not None:
+                    routing.write_text(state, encoding="utf-8", newline="\n")
+                self.cli("providers", "add", "fresh", "--base-url",
+                         "https://example.invalid/v1", "--model", "new", config=config)
+                self.cli("routes", "set", "unused", "--provider", "fixture",
+                         "--model", "unused", config=config)
+                self.cli("routes", "remove", "unused", config=config)
+                self.cli("providers", "remove", "fresh", config=config)
+                self.check_config(config)
+                self.assertEqual(routing.read_text(encoding="utf-8") if routing.exists() else None,
+                                 state)
+
     def test_profile_without_credentials_clears_stale_private_state(self):
         self.cli("profiles", "save", "empty")
         credentials = self.directory / "credentials"
@@ -186,6 +948,79 @@ class ControlTests(unittest.TestCase):
         listed = self.cli("groups", "list")
         self.assertNotIn("fixture-secret", json.dumps(listed))
         self.assertTrue(listed["deciders"][0]["credential_configured"])
+
+
+    def test_usage_record_size_limit_and_line_endings(self):
+        limit = 1024 * 1024
+        record = b'{"input_tokens":3,"output_tokens":4,"status":503}'
+        prefix = b'{"in":2,"out":1,"status":200}\r\n\nnot-json\n'
+        following = b'{"in":5,"out":6,"status":200}'
+        for ending in (b"\n", b"\r\n", b""):
+            for size in (limit - 1, limit, limit + 1):
+                with self.subTest(ending=ending, size=size):
+                    (self.directory / "usage.jsonl").write_bytes(
+                        prefix + record + b" " * (size - len(record)) + ending
+                        + (following if ending else b""))
+                    totals = self.cli("usage", "summary")
+                    included = int(size <= limit)
+                    after = int(bool(ending))
+                    self.assertEqual(
+                        tuple(totals[key] for key in
+                              ("requests", "failed", "input_tokens", "output_tokens")),
+                        (1 + included + after, included,
+                         2 + 3 * included + 5 * after, 1 + 4 * included + 6 * after))
+
+    def test_usage_invalid_utf8_is_an_error(self):
+        (self.directory / "usage.jsonl").write_bytes(b'{"in":1}\n\xff\n')
+        self.cli("usage", "summary", ok=False)
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "requires Linux address-space limits")
+    def test_usage_large_record_has_bounded_memory(self):
+        # Limit only this fixture child; a line larger than its entire address
+        # space must be discarded without being allocated in full.
+        with (self.directory / "usage.jsonl").open("wb") as history:
+            chunk = b" " * (1024 * 1024)
+            for _ in range(128):
+                history.write(chunk)
+            history.write(b'\n{"in":7,"out":11,"status":200}\n')
+            history.write(chunk)
+            history.write(b" ")
+        runner = (
+            "import os,resource,sys; "
+            "resource.setrlimit(resource.RLIMIT_CORE,(0,0)); "
+            "resource.setrlimit(resource.RLIMIT_AS,(96*1024*1024,)*2); "
+            "os.execv(sys.argv[1],sys.argv[1:])"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", runner, str(BINARY), "usage", "summary",
+             "--config", str(self.config), "--json"],
+            text=True, capture_output=True, env=self.env, timeout=20, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        totals = json.loads(result.stdout)
+        self.assertEqual(
+            tuple(totals[key] for key in
+                  ("requests", "failed", "input_tokens", "output_tokens")),
+            (1, 0, 7, 11))
+
+    def test_usage_export_missing_source_leaves_destination_available(self):
+        target = self.home / "usage-export.jsonl"
+        self.cli("usage", "export", "--file", str(target), ok=False)
+        self.assertFalse(target.exists())
+        original = b'{"in":17,"out":9,"status":200}\r\nnot-json\n'
+        (self.directory / "usage.jsonl").write_bytes(original)
+        self.assertTrue(self.cli("usage", "export", "--file", str(target))["ok"])
+        self.assertEqual(target.read_bytes(), original)
+        if os.name == "posix":
+            self.assertEqual(target.stat().st_mode & 0o777, 0o600)
+
+    def test_usage_export_does_not_overwrite_existing_destination(self):
+        original = b'{"in":1}\n'
+        target = self.home / "usage-export.jsonl"
+        target.write_bytes(b"keep existing contents")
+        (self.directory / "usage.jsonl").write_bytes(original)
+        self.cli("usage", "export", "--file", str(target), ok=False)
+        self.assertEqual(target.read_bytes(), b"keep existing contents")
+        self.assertEqual((self.directory / "usage.jsonl").read_bytes(), original)
 
 
     def test_provider_discovery_accepts_complete_generation_endpoint(self):

@@ -59,7 +59,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libcurl4-openssl-dev libzstd-dev zlib1g-dev pkg-config shellcheck
+          sudo apt-get install -y --no-install-recommends libcurl4-openssl-dev libzstd-dev zlib1g-dev pkg-config shellcheck libsystemd-dev dbus
           rustup toolchain install 1.100.0 --profile minimal --component rustfmt,clippy
       - name: Install native toolchain
         if: runner.os != 'Linux'
@@ -131,6 +131,11 @@ jobs:
           else
             python3 scripts/release.py verify-ref "$RELEASE_TAG"
           fi
+      - name: Build and validate optional native notification identities
+        shell: bash
+        run: |
+          python3 plugins/desktop/native/test-build.py
+          python3 plugins/desktop/native/build.py --out-dir target/release/desktop-native --self-test
       - name: Run Linux release checks
         if: runner.os == 'Linux'
         run: ./scripts/check.sh
@@ -142,6 +147,8 @@ jobs:
           cargo clippy --workspace --all-targets --locked -- -D warnings
           cargo test --workspace --all-targets --locked
           cargo build --release --workspace --locked
+          cargo build --release --locked -p zcalld-plugin-routing --example recovery-fixture
+          python3 scripts/test-recovery.py
           ./target/release/zcalld --version
           if [[ -f target/release/zcalld.exe ]]; then
             export ZCALLD_TEST_BINARY=target/release/zcalld.exe
@@ -159,6 +166,9 @@ jobs:
       - name: Assemble the native archive
         shell: bash
         run: python3 scripts/package.py --no-build --target '${{ matrix.target }}'
+      - name: Verify full native archive installer
+        shell: bash
+        run: python3 scripts/test-installer.py --archive-dir dist
       - name: Assemble complete pinned sources
         if: matrix.target == 'x86_64-unknown-linux-gnu'
         run: python3 scripts/package.py --source

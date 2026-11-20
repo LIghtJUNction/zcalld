@@ -1,0 +1,23 @@
+{
+  "gui_commit": "da6b56d2cd286a9bf699cb3ee3d0a4f7db755e9f",
+  "core_commit": "6aea363671a9eb6a210cdf88dff22f34d1c829f8",
+  "backend": "actual zcalld",
+  "display": "private Xvfb",
+  "overview_provider_and_agent_navigation": true,
+  "provider_stdin_verified": true,
+  "actual_provider_state_verified": true,
+  "agent_apply_and_restore": true,
+  "catalog_uses_real_data_id": true,
+  "no_guessed_local_route": true,
+  "route_search_keyboard": true,
+  "route_picker_blocks_background": true,
+  "empty_catalog_disables_apply": true,
+  "agent_pre_change_config_preserved": true,
+  "privacy_mode_verified": true,
+  "theme_language_persisted": true,
+  "restart_restores_dark": true,
+  "idle_cpu_ticks_2s": 0,
+  "clock_ticks_per_second": 100,
+  "calls": 58,
+  "host_input": false
+}

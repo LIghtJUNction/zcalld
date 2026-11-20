@@ -17,7 +17,7 @@
 
 对应回归包括设置后刷新、成功重启、重启失败，以及关闭后重开且服务在线但运行态未知。实现和测试见[最终 src/main.rs](https://github.com/LIghtJUNction/zcall-gui/blob/4d0267f229c3fea7277369e50404a455d8dabc06/src/main.rs)。在前一提交 90cedb0 上，私有 Xvfb 还完成了真实窗口点击：设置隐私 → 自动刷新 → 服务面板 → 中文确认重启 → 自动刷新。该测试只调用无副作用的 CLI fixture，没有操作宿主服务。[窗口操作记录](zcall-gui-4d0267f/privacy-window.json)
 
-![隐私配置保存后的待重启提示](zcall-gui-4d0267f/privacy-pending.png)
+[隐私配置保存后的待重启提示](../evidence-archive-20261120.md)
 
 ## 五平台原生候选
 
@@ -54,7 +54,7 @@ RSS 是映射进程的驻留页总量；PSS 将共享页按使用者分摊；Pri
 
 该二进制 SHA256 为 fbbf26ae9f1e01a5d510a888466a6b6f99dc6c23bb336182ae0aaf637f75f0be。它对应 90cedb0，不是尚未发布的最终平台资产。也不将此前 llvmpipe 软件渲染测量与这次 Intel 结果混用。
 
-![实际 Intel GPU 窗口，仅截取被测应用](zcall-gui-4d0267f/overview-intel-light.png)
+[实际 Intel GPU 窗口，仅截取被测应用](../evidence-archive-20261120.md)
 
 ## 最终 Arch 源包
 

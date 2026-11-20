@@ -1,4 +1,5 @@
 //! On-demand configuration and service control. Never loaded as a separate daemon.
+mod service_install;
 use crate::{
     config, http,
     state_json::{self as json, Value, object},
@@ -43,6 +44,14 @@ pub fn run(input: &[String]) -> Option<Result<(), String>> {
         index += 1;
     }
     let command = args.first().map(String::as_str).unwrap_or("");
+    if command == "install" {
+        if config_count != 0 || json_count > 1 {
+            return Some(Err(
+                "install does not accept --config or duplicate --json".into()
+            ));
+        }
+        return Some(crate::installer::run(&args[1..]));
+    }
     if command == "keys" && (config_count > 1 || json_count > 1 || invalid_config_value) {
         return Some(Err("duplicate or invalid global caller key option".into()));
     }
@@ -52,6 +61,7 @@ pub fn run(input: &[String]) -> Option<Result<(), String>> {
             | "service"
             | "agents"
             | "privacy"
+            | "desktop"
             | "profiles"
             | "migrate"
             | "update"
@@ -85,6 +95,7 @@ pub fn run(input: &[String]) -> Option<Result<(), String>> {
             "service" => service(&context, &args[1..]),
             "agents" => crate::adapters::run(&context, &args[1..]),
             "privacy" => privacy(&context, &args[1..]),
+            "desktop" => crate::desktop::run(&context, &args[1..]),
             "profiles" => profiles(&context, &args[1..]),
             "plugins" => crate::extensions::run(&args[1..], &context.path),
             "migrate" => crate::migration::run(&context, &args[1..]),
@@ -166,12 +177,19 @@ pub fn config_text(context: &Context) -> Result<String, String> {
         ))
     }
 }
+fn section_header(line: &str) -> Option<&str> {
+    line.trim()
+        .strip_prefix('[')?
+        .strip_suffix(']')
+        .map(str::trim)
+}
+
 pub fn sections(text: &str) -> Vec<(String, BTreeMap<String, String>)> {
     let mut out: Vec<(String, BTreeMap<String, String>)> = Vec::new();
     for line in text.lines() {
         let line = line.trim();
-        if line.starts_with('[') && line.ends_with(']') {
-            out.push((line[1..line.len() - 1].trim().into(), BTreeMap::new()));
+        if let Some(section) = section_header(line) {
+            out.push((section.into(), BTreeMap::new()));
         } else if !line.starts_with(['#', ';'])
             && let Some((key, value)) = line.split_once('=')
             && let Some((_, fields)) = out.last_mut()
@@ -205,7 +223,10 @@ pub fn ini_set(text: &str, section: &str, key: &str, value: &str) -> Result<Stri
     }
     let mut lines: Vec<String> = text.lines().map(String::from).collect();
     let header = format!("[{section}]");
-    let start = if let Some(i) = lines.iter().position(|v| v.trim() == header) {
+    let start = if let Some(i) = lines
+        .iter()
+        .position(|v| section_header(v) == Some(section))
+    {
         i
     } else {
         if !lines.is_empty() {
@@ -215,7 +236,7 @@ pub fn ini_set(text: &str, section: &str, key: &str, value: &str) -> Result<Stri
         lines.len() - 1
     };
     let end = (start + 1..lines.len())
-        .find(|i| lines[*i].trim().starts_with('['))
+        .find(|i| section_header(&lines[*i]).is_some())
         .unwrap_or(lines.len());
     if let Some(i) = (start + 1..end).find(|i| {
         lines[*i]
@@ -232,9 +253,8 @@ pub fn ini_remove(text: &str, section: &str) -> String {
     let mut removing = false;
     let mut out = String::new();
     for line in text.lines() {
-        let t = line.trim();
-        if t.starts_with('[') && t.ends_with(']') {
-            removing = &t[1..t.len() - 1] == section;
+        if let Some(header) = section_header(line) {
+            removing = header == section;
         }
         if !removing {
             out.push_str(line);
@@ -436,6 +456,8 @@ fn service_state() -> String {
 }
 pub fn status(context: &Context) -> Value {
     let state = service_state();
+    let (configuration_path, configuration_exists) = configuration_info(&context.path);
+    let (service_install_supported, service_installed) = service_install::information(context);
     match config::Config::load(&context.path) {
         Ok(c) => {
             let healthy = transport::connect(&c)
@@ -453,6 +475,13 @@ pub fn status(context: &Context) -> Value {
                 ("version", env!("CARGO_PKG_VERSION").into()),
                 ("healthy", healthy.into()),
                 ("configured", true.into()),
+                ("configuration_path", configuration_path.into()),
+                ("configuration_exists", configuration_exists.into()),
+                (
+                    "service_install_supported",
+                    service_install_supported.into(),
+                ),
+                ("service_installed", service_installed),
                 (
                     "listen",
                     c.listen.map(|a| a.to_string()).unwrap_or_default().into(),
@@ -473,12 +502,34 @@ pub fn status(context: &Context) -> Value {
             ("version", env!("CARGO_PKG_VERSION").into()),
             ("healthy", false.into()),
             ("configured", false.into()),
+            ("configuration_path", configuration_path.into()),
+            ("configuration_exists", configuration_exists.into()),
+            (
+                "service_install_supported",
+                service_install_supported.into(),
+            ),
+            ("service_installed", service_installed),
             ("listen", "".into()),
             ("socket", "".into()),
             ("service", state.into()),
             ("error", error.into()),
         ]),
     }
+}
+
+fn configuration_info(path: &Path) -> (String, bool) {
+    let absolute = std::path::absolute(path)
+        .ok()
+        .and_then(|path| path.to_str().map(str::to_owned))
+        .unwrap_or_default();
+    // A dangling symlink, unreadable node or non-directory parent is not
+    // permission to initialize over an existing user choice.
+    let exists = absolute.is_empty()
+        || !matches!(
+            fs::symlink_metadata(path),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound
+        );
+    (absolute, exists)
 }
 
 fn credential_ready(context: &Context, name: &str) -> bool {
@@ -503,6 +554,51 @@ pub fn gateway_url(context: &Context) -> Result<String, String> {
 pub fn gateway_token(context: &Context) -> Result<String, String> {
     let c = config::Config::load(&context.path)?;
     Ok(c.token.unwrap_or_else(|| "zcalld".into()))
+}
+
+/// Keep an exclusive existing reference; otherwise allocate a private slot.
+/// Raw name bytes distinguish punctuation and case without a hash collision.
+fn provider_credential_env(
+    text: &str,
+    name: &str,
+    credentials: &BTreeMap<String, String>,
+) -> String {
+    let section = format!("provider {name}");
+    let parsed = sections(text);
+    let mut referenced = std::collections::BTreeSet::new();
+    for (other_section, fields) in &parsed {
+        for (field, value) in fields {
+            if (field.ends_with("_env") || field.starts_with("header_env."))
+                && !(other_section == &section && field == "api_key_env")
+            {
+                referenced.insert(value.as_str());
+            }
+        }
+    }
+    if let Some(existing) = ini_get(text, &section, "api_key_env")
+        && config::valid_env_name(&existing)
+        && !referenced.contains(existing.as_str())
+    {
+        return existing;
+    }
+
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    let mut base = String::from("ZCALLD_PROVIDER_");
+    for byte in name.bytes() {
+        base.push(char::from(HEX[usize::from(byte >> 4)]));
+        base.push(char::from(HEX[usize::from(byte & 15)]));
+    }
+    base.push_str("_KEY");
+    let mut selected = base.clone();
+    let mut suffix = 2usize;
+    while credentials.contains_key(&selected)
+        || referenced.contains(selected.as_str())
+        || std::env::var_os(&selected).is_some()
+    {
+        selected = format!("{base}_{suffix}");
+        suffix += 1;
+    }
+    selected
 }
 
 fn providers(context: &Context, args: &[String]) -> Result<(), String> {
@@ -550,6 +646,9 @@ fn providers(context: &Context, args: &[String]) -> Result<(), String> {
                     "provider name must use letters, digits, dash, dot or underscore".into(),
                 );
             }
+            if flag(args, "--api-key-stdin") && option(args, "--api-key-env")?.is_some() {
+                return Err("use either --api-key-env or --api-key-stdin, not both".into());
+            }
             let mut pending_credentials = None;
             let section = format!("provider {name}");
             let old = sections(&text)
@@ -572,17 +671,34 @@ fn providers(context: &Context, args: &[String]) -> Result<(), String> {
                 .map(str::to_string)
                 .or_else(|| old.get("protocol").cloned())
                 .unwrap_or_else(|| "chat".into());
-            crate::protocol::parse_protocol(&protocol)?;
+            let parsed_protocol = crate::protocol::parse_protocol(&protocol)?;
+            crate::protocol::endpoint(
+                config::parse_ini_value(&url)?,
+                parsed_protocol,
+                "validation-model",
+                false,
+            )?;
             text = ini_set(&text, &section, "base_url", &url)?;
             text = ini_set(&text, &section, "protocol", &protocol)?;
             if let Some(env) = option(args, "--api-key-env")? {
-                if env.is_empty()
-                    || !env.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
-                    || env.as_bytes()[0].is_ascii_digit()
-                {
+                if !config::valid_env_name(env) {
                     return Err("invalid environment variable name".into());
                 }
                 text = ini_set(&text, &section, "api_key_env", env)?;
+            }
+            if let Some(model) = option(args, "--model")? {
+                if !config::valid_model(config::parse_ini_value(model)?) {
+                    return Err("model must be nonempty and at most 512 bytes".into());
+                }
+                let route = option(args, "--route")?
+                    .map(str::to_string)
+                    .unwrap_or_else(|| format!("{name}/{model}"));
+                if !valid_name(&route) {
+                    return Err("route name contains unsupported characters".into());
+                }
+                crate::maintenance::check_group_route_mutation(context, [route.as_str()], false)?;
+                text = ini_set(&text, &format!("route {route}"), "provider", name)?;
+                text = ini_set(&text, &format!("route {route}"), "model", model)?;
             }
             if flag(args, "--api-key-stdin") {
                 let mut key = String::new();
@@ -594,30 +710,22 @@ fn providers(context: &Context, args: &[String]) -> Result<(), String> {
                 if key.is_empty() || key.len() > 16384 || key.chars().any(char::is_control) {
                     return Err("key must be a nonempty single line up to 16 KiB".into());
                 }
-                let env = format!(
-                    "ZCALLD_PROVIDER_{}_KEY",
-                    name.to_ascii_uppercase().replace(['-', '.'], "_")
-                );
                 let path = context.directory.join("credentials");
-                let previous = fs::read_to_string(&path).unwrap_or_default();
+                let previous = config::read_credentials(&path)?;
+                let credentials = config::parse_credentials(&previous)?;
+                let env = provider_credential_env(&text, name, &credentials);
                 let mut lines: Vec<String> = previous
                     .lines()
                     .filter(|l| !l.split_once('=').is_some_and(|(k, _)| k.trim() == env))
                     .map(String::from)
                     .collect();
                 lines.push(format!("{env}={}", http::quote(key)));
-                pending_credentials = Some((path, lines.join("\n") + "\n"));
-                text = ini_set(&text, &section, "api_key_env", &env)?;
-            }
-            if let Some(model) = option(args, "--model")? {
-                let route = option(args, "--route")?
-                    .map(str::to_string)
-                    .unwrap_or_else(|| format!("{name}/{model}"));
-                if !valid_name(&route) {
-                    return Err("route name contains unsupported characters".into());
+                let content = lines.join("\n") + "\n";
+                if content.len() > config::MAX_CREDENTIALS_BYTES {
+                    return Err("credentials file exceeds 256 KiB".into());
                 }
-                text = ini_set(&text, &format!("route {route}"), "provider", name)?;
-                text = ini_set(&text, &format!("route {route}"), "model", model)?;
+                pending_credentials = Some((path, content));
+                text = ini_set(&text, &section, "api_key_env", &env)?;
             }
             let mut paths = vec![context.path.clone()];
             if let Some((path, _)) = &pending_credentials {
@@ -655,6 +763,13 @@ fn providers(context: &Context, args: &[String]) -> Result<(), String> {
                 .filter(|(s, v)| s.starts_with("route ") && v.get("provider") == Some(name))
                 .map(|(s, _)| s)
                 .collect();
+            crate::maintenance::check_group_route_mutation(
+                context,
+                routes
+                    .iter()
+                    .filter_map(|section| section.strip_prefix("route ")),
+                true,
+            )?;
             text = ini_remove(&text, &section);
             for r in &routes {
                 text = ini_remove(&text, r);
@@ -1010,8 +1125,18 @@ fn service(context: &Context, args: &[String]) -> Result<(), String> {
     if action == "status" {
         return emit(status(context));
     }
+    if action == "install" {
+        if args.len() != 1 {
+            return Err(
+                "service install accepts only --config and --json; it is a per-user action".into(),
+            );
+        }
+        return emit(service_install::install(context)?);
+    }
     if !matches!(action, "start" | "stop" | "restart" | "enable" | "disable") {
-        return Err("service expects status, start, stop, restart, enable or disable".into());
+        return Err(
+            "service expects status, install, start, stop, restart, enable or disable".into(),
+        );
     }
     #[cfg(target_os = "linux")]
     {

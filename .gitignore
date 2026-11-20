@@ -11,3 +11,8 @@ credentials
 /.worktrees/
 __pycache__/
 *.py[cod]
+
+# Generated evidence is stored in the external archive.
+/docs/validation/zcall-gui-4d0267f/overview-intel-light.png
+/docs/validation/zcall-gui-4d0267f/privacy-after-restart.png
+/docs/validation/zcall-gui-4d0267f/privacy-pending.png

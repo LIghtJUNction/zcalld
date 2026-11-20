@@ -2,17 +2,12 @@
 
 ## 0.4.0 — 2026-11-20
 
-- merge: include current quota header fixes before release preparation [skip ci]
-- docs: record verified native listener PTY acceptance [skip ci]
-- fix: preserve per-model Codex quota headers
-- merge: synchronize native listener with explicit plugin context [skip ci]
-- docs: clarify native listener endpoint and input limits [skip ci]
-- feat(listener): connect native SSMCP input to the local gateway [skip ci]
-- feat: expose explicit read-only context to HTTP plugins
-- feat: expose opt-in trusted route context to HTTP extensions
-- chore: exclude private workspace session state
-- docs: record verified zgpui cohort propagation
-- fix: complete zgpui propagation for the zcall 0.3 cohort [skip ci]
+- Install and update complete native bundles through a verified private prefix, with per-file manifests, a durable recovery journal, runtime leases and complete rollback. Package-managed installations keep using their package manager.
+- Add explicit first-use configuration and Linux user-service registration for private installs. Preserve existing files, reject conflicting service definitions, and keep installation, configuration and service startup as separate confirmed actions.
+- Recover eligible explicit-account routes after bounded, fully received upstream refusals. Healthy fallbacks run first; a proven weekly reset allows one final request within the original deadline. Prompts and credentials never enter recovery metadata, and cancellation drains owned workers.
+- Pin compatibility 0.2 with native quota reads, safe builtin upgrades, inherited warmup/reset policies, persistent maintenance ledgers and fresh quota checks after a confirmed reset. Optional maintenance remains off until configured or imported.
+- Add optional native completion, quota and privacy notifications with conversation-safe filtering and keep-awake lifecycle handling. Preserve model-group references in provider and route edits.
+- Run recovery, maintenance, full-archive installer and service-registration acceptance with isolated local fixtures. Retain five native release targets, checksums, source archives and AUR publishing in the formal release workflow.
 
 ## 0.3.1 — 2026-11-20
 

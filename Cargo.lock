@@ -40,6 +40,7 @@ checksum = "a2c754d6c33795a1c324727428e5a7dedb5b06195f9890bdbcba760d3e246563"
 [[package]]
 name = "zcall"
 version = "0.4.0"
+source = "git+https://github.com/LIghtJUNction/zcall.git#564ede15db66530a6dbb78e8b1f4a85998b6f0d8"
 dependencies = [
  "zconv",
 ]
@@ -50,6 +51,7 @@ version = "0.4.0"
 dependencies = [
  "zcall",
  "zcalld-compat-client",
+ "zcalld-installer",
  "zcalld-plugin-api",
  "zconv",
  "zplugin",
@@ -57,6 +59,13 @@ dependencies = [
 
 [[package]]
 name = "zcalld-compat-client"
+version = "0.4.0"
+dependencies = [
+ "zconv",
+]
+
+[[package]]
+name = "zcalld-installer"
 version = "0.4.0"
 dependencies = [
  "zconv",
@@ -84,6 +93,17 @@ dependencies = [
  "zcalld-compat-client",
  "zcalld-plugin-api",
  "zplugin",
+]
+
+[[package]]
+name = "zcalld-plugin-desktop"
+version = "0.4.0"
+dependencies = [
+ "zcalld-compat-client",
+ "zcalld-plugin-api",
+ "zconv",
+ "zplugin",
+ "zsys",
 ]
 
 [[package]]
@@ -116,10 +136,12 @@ dependencies = [
 [[package]]
 name = "zconv"
 version = "0.4.0"
+source = "git+https://github.com/LIghtJUNction/zconv.git#0af1f7eb0766ff0ce9db5cee7c6184eff511a8c1"
 
 [[package]]
 name = "zplugin"
 version = "0.3.1"
+source = "git+https://github.com/LIghtJUNction/zplugin.git#cf02c1d9db575b92b36297dfe1fde72de9ee51e4"
 dependencies = [
  "zplugin-macros",
  "zsys",
@@ -128,6 +150,7 @@ dependencies = [
 [[package]]
 name = "zplugin-macros"
 version = "0.3.1"
+source = "git+https://github.com/LIghtJUNction/zplugin.git#cf02c1d9db575b92b36297dfe1fde72de9ee51e4"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -137,3 +160,4 @@ dependencies = [
 [[package]]
 name = "zsys"
 version = "0.1.1"
+source = "git+https://github.com/LIghtJUNction/zsys.git#808fcfdb73584ca7ca122e20b76f0209f56ab0f7"

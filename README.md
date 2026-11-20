@@ -2,7 +2,7 @@
 
 A native local AI gateway for Linux, macOS and Windows, built on [zcall](https://github.com/LIghtJUNction/zcall), [zconv](https://github.com/LIghtJUNction/zconv), [zplugin](https://github.com/LIghtJUNction/zplugin) and [zsys](https://github.com/LIghtJUNction/zsys).
 
-The CLI daemon owns transport, bounded queues, credentials and protocol conversion. Privacy, community providers and model-group decisions are optional plugins. [zcall-gui](https://github.com/LIghtJUNction/zcall-gui) is a separate native application built with [zgpui](https://github.com/LIghtJUNction/zgpui); closing it leaves the gateway running. There is no embedded browser in either application. The optional compatibility package supplies the Go privacy and advanced-rule workers and one lazy Bun host for existing JavaScript community plugins. [zcall-omarchy](https://github.com/LIghtJUNction/zcall-omarchy) is a second, independent frontend that uses Omarchy's native plugin and menu interfaces without another background gateway.
+The CLI daemon owns transport, bounded queues, credentials and protocol conversion. Privacy, community providers, model-group decisions and desktop notifications are optional plugins. [zcall-gui](https://github.com/LIghtJUNction/zcall-gui) is a separate native application built with [zgpui](https://github.com/LIghtJUNction/zgpui); closing it leaves the gateway running. There is no embedded browser in either application. The optional compatibility package supplies the Go privacy and advanced-rule workers and one lazy Bun host for existing JavaScript community plugins. [zcall-omarchy](https://github.com/LIghtJUNction/zcall-omarchy) is a second, independent frontend that uses Omarchy's native plugin and menu interfaces without another background gateway.
 
 The daemon reuses zcall's optional server module for HTTP framing, protocol conversion and caller-key parsing. zcalld owns worker queues, native plugin instances, upstream transport and bounded gzip/zstd decoding; each worker retains its own plugin state.
 
@@ -98,12 +98,24 @@ zcalld plugins mcp show --json
 zcalld accounts list --json
 zcalld plugins quota list --json
 zcalld privacy show --json
+zcalld desktop show --json
 zcalld profiles save work --json
 zcalld library list --json
 zcalld library targets --json
 zcalld usage summary --json
+zcalld usage export --file usage-export.jsonl --json
 zcalld update check --json
 ```
+
+Provider `--api-key-stdin` updates an exclusive credential reference in place. If another provider, header or gateway token shares that reference, the edited provider receives a separate credential slot and the other references keep their saved value. New slots avoid existing saved credentials, configuration references and environment variables. Use `--api-key-env NAME` to select an existing credential instead; it cannot be combined with `--api-key-stdin`. Environment values still take precedence over saved credentials. Invalid or oversized credential files are rejected before either file is changed.
+
+Model edits through `providers add/edit --model` or `routes set --model` use the configuration reader's INI value rules: the parsed model must be nonempty, contain no control characters and fit in 512 UTF-8 bytes. Provider model and route errors are rejected before reading `--api-key-stdin`, creating backups or writing files. Group routes preserve the selected model's literal quotes and surrounding spaces.
+
+Provider add/edit validates the effective base URL and protocol together before reading credentials or writing files. Route and group edits preserve the selected provider's literal name, including quotes or spaces. Configuration updates and removals recognize section headers with surrounding whitespace, while keeping whitespace inside names distinct.
+
+Managed model groups own their public route names. Direct route edits and provider model options cannot overwrite or remove a group route. Removing a member route, or a provider that still supplies a group route or member, is rejected before credential input, backups or file writes. First update the group's members with `groups set`, or remove the group with `groups remove`. These route-changing commands also reject malformed `routing.json` instead of treating it as an empty group list.
+
+Group definition files preserve member `weight` and `off` settings and literal route names, including commas. Explicit settings replace the selected member's values; omitted settings keep them. Invalid new weights or disabled-state values fail before files or backups change. See the [group configuration examples](docs/ROUTING.md).
 
 Agent edits preserve unrelated fields and keep exact-byte backups. Revert refuses to overwrite later user edits unless explicitly forced. Account controls operate on the actual private compatibility-host store. Community packages must be deliberately enabled; trusted native libraries run inside the daemon process.
 
@@ -114,6 +126,23 @@ Privacy runs before model-group classification. JSON and fragmented SSE response
 [Caller-key management](docs/KEYS.md) provides `keys add`, `rotate` and `revoke`; new key material is accepted only through `--api-key-stdin`. Saved key changes require a gateway restart and never restart the service automatically.
 
 `plugins quota list` reads local saved results. With the optional compatibility helper 0.1.6 or newer, `plugins quota refresh --account ACCOUNT_ID` explicitly updates one supported account; ordinary status and quota-list commands do not refresh credentials or contact providers.
+
+Usage summaries scan local `usage.jsonl` with bounded record buffering and skip records over 1 MiB, excluding LF or CRLF. `usage export --file PATH` copies the original bytes to a new file, refuses existing destinations and uses mode `0600` on Unix. If the source cannot be opened, no destination is created. See the [usage validation](docs/validation/usage-bounds-20261120.md) for boundary coverage and export limits.
+
+[Desktop integration](docs/DESKTOP.md) is a separate native plugin, disabled by default.
+It can keep the device awake while an agent is working and deliver usage, balance,
+renewal, expiring reset-credit, first-mask and completed-turn notices. Only existing
+fresh observations are used; notifications add no provider polling. A completed
+turn requires a terminal success that was fully delivered to the client; tools,
+cancelled requests and truncated streams do not count as completed answers.
+
+Use `zcalld desktop configure --file SETTINGS.json` for explicit settings, or
+`desktop plan --source /absolute/path/to/magpie` followed by
+`desktop sync --source PATH --expect-plan HASH` to preserve existing preferences.
+Inspection and configuration validation do not send notifications or acquire an
+inhibitor. Saved changes take effect after the gateway is restarted. Windows and
+macOS notification identities require the native platform's explicit registration
+or permission step; their packaged helper never requests that permission implicitly.
 
 ## Services
 
@@ -154,7 +183,3 @@ MIT licensed. Magpie compatibility code retains upstream notices in the optional
 ## Codex transport compatibility
 
 Responses clients that negotiate WebSocket transport can fall back to HTTP/SSE through the gateway. See [the negotiation contract and local validation](docs/CODEX_TRANSPORT.md) for the supported boundary.
-
-### Native SSMCP listener
-
-On Linux, the opt-in `zcalld listen --ssmcp-socket PATH --model ROUTE` command receives explicit `/send` input and returns one scoped execution result through the original live SSMCP conversation. Ordinary chat input is not intercepted. See [the local listener guide](docs/ssmcp-listener.md) for authentication, receipt semantics, limits, and verification scope.

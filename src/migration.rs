@@ -417,11 +417,15 @@ fn plan_from_active(
         ]));
     }
     for (name, route) in &routes {
-        if route.model.chars().any(char::is_control) {
-            return Err("upstream model contains a control character".into());
+        if !crate::config::valid_model(&route.model) {
+            return Err(
+                "upstream model must be nonempty, contain no control characters and fit in 512 bytes"
+                    .into(),
+            );
         }
+        // Catalog values are already literal strings, not INI source text.
         config.push_str(&format!(
-            "\n[route {name}]\nprovider = {}\nmodel = {}\n",
+            "\n[route {name}]\nprovider = {}\nmodel = \"{}\"\n",
             route.provider, route.model
         ));
     }
@@ -1033,6 +1037,81 @@ mod tests {
         assert_ne!(safe_internal("a@b"), safe_internal("a#b"));
         assert!(control::safe_id(&safe_internal("../../secret")));
     }
+    fn imported_plugin_model_fixture(upstream: &str) -> (Value, Vec<Value>, Value) {
+        let providers = object([("providers", Value::Array(Vec::new()))]);
+        let plugins = vec![object([
+            ("id", "plugin".into()),
+            ("api", "http://127.0.0.1:9/v1".into()),
+            (
+                "models",
+                Value::Array(vec![object([
+                    ("id", "model".into()),
+                    ("apiId", upstream.into()),
+                ])]),
+            ),
+        ])];
+        let catalog = object([(
+            "data",
+            Value::Array(vec![object([("id", "plugin/model".into())])]),
+        )]);
+        (providers, plugins, catalog)
+    }
+
+    #[test]
+    fn imported_models_round_trip_through_configuration() {
+        let fixture = LibraryFixture::new();
+        for upstream in [
+            "\"\"".to_string(),
+            "'unfinished".to_string(),
+            " x ".to_string(),
+            "path\\model".to_string(),
+            "é".repeat(256),
+        ] {
+            let (providers, plugins, catalog) = imported_plugin_model_fixture(&upstream);
+            fs::write(fixture.0.join("model-catalog.json"), catalog.stringify()).unwrap();
+            let plan =
+                plan_from_active(&Value::Null, &providers, &plugins, &catalog, 3425).unwrap();
+            let parsed =
+                crate::config::Config::parse(&plan.config, &fixture.0).unwrap_or_else(|error| {
+                    panic!("cannot reload imported model {upstream:?}: {error}")
+                });
+            assert_eq!(parsed.routes.len(), 1);
+            assert_eq!(parsed.routes[0].name, "plugin/model");
+            assert_eq!(parsed.routes[0].model, upstream);
+        }
+    }
+
+    #[test]
+    fn imported_models_reject_empty_upstream_values() {
+        let providers = object([(
+            "providers",
+            Value::Array(vec![object([
+                ("id", "local".into()),
+                ("chat", "http://127.0.0.1:9/v1".into()),
+            ])]),
+        )]);
+        let catalog = object([(
+            "data",
+            Value::Array(vec![object([("id", "local/".into())])]),
+        )]);
+        assert!(
+            plan_from_active(&Value::Null, &providers, &[], &catalog, 3425).is_err(),
+            "accepted an empty upstream model"
+        );
+    }
+
+    #[test]
+    fn imported_models_reject_overlong_upstream_values() {
+        for upstream in ["x".repeat(513), "é".repeat(257)] {
+            let (providers, plugins, catalog) = imported_plugin_model_fixture(&upstream);
+            assert!(
+                plan_from_active(&Value::Null, &providers, &plugins, &catalog, 3425).is_err(),
+                "accepted an upstream model with {} bytes",
+                upstream.len()
+            );
+        }
+    }
+
     #[test]
     fn importing_unknown_models_does_not_claim_readiness() {
         let providers = object([("providers", Value::Array(Vec::new()))]);

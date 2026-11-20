@@ -20,7 +20,7 @@ The transport regressions exercise TCP negotiation followed by a real local HTTP
 
 The built-in OpenAI provider chooses different default URL paths according to its authentication mode. In [Codex 0.170.0 provider selection](https://github.com/openai/codex/blob/rust-v0.170.0/codex-rs/model-provider-info/src/lib.rs), API-key requests use `/v1`, while ChatGPT requests use `/backend-api/codex`. The Responses client appends `/responses` to that base.
 
-zcalld accepts the exact `/backend-api/codex/responses` path as a Responses ingress alias. It uses the same authentication, body limits, decoding, privacy, routing and upstream protocol path as `/v1/responses`. This does not expose arbitrary `/backend-api` paths or add account, model-catalog or quota endpoints.
+zcalld accepts the exact `/backend-api/codex/responses` path as a Responses ingress alias. It uses the same authentication, body limits, decoding, privacy, routing and upstream protocol path as `/v1/responses`. Account, model-catalog and quota requests use the separately configured [account-bound metadata extension](CODEX.md). Arbitrary `/backend-api` paths remain unavailable.
 
 The installed-client fixture preserves each built-in provider's default path and replaces only its scheme and authority with a server inside the isolated network namespace. It asserts that both the ChatGPT WebSocket handshake and its subsequent zstd POST use `/backend-api/codex/responses`. Its recording proxy forwards that path unchanged; the actual gateway must map it to the configured upstream Responses endpoint. The API-key case separately verifies `/v1/responses`.
 
@@ -41,7 +41,7 @@ A named family consists of nonempty ASCII letter/digit segments separated by sin
 
 The same response path preserves these fields for JSON, SSE and upstream 429/503 responses. The HTTP regression checks two named families, mixed-case names, exact numeric strings, shared credits and rejected private fields. The installed-client fixture uses separate default and named-family cases under both API-key and ChatGPT authentication. Codex records the last rate-limit update in each completed TokenCount rollout event, so each family is asserted independently against exact synthetic values.
 
-These fixtures use disposable private homes and local synthetic providers. They do not read the user's Codex settings or contact a real account. The interactive status bar also uses the separate account-usage API; response-header forwarding does not add that endpoint or change its display rules.
+These fixtures use disposable private homes and local synthetic providers. They do not read the user's Codex settings or contact a real account. Codex account-rate-limit requests use the separate account-usage API. The optional [metadata extension](CODEX.md) serves that endpoint, and its installed-client fixture checks parsed quota windows and bound model names independently of response-header forwarding.
 
 ## Compressed HTTP requests
 

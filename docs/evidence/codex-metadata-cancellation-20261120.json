@@ -1,0 +1,148 @@
+{
+  "schema": "zcalld.validation.v1",
+  "date": "2026-11-20",
+  "timezone": "Asia/Taipei",
+  "source_commit": "1aaff74a64fefa9db3bcf8b7b085024cf33da0a4",
+  "compatibility_commit": "15e5e4960adb8028b2d099c1835eaa6a2faaa0c8",
+  "environment": {
+    "platform": "Linux x86_64",
+    "rust": "1.100.0",
+    "codex": "0.170.0",
+    "profile": "release"
+  },
+  "suites": [
+    {
+      "name": "Rust workspace",
+      "command": "cargo test --release --workspace --locked --jobs 2",
+      "passed": 108,
+      "failed": 0
+    },
+    {
+      "name": "Bun Codex metadata",
+      "cwd": "extensions/compat",
+      "command": "bun test community/builtin/tests/codex-metadata.test.mjs",
+      "passed": 13,
+      "failed": 0
+    },
+    {
+      "name": "Native Codex metadata",
+      "script": "scripts/test-codex-metadata.py",
+      "passed": 17,
+      "failed": 0,
+      "duration_seconds": 4.561
+    },
+    {
+      "name": "HTTP cancellation",
+      "script": "scripts/test-http-cancellation.py",
+      "passed": 4,
+      "failed": 0,
+      "duration_seconds": 1.228
+    },
+    {
+      "name": "MCP",
+      "script": "scripts/test-mcp.py",
+      "passed": 14,
+      "failed": 0,
+      "duration_seconds": 1.7
+    },
+    {
+      "name": "HTTP integration",
+      "script": "scripts/integration.py",
+      "passed": 22,
+      "failed": 0,
+      "duration_seconds": 0.648
+    },
+    {
+      "name": "Installed Codex parser",
+      "script": "scripts/test-codex-client-metadata.py",
+      "passed": 2,
+      "failed": 0,
+      "duration_seconds": 1.249
+    }
+  ],
+  "total_passed": 180,
+  "total_failed": 0,
+  "static_checks": [
+    {
+      "command": "cargo fmt --all -- --check",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo clippy --release --workspace --all-targets --locked --jobs 2 -- -D warnings",
+      "exit_code": 0
+    }
+  ],
+  "regressions": [
+    {
+      "name": "Bound model upgrade targets",
+      "before": {
+        "passed": 11,
+        "failed": 2
+      },
+      "after": {
+        "passed": 13,
+        "failed": 0
+      },
+      "cases": [
+        "unique alias",
+        "missing target",
+        "target absent from official catalog",
+        "ambiguous aliases",
+        "advertised canonical target"
+      ]
+    },
+    {
+      "name": "Confirmed downstream disconnect",
+      "baseline_commit": "bba14cc",
+      "before": {
+        "passed": 2,
+        "failed": 2
+      },
+      "after": {
+        "passed": 4,
+        "failed": 0
+      },
+      "cases": [
+        "TCP RST",
+        "Unix full close",
+        "TCP write half-close",
+        "Unix write half-close"
+      ],
+      "assertions": [
+        "abort observed within 1 second",
+        "next request completes within 1 second",
+        "same shared host retained"
+      ]
+    },
+    {
+      "name": "Actual Codex metadata parsing",
+      "rpc_methods": [
+        "initialize",
+        "account/rateLimits/read",
+        "model/list"
+      ],
+      "fixture_values": {
+        "used_percent": 37,
+        "window_duration_minutes": 300,
+        "resets_at": 1900000000,
+        "public_model": "public-alias"
+      },
+      "invalid_used_percent": 37.5,
+      "invalid_result": "RPC error"
+    }
+  ],
+  "boundaries": {
+    "real_accounts_used": false,
+    "model_turns_started": false,
+    "user_codex_configuration_modified": false,
+    "platforms_exercised": [
+      "Linux x86_64"
+    ],
+    "ordinary_tcp_fin": "response and normal deadline preserved",
+    "installed_service": {
+      "version": "0.3.1",
+      "state": "active",
+      "replaced": false
+    }
+  }
+}

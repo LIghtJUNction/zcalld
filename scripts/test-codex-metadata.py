@@ -46,14 +46,17 @@ globalThis.fetch=async(url,init)=>{
   }
   const model={slug:'fixture',display_name:'Official fixture',base_instructions:'UPSTREAM INSTRUCTIONS {{personality}}',
     model_messages:{instructions_template:'UPSTREAM TEMPLATE',instructions_variables:{personality_default:'official'}},
-    supported_reasoning_levels:[{effort:'high',description:'Official'}],shell_type:'shell_command',
+    supported_reasoning_levels:[{effort:'high',description:'Official'}],default_reasoning_level:'high',shell_type:'shell_command',
     visibility:'list',supported_in_api:true,priority:3,support_verbosity:true,
     truncation_policy:{mode:'bytes',limit:100000},experimental_supported_tools:['web'],
     opaque_extension:{retained:['a',true,7]}};
   const value=parsed.pathname.endsWith('/models')?{models:[model,{...model,slug:'not-bound'}],custom_extension:true}:
-    parsed.pathname.endsWith('/usage')?{plan_type:'fixture',rate_limit:{primary_window:{used_percent:37.5,limit_window_seconds:18000,reset_at:1900000000}}}:
-    parsed.pathname.endsWith('/check')?{accounts:{fixture:{account:{id:'fixture-account'},is_eligible_for_codex:true}},account_ordering:['fixture']}:
-    {features:{fixture:true},workspace_backend_origin:'https://chatgpt.com'};
+    parsed.pathname.endsWith('/usage')?{plan_type:'plus',rate_limit:{allowed:true,limit_reached:false,
+      primary_window:{used_percent:37,limit_window_seconds:18000,reset_after_seconds:1800,reset_at:1900000000}}}:
+    parsed.pathname.endsWith('/check')?{accounts:{fixture:{account:{account_id:'fixture-account'},is_eligible_for_codex:true}},account_ordering:['fixture']}:
+    {config_toml:{enterprise_managed:[]}};
+  if(options.model_upgrade&&parsed.pathname.endsWith('/models'))value.models[0].upgrade={model:'not-bound'};
+  if(options.bad_usage_schema&&parsed.pathname.endsWith('/usage'))value.rate_limit.primary_window.used_percent=37.5;
   let raw=JSON.stringify(value);
   if(options.bad_json)raw='not valid JSON';
   if(options.large)raw=JSON.stringify({padding:'x'.repeat((1<<20)+1)});
@@ -154,6 +157,25 @@ class CodexMetadataTests(base.BuiltinFetchTests):
         self.assertEqual(item["opaque_extension"], {"retained": ["a", True, 7]})
         self.assertTrue(data["custom_extension"])
         self.assertRegex(headers["etag"], r'^"zcalld-[0-9a-f]{64}"$')
+
+    def test_model_upgrade_uses_an_advertised_alias_or_is_omitted(self):
+        self.config.write_text(self.config.read_text() +
+            "\n[route public-alias]\nprovider=codex\nmodel=fixture\n" +
+            "\n[route next-alias]\nprovider=codex\nmodel=not-bound\n")
+        self.binding({"enabled": True, "loopback": {
+            "provider": "codex", "routes": ["public-alias", "next-alias"]}})
+        self.mock(model_upgrade=True)
+        self.start()
+        status, _, raw = self.metadata("/backend-api/codex/models?client_version=0.170.0")
+        self.assertEqual(status, 200, raw.decode())
+        models = json.loads(raw)["models"]
+        self.assertEqual([model["slug"] for model in models], ["public-alias", "next-alias"])
+        self.assertEqual(models[0]["upgrade"], {"model": "next-alias"})
+        self.binding({"enabled": True, "loopback": {
+            "provider": "codex", "routes": ["public-alias"]}})
+        status, _, raw = self.metadata("/backend-api/codex/models?client_version=0.170.0")
+        self.assertEqual(status, 200, raw.decode())
+        self.assertIsNone(json.loads(raw)["models"][0]["upgrade"])
 
     def test_methods_query_and_unrecognized_paths_cannot_become_upstream_requests(self):
         self.start()

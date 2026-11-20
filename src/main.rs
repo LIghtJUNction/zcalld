@@ -5,9 +5,12 @@ mod compression;
 mod config;
 mod control;
 mod curl;
+mod desktop;
 mod digest;
+mod events;
 mod extensions;
 mod http;
+mod installer;
 mod keys;
 mod listener;
 mod maintenance;
@@ -15,12 +18,11 @@ mod migration;
 mod plugin_http;
 mod plugins;
 mod protocol;
+mod recovery;
 mod server;
 mod state_json;
 mod system;
 mod transport;
-#[cfg(windows)]
-mod windows_update;
 
 use std::{
     io::{Read, Write},
@@ -41,6 +43,7 @@ Gateway:
                            Local Linux listener; --config PATH and --token-env NAME are optional
   env [openai|anthropic|gemini]
   service start|stop|restart|enable|disable|status [--system]
+  service install          Prepare a Linux user unit for a verified private install
 
 Configuration:
   providers list|add|edit|remove|test|models
@@ -49,6 +52,7 @@ Configuration:
   groups list|set|remove
   agents list|apply|revert|catalog
   privacy show|set off|secrets|personal
+  desktop show|configure|disable|plan|sync
   plugins list|inspect|install|enable|disable|remove|update|config|providers
   plugins quota list
   plugins quota refresh --account ACCOUNT_ID
@@ -62,6 +66,10 @@ Migration and updates:
   migrate magpie [--source PATH] [--catalog FILE] [--apply]
   migrate status|verify
   update check|apply
+  install defaults
+  install plan [--version X.Y.Z] [--prefix PATH] --out PLAN
+  install apply --plan PLAN [--defer]
+  install status|resume|rollback --transaction PATH
   version
 
 Options:
@@ -95,18 +103,11 @@ fn main() -> ExitCode {
 }
 
 fn run() -> Result<(), String> {
+    let _runtime_lease = installer::lease()?;
     let management_args: Vec<String> = std::env::args().skip(1).collect();
     if management_args.iter().any(|a| a == "--help" || a == "-h") {
         print!("{HELP}");
         return Ok(());
-    }
-    #[cfg(windows)]
-    if management_args
-        .first()
-        .is_some_and(|a| a == "__finish-update")
-    {
-        let path = management_args.get(1).ok_or("missing update state")?;
-        return windows_update::finish(std::path::Path::new(path));
     }
     if let Some(result) = listener::run(&management_args) {
         return result;

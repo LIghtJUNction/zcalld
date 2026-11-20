@@ -44,9 +44,17 @@ or
 List, add, edit or remove provider configuration; inspect models or test a
 provider. Plugin account tests identify when only local configuration was
 validated. They do not report an unperformed remote request as successful.
+Add/edit validates URL syntax and protocol endpoint compatibility before reading
+a standard-input credential or writing files.
 .TP
 .BR routes " | " groups
 List, set or remove model routes and model groups.
+Edits preserve the selected provider's literal name, including quotes or spaces.
+Managed group routes must be changed through groups set/remove. Direct route edits
+and provider model options cannot overwrite them. Route/provider removal refuses
+entries still used by a group; change its members or remove the group first.
+These checks run before credential input, backups or writes and reject malformed
+routing.json rather than assuming no groups exist.
 .TP
 .B agents
 Discover supported installed agents, inspect the adapter catalog, apply gateway
@@ -120,13 +128,46 @@ Request machine-readable output. Management commands already use JSON.
 .TP
 .B \-\-api-key-stdin
 Read a provider credential from standard input for supported provider operations.
+Keep an existing exclusive credential reference; give the provider a separate
+reference when the old one is shared by another provider, header or gateway token.
+Environment values continue to take precedence over saved credentials.
 Do not put credentials in shell arguments or history.
+.TP
+.BI "\-\-api-key-env " name
+Select an existing environment or saved credential for a provider.
+Cannot be combined with
+.B \-\-api-key-stdin
+in the same operation.
+.TP
+.BI "\-\-model " value
+Set an upstream model for provider or route edits. INI value quoting rules apply;
+the parsed model must be nonempty, contain no control characters, and fit in
+512 UTF-8 bytes. Provider model and route validation finishes before reading
+.B \-\-api-key-stdin
+or creating backups. Group routes preserve the selected model's parsed value.
 .TP
 .B \-\-help
 Print the command overview.
 .TP
 .B \-\-version
 Print the installed version.
+.SH DESKTOP INTEGRATION
+The optional native desktop plugin is disabled by default.
+.B zcalld desktop show
+reads settings and static capabilities without sending a notification or inhibiting sleep.
+.B zcalld desktop configure --file PATH
+validates and saves explicit settings; restart the gateway to use them.
+.B zcalld desktop plan --source PATH
+previews the original Magpie desktop preferences.
+.B zcalld desktop sync --source PATH --expect-plan HASH
+rechecks that plan before saving it. It does not edit agent configuration.
+.B zcalld desktop disable
+disables the plugin after the next gateway restart.
+.PP
+Notifications use fresh observations already produced by normal operations.
+Successful turn notifications exclude cancelled, incomplete and tool-only responses.
+Windows and macOS require the explicit native application identity/permission
+step described in DESKTOP.md.
 .SH FILES
 .TP
 .B ~/.config/zcalld/config.conf
@@ -172,6 +213,8 @@ Linux uses $XDG_CONFIG_HOME/zcalld or $HOME/.config/zcalld.
 macOS uses $HOME/Library/Application Support/zcalld.
 Windows uses %APPDATA%/zcalld.
 The configuration file is named config.conf.
+Management updates and removals recognize section headers with surrounding
+whitespace while preserving distinct whitespace inside names.
 .SH SECURITY
 Keep caller authentication separate from provider credentials.
 Unix sockets use private ownership and permissions.

@@ -6,7 +6,8 @@ use zcalld_plugin_api::{
     ProviderPluginApi, ProviderPluginProxy, ResponsePluginApi, ResponsePluginProxy, RetryPluginApi,
     RetryPluginProxy, protocol, status,
 };
-use zcalld_plugin_api::{HttpPluginApi, HttpPluginProxy};
+use zcalld_plugin_api::{EventPluginApi, EventPluginProxy, HttpPluginApi, HttpPluginProxy, events};
+use zcalld_plugin_api::{RecoveryPluginApi, RecoveryPluginProxy, recovery};
 use zplugin::{Error, Plugin, UnloadPolicy};
 
 const MAX_PLUGINS: usize = 32;
@@ -36,6 +37,9 @@ struct Entry {
     provider: Option<ProviderPluginProxy<'static>>,
     retry: Option<RetryPluginProxy<'static>>,
     http: Option<HttpPluginProxy<'static>>,
+    events: Option<EventPluginProxy<'static>>,
+    recovery: Option<RecoveryPluginProxy<'static>>,
+    recovery_executor: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -156,6 +160,40 @@ impl Plugins {
                 Err(Error::InterfaceNotFound) => None,
                 Err(e) => return Err(hook_error(&path, "HTTP create", e)),
             };
+            let events = match Plugin::create_owned(&library, EventPluginApi::SPEC) {
+                Ok(instance) => {
+                    let mut p = EventPluginApi::wrap(instance)
+                        .map_err(|e| hook_error(&path, "events bind", e))?;
+                    p.configure(&spec.config)
+                        .map_err(|e| hook_error(&path, "events configure", e))?;
+                    Some(p)
+                }
+                Err(Error::InterfaceNotFound) => None,
+                Err(e) => return Err(hook_error(&path, "events create", e)),
+            };
+            let (recovery, recovery_executor) =
+                match Plugin::create_owned(&library, RecoveryPluginApi::SPEC) {
+                    Ok(instance) => {
+                        let mut p = RecoveryPluginApi::wrap(instance)
+                            .map_err(|e| hook_error(&path, "recovery bind", e))?;
+                        p.configure(&spec.config)
+                            .map_err(|e| hook_error(&path, "recovery configure", e))?;
+                        let executor = match p
+                            .accepts()
+                            .map_err(|e| hook_error(&path, "recovery capability", e))?
+                        {
+                            0 => false,
+                            1 => true,
+                            _ => return Err("invalid recovery capability".into()),
+                        };
+                        (Some(p), executor)
+                    }
+                    Err(Error::InterfaceNotFound) => (None, false),
+                    Err(e) => return Err(hook_error(&path, "recovery create", e)),
+                };
+            if recovery_executor && entries.iter().any(|e: &Entry| e.recovery_executor) {
+                return Err("only one provider recovery executor may be configured".into());
+            }
             if provider.is_some() && entries.iter().any(|e: &Entry| e.provider.is_some()) {
                 return Err("only one community provider host may be configured".into());
             }
@@ -167,9 +205,78 @@ impl Plugins {
                 provider,
                 retry,
                 http,
+                events,
+                recovery,
+                recovery_executor,
             });
         }
         Ok(Self { entries })
+    }
+
+    /// Static validation only; no activation or inbox consumption.
+    pub fn event_status(&mut self) -> Result<Vec<String>, String> {
+        let mut result = Vec::new();
+        for entry in &mut self.entries {
+            if let Some(plugin) = &mut entry.events {
+                let mut bytes = vec![0u8; events::MAX_EVENT_BYTES];
+                let count = plugin
+                    .status(&mut bytes)
+                    .map_err(|e| hook_error(&entry.path, "events status", e))?;
+                let count = usize::try_from(count)
+                    .ok()
+                    .filter(|n| *n <= bytes.len())
+                    .ok_or("event plugin returned an invalid status length")?;
+                bytes.truncate(count);
+                result.push(String::from_utf8(bytes).map_err(|_| "event status is not UTF-8")?);
+            }
+        }
+        Ok(result)
+    }
+
+    pub fn has_events(&self) -> bool {
+        self.entries.iter().any(|entry| entry.events.is_some())
+    }
+
+    /// Notification failures cannot turn a successful generation into an error.
+    pub fn emit_event(&mut self, kind: u32, event: &str) {
+        if event.len() > events::MAX_EVENT_BYTES {
+            crate::events::diagnostic("oversized event");
+            return;
+        }
+        for entry in &mut self.entries {
+            if let Some(plugin) = &mut entry.events {
+                match plugin.emit(kind, event) {
+                    Ok(0..=2) => {}
+                    _ => crate::events::diagnostic("event delivery"),
+                }
+            }
+        }
+    }
+
+    pub fn begin_events(&mut self, metadata: &str) -> crate::events::Leases {
+        let mut leases = crate::events::Leases::default();
+        if metadata.len() > events::MAX_EVENT_BYTES {
+            crate::events::diagnostic("oversized request metadata");
+            return leases;
+        }
+        for entry in &mut self.entries {
+            if let Some(plugin) = &mut entry.events {
+                match plugin.begin(metadata) {
+                    Ok(resource) => {
+                        if resource
+                            .check(events::REQUEST_TYPE, events::REQUEST_VERSION)
+                            .is_ok()
+                        {
+                            leases.push(resource);
+                        } else {
+                            crate::events::diagnostic("invalid request lease");
+                        }
+                    }
+                    Err(_) => crate::events::diagnostic("request lease"),
+                }
+            }
+        }
+        leases
     }
 
     /// Initialize optional post-conversion response hooks for one request.
@@ -285,6 +392,72 @@ impl Plugins {
 
     pub fn has_retry(&self) -> bool {
         self.entries.iter().any(|entry| entry.retry.is_some())
+    }
+
+    pub fn has_recovery(&self) -> bool {
+        self.entries.iter().any(|entry| entry.recovery_executor)
+    }
+
+    pub fn begin_recovery(&mut self, metadata: &[u8]) -> Result<Option<RecoveryResponse>, String> {
+        if metadata.len() > recovery::MAX_METADATA_BYTES {
+            return Err("recovery metadata exceeds limit".into());
+        }
+        for entry in &mut self.entries {
+            if !entry.recovery_executor {
+                continue;
+            }
+            let executor = entry.recovery.as_mut().expect("validated executor");
+            let resource = executor
+                .begin(metadata)
+                .map_err(|e| hook_error(&entry.path, "recovery begin", e))?;
+            resource
+                .check(recovery::RESOURCE_ID, recovery::RESOURCE_VERSION)
+                .map_err(|e| hook_error(&entry.path, "recovery resource", e))?;
+            return Ok(Some(RecoveryResponse { resource }));
+        }
+        Ok(None)
+    }
+
+    /// Only route observers adjust an already filtered request after recovery.
+    pub fn resume_recovery(
+        &mut self,
+        protocol: u32,
+        model: &str,
+        body: &[u8],
+        max_body: usize,
+    ) -> Result<Option<Vec<u8>>, String> {
+        validate_model(model)?;
+        if !protocol::is_supported(protocol) || max_body == 0 || body.len() > max_body {
+            return Err("invalid recovered request".into());
+        }
+        let mut current: Option<Vec<u8>> = None;
+        for entry in &mut self.entries {
+            let Some(observer) = &mut entry.recovery else {
+                continue;
+            };
+            let input = current.as_deref().unwrap_or(body);
+            let mut output = Vec::new();
+            let count = loop {
+                match observer.resume(protocol, model, input, &mut output) {
+                    Ok(n) => break n,
+                    Err(Error::BufferTooSmall) if output.len() < max_body => {
+                        let next = if output.is_empty() {
+                            input.len().saturating_add(2048).max(256).min(max_body)
+                        } else {
+                            output.len().saturating_mul(2).min(max_body)
+                        };
+                        output.resize(next, 0);
+                    }
+                    Err(e) => return Err(hook_error(&entry.path, "recovery resume", e)),
+                }
+            };
+            let count = checked_count(count, output.len(), &entry.path)?;
+            if count != 0 {
+                output.truncate(count);
+                current = Some(output);
+            }
+        }
+        Ok(current)
     }
 
     /// The first willing retry controller selects an alternative and adjusts
@@ -578,6 +751,38 @@ impl Drop for ProviderResponse {
     }
 }
 
+/// Drop owns cancellation while the core polls under the original request deadline.
+pub struct RecoveryResponse {
+    resource: zplugin::Resource<'static>,
+}
+impl RecoveryResponse {
+    pub fn poll(&mut self) -> Result<Option<Option<usize>>, String> {
+        let mut output = [0_u8; recovery::MAX_RESULT_BYTES];
+        let count = match self.resource.call(recovery::POLL, &[], &mut output) {
+            Ok(n) if n <= output.len() => n,
+            Err(Error::PluginStatus(3)) => return Ok(None),
+            _ => return Err("invalid provider recovery result".into()),
+        };
+        let value = crate::state_json::parse(&output[..count])
+            .map_err(|_| "invalid provider recovery result")?;
+        let object = value
+            .as_object()
+            .ok_or("invalid provider recovery result")?;
+        match value.get("recovered").as_bool() {
+            Some(false) if object.len() == 1 => Ok(Some(None)),
+            Some(true) if object.len() == 2 => {
+                let index = value
+                    .get("candidate")
+                    .as_u64()
+                    .filter(|n| *n < recovery::MAX_ATTEMPTS as u64)
+                    .ok_or("invalid recovery candidate")?;
+                Ok(Some(Some(index as usize)))
+            }
+            _ => Err("invalid provider recovery result".into()),
+        }
+    }
+}
+
 pub struct ProviderHead {
     pub status: u16,
     pub headers: Vec<(String, String)>,
@@ -601,6 +806,8 @@ mod tests {
         let mut plugins = Plugins::load(&[]).unwrap();
         assert!(plugins.is_empty());
         assert!(!plugins.has_retry());
+        assert!(!plugins.has_recovery());
+        assert!(plugins.begin_recovery(b"{}").unwrap().is_none());
         assert!(plugins.http_handler("/mcp/example").unwrap().is_none());
         assert!(
             plugins

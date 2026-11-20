@@ -138,6 +138,9 @@ impl Config {
             config.dynamic_routes = groups;
             config.plugins.push(routing);
         }
+        if let Some(desktop) = crate::desktop::plugin(path)? {
+            config.plugins.push(desktop);
+        }
         if config.plugins.len() > 32 {
             return Err("configuration exceeds plugin limit after managed extensions".into());
         }
@@ -312,7 +315,7 @@ impl Config {
                 "route" => {
                     let provider = required(&mut values, "provider", &section)?;
                     let model = required(&mut values, "model", &section)?;
-                    if model.len() > 512 || model.chars().any(char::is_control) {
+                    if !valid_model(&model) {
                         return Err(format!("[{section}] invalid model"));
                     }
                     unknown(&values, &section)?;
@@ -421,24 +424,34 @@ fn parse_sections(text: &str) -> Result<Vec<(String, Section)>, String> {
         {
             return Err(err("invalid key"));
         }
-        let value = value.trim();
-        let value = if value.starts_with('"') || value.starts_with('\'') {
-            let quote = value.as_bytes()[0] as char;
-            value
-                .strip_prefix(quote)
-                .and_then(|v| v.strip_suffix(quote))
-                .ok_or_else(|| err("unclosed quoted value"))?
-        } else {
-            value
-        };
-        if value.chars().any(char::is_control) {
-            return Err(err("control character in value"));
-        }
+        let value = parse_ini_value(value).map_err(err)?;
         if section.insert(key.into(), value.into()).is_some() {
             return Err(err("duplicate key"));
         }
     }
     Ok(sections)
+}
+
+/// Apply the same INI value syntax during loading and management preflight.
+pub(crate) fn parse_ini_value(value: &str) -> Result<&str, &'static str> {
+    let value = value.trim();
+    let value = if value.starts_with('"') || value.starts_with('\'') {
+        let quote = value.as_bytes()[0] as char;
+        value
+            .strip_prefix(quote)
+            .and_then(|v| v.strip_suffix(quote))
+            .ok_or("unclosed quoted value")?
+    } else {
+        value
+    };
+    if value.chars().any(char::is_control) {
+        return Err("control character in value");
+    }
+    Ok(value)
+}
+
+pub(crate) fn valid_model(value: &str) -> bool {
+    !value.is_empty() && value.len() <= 512 && !value.chars().any(char::is_control)
 }
 
 fn valid_name(value: &str) -> bool {
@@ -590,7 +603,7 @@ fn unknown(values: &Section, section: &str) -> Result<(), String> {
         Ok(())
     }
 }
-fn valid_env_name(name: &str) -> bool {
+pub(crate) fn valid_env_name(name: &str) -> bool {
     !name.is_empty()
         && !name.as_bytes()[0].is_ascii_digit()
         && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
@@ -631,7 +644,9 @@ fn resolve_secret(
     Ok(value)
 }
 
-fn read_credentials(path: &Path) -> Result<String, String> {
+pub(crate) const MAX_CREDENTIALS_BYTES: usize = 256 * 1024;
+
+pub(crate) fn read_credentials(path: &Path) -> Result<String, String> {
     use std::io::Read;
     let file = match fs::File::open(path) {
         Ok(file) => file,
@@ -652,16 +667,16 @@ fn read_credentials(path: &Path) -> Result<String, String> {
         }
     }
     let mut text = String::new();
-    file.take(256 * 1024 + 1)
+    file.take((MAX_CREDENTIALS_BYTES + 1) as u64)
         .read_to_string(&mut text)
         .map_err(|_| "credentials file must contain UTF-8 text".to_string())?;
-    if text.len() > 256 * 1024 {
+    if text.len() > MAX_CREDENTIALS_BYTES {
         return Err("credentials file exceeds 256 KiB".into());
     }
     Ok(text)
 }
 
-fn parse_credentials(text: &str) -> Result<BTreeMap<String, String>, String> {
+pub(crate) fn parse_credentials(text: &str) -> Result<BTreeMap<String, String>, String> {
     let mut values = BTreeMap::new();
     for (index, line) in text.lines().enumerate() {
         let line = line.trim();

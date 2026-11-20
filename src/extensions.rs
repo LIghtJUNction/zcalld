@@ -98,7 +98,7 @@ pub fn run(args: &[String], config_path: &Path) -> Result<(), String> {
         Err("plugin operation failed; see the helper diagnostic".into())
     }
 }
-fn library(kind: &str) -> Result<PathBuf, String> {
+pub(crate) fn library(kind: &str) -> Result<PathBuf, String> {
     let variable = format!("ZCALLD_{}_PLUGIN", kind.to_ascii_uppercase());
     if let Some(path) = std::env::var_os(variable) {
         let path = PathBuf::from(path);
@@ -124,6 +124,8 @@ fn library(kind: &str) -> Result<PathBuf, String> {
     if let Ok(exe) = std::env::current_exe()
         && let Some(dir) = exe.parent()
     {
+        // Cargo may place development artifacts outside the source checkout.
+        candidates.insert(0, dir.join(&name));
         candidates.insert(0, dir.join("plugins").join(&name));
         if let Some(prefix) = dir.parent() {
             candidates.insert(0, prefix.join("lib/zcalld/plugins").join(&name));
@@ -213,9 +215,15 @@ pub fn privacy_plugin(config_path: &Path) -> Result<Option<PluginSpec>, String> 
     if !config.exists() {
         return Ok(None);
     }
+    let mut binding = resolved_privacy_binding(state_json::read(&config)?);
+    if let Some(inbox) = crate::desktop::inbox(config_path)? {
+        binding.set("desktop_inbox", inbox.to_string_lossy().into_owned().into());
+    } else {
+        binding.remove("desktop_inbox");
+    }
     Ok(Some(PluginSpec {
         path: library("redact")?,
-        config: resolved_privacy_binding(state_json::read(&config)?).stringify(),
+        config: binding.stringify(),
     }))
 }
 

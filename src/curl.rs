@@ -29,6 +29,7 @@ unsafe extern "C" {
 pub trait Sink {
     fn header(&mut self, bytes: &[u8]) -> Result<(), String>;
     fn body(&mut self, bytes: &[u8]) -> Result<(), String>;
+    fn is_cancelled(&self) -> bool;
 }
 
 pub struct Options<'a> {
@@ -359,8 +360,29 @@ extern "C" fn header_callback(
 ) -> usize {
     callback(data, size, count, context, true)
 }
-extern "C" fn progress_callback(_: *mut c_void, _: i64, _: i64, _: i64, _: i64) -> c_int {
-    c_int::from(STOPPING.load(Ordering::Relaxed))
+extern "C" fn progress_callback(context: *mut c_void, _: i64, _: i64, _: i64, _: i64) -> c_int {
+    if context.is_null() || STOPPING.load(Ordering::Relaxed) {
+        return 1;
+    }
+    // SAFETY: libcurl invokes callbacks synchronously with the live Transfer
+    // pointer installed in perform; reset removes it before that borrow ends.
+    let transfer = unsafe { &mut *(context as *mut Transfer<'_>) };
+    if transfer.error.is_some() {
+        return 1;
+    }
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        transfer.sink.is_cancelled()
+    })) {
+        Ok(false) => 0,
+        Ok(true) => {
+            transfer.error = Some("downstream client disconnected".into());
+            1
+        }
+        Err(_) => {
+            transfer.error = Some("upstream progress callback failed".into());
+            1
+        }
+    }
 }
 fn code_message(code: c_int) -> String {
     // SAFETY: curl_easy_strerror returns a static, NUL-terminated string.

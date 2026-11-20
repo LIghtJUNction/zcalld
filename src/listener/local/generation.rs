@@ -182,6 +182,11 @@ struct Response {
     maximum: usize,
 }
 impl Sink for Response {
+    fn is_cancelled(&self) -> bool {
+        // This process owns one lease; a failed lease heartbeat sets STOPPING.
+        STOPPING.load(Ordering::Relaxed)
+    }
+
     fn header(&mut self, bytes: &[u8]) -> Result<(), String> {
         self.header_bytes = self
             .header_bytes
