@@ -37,4 +37,4 @@ listen 显式登记 enable_reply=true 的本地租约，依次 read、ack，然�
 
 SSMCP 仓库的 scripts/e2e_zcalld_listener.py 使用预先编译的两个项目二进制、真实 owned PTY、隔离账号网关、真实 zcalld serve/listen 进程和可控 fake HTTP provider。它从真实 composer 输入 /send，验证接收与模型完成的先后、普通队列隔离、原文和回写身份、忙碌拒收、模型失败、会话切换及断线不重放。该脚本不构建缺失二进制、不使用真实模型或生产登录。
 
-本提交只提供实现与回归代码。具体候选的编译、执行结果、源码 SHA 和二进制校验值以对应验收报告为准，不能把代码存在当成已通过或已部署。
+已验证候选的源码、二进制哈希和 94 项真实终端检查见[验收记录](ssmcp-listener-validation.md)。后续升版、安装包和部署仍需对应各自的精确产物记录。
