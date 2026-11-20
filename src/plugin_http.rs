@@ -19,6 +19,7 @@ fn metadata(
     config: &Config,
     loopback: bool,
     caller: Option<&str>,
+    route_context: bool,
 ) -> String {
     let mut headers = BTreeMap::new();
     for name in [
@@ -31,7 +32,7 @@ fn metadata(
             headers.insert(name.to_string(), Value::from(value));
         }
     }
-    object([
+    let mut result = object([
         ("method", request.method.clone().into()),
         ("path", path.into()),
         ("headers", Value::Object(headers)),
@@ -42,8 +43,80 @@ fn metadata(
         ),
         ("timeout_ms", config.upstream_timeout_ms.into()),
         ("max_response_bytes", config.max_response.into()),
-    ])
-    .stringify()
+    ]);
+    if route_context {
+        // The peer and route relationships come from the authenticated connection
+        // and the loaded configuration. Never copy a client-supplied identity.
+        result.set(
+            "query",
+            request
+                .path
+                .split_once('?')
+                .map(|(_, q)| q)
+                .unwrap_or("")
+                .into(),
+        );
+        let providers = config
+            .providers
+            .iter()
+            .map(|provider| {
+                object([
+                    ("id", provider.name.clone().into()),
+                    (
+                        "plugin",
+                        provider
+                            .plugin
+                            .clone()
+                            .map(Value::from)
+                            .unwrap_or(Value::Null),
+                    ),
+                    (
+                        "account",
+                        provider
+                            .plugin_account
+                            .clone()
+                            .map(Value::from)
+                            .unwrap_or(Value::Null),
+                    ),
+                ])
+            })
+            .collect();
+        let routes = config
+            .routes
+            .iter()
+            .map(|route| {
+                let dynamic = config.dynamic_routes.contains(&route.name);
+                object([
+                    ("id", route.name.clone().into()),
+                    ("dynamic", dynamic.into()),
+                    (
+                        "provider",
+                        if dynamic {
+                            Value::Null
+                        } else {
+                            config.providers[route.provider].name.clone().into()
+                        },
+                    ),
+                    (
+                        "model",
+                        if dynamic {
+                            Value::Null
+                        } else {
+                            route.model.clone().into()
+                        },
+                    ),
+                ])
+            })
+            .collect();
+        result.set(
+            "routing",
+            object([
+                ("providers", Value::Array(providers)),
+                ("routes", Value::Array(routes)),
+            ]),
+        );
+    }
+    result.stringify()
 }
 
 fn response_headers(head: ProviderHead) -> (u16, String, Vec<(String, String)>) {
@@ -56,7 +129,8 @@ fn response_headers(head: ProviderHead) -> (u16, String, Vec<(String, String)>) 
             | "mcp-protocol-version"
             | "retry-after"
             | "allow"
-            | "www-authenticate" => {
+            | "www-authenticate"
+            | "etag" => {
                 extra.push((name, value));
             }
             // Framing, connection state, cookies and caching remain host-owned.
@@ -195,6 +269,7 @@ pub fn try_handle(
         config,
         socket.is_loopback_peer(),
         caller_key_id,
+        handler.route_context,
     );
     match plugins.http_fetch(handler, &envelope, &request.body) {
         Ok(response) => relay(socket, config, response, head_only),
@@ -209,6 +284,60 @@ pub fn try_handle(
 mod tests {
     use super::*;
 
+    #[test]
+    fn route_context_comes_from_config_and_never_claims_group_capabilities() {
+        let mut config = Config::parse(
+            "[server]\nlisten = 127.0.0.1:9415\n[provider fixture]\nbase_url = https://private-host.example/v1\nprotocol = responses\nauth = none\nplugin = builtin:codex\nplugin_account = builtin:codex#bound\n[route alias]\nprovider = fixture\nmodel = upstream-slug\n[route group]\nprovider = fixture\nmodel = guessed-member\n",
+            std::path::Path::new("."),
+        ).unwrap();
+        config.providers[0].key = Some("upstream-secret-canary".into());
+        config.providers[0]
+            .headers
+            .push(("x-private".into(), "header-secret-canary".into()));
+        config.dynamic_routes.push("group".into());
+        let request = Request {
+            method: "GET".into(),
+            path: "/backend-api/codex/models?client_version=0.170.0".into(),
+            headers: vec![
+                ("x-caller-key-id".into(), "forged-caller".into()),
+                ("x-loopback".into(), "true".into()),
+                ("chatgpt-account-id".into(), "forged-account".into()),
+            ],
+            body: Vec::new(),
+        };
+        let text = metadata(
+            &request,
+            "/backend-api/codex/models",
+            &config,
+            false,
+            Some("verified"),
+            true,
+        );
+        let value = crate::state_json::parse(text.as_bytes()).unwrap();
+        assert_eq!(value.get("loopback").as_bool(), Some(false));
+        assert_eq!(value.get("caller_key_id").as_str(), Some("verified"));
+        assert_eq!(value.get("query").as_str(), Some("client_version=0.170.0"));
+        let providers = value.get("routing").get("providers").as_array();
+        assert_eq!(
+            providers[0].get("account").as_str(),
+            Some("builtin:codex#bound")
+        );
+        let routes = value.get("routing").get("routes").as_array();
+        assert_eq!(routes[0].get("id").as_str(), Some("alias"));
+        assert_eq!(routes[0].get("model").as_str(), Some("upstream-slug"));
+        assert_eq!(routes[1].get("dynamic").as_bool(), Some(true));
+        assert_eq!(routes[1].get("provider"), &Value::Null);
+        assert_eq!(routes[1].get("model"), &Value::Null);
+        for forbidden in [
+            "private-host",
+            "upstream-secret",
+            "header-secret",
+            "forged-",
+            "guessed-member",
+        ] {
+            assert!(!text.contains(forbidden));
+        }
+    }
     #[test]
     fn extension_metadata_has_only_validated_identity_and_protocol_headers() {
         let config = Config::parse(
@@ -228,7 +357,14 @@ mod tests {
             ],
             body: b"{}".to_vec(),
         };
-        let text = metadata(&request, "/mcp/example", &config, true, Some("verified-id"));
+        let text = metadata(
+            &request,
+            "/mcp/example",
+            &config,
+            true,
+            Some("verified-id"),
+            false,
+        );
         let value = crate::state_json::parse(text.as_bytes()).unwrap();
         assert_eq!(value.get("caller_key_id").as_str(), Some("verified-id"));
         assert_eq!(value.get("path").as_str(), Some("/mcp/example"));
