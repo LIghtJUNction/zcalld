@@ -2,6 +2,7 @@
 
 ## 0.4.4 — 2026-11-20
 
+- Initialize synthetic provider hosts before in-flight timeout assertions while preserving separate cold-initialization deadline coverage.
 - Keep Windows maintenance fixtures under the helper-owned private ACL and validate their state before gateway startup.
 - Pair Windows installer recovery with zcall-gui 0.1.5 and keep its strict private-file checks.
 - Refresh the zcall submodule and locked commit for cold-runner version preparation; library runtime code is unchanged.

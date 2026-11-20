@@ -168,6 +168,20 @@ class BuiltinFetchTests(unittest.TestCase):
             f"[plugin community]\npath={self.community_plugin}\nconfig_file={self.host_config}\n",
             encoding="utf-8", newline="\n")
 
+    def warm_local_tools(self):
+        # Health readiness does not include lazy Bun initialization. List local
+        # tools without priming quota or generating before an in-flight test.
+        with contextlib.closing(http.client.HTTPConnection("127.0.0.1", self.port, timeout=8)) as conn:
+            conn.request("POST", "/mcp/zcalld/tools",
+                         body=json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}),
+                         headers={"Content-Type": "application/json",
+                                  "Accept": "application/json, text/event-stream"})
+            response = conn.getresponse()
+            body = response.read()
+            self.assertEqual(response.status, 200, body)
+            self.assertEqual(json.loads(body),
+                             {"jsonrpc": "2.0", "id": 1, "result": {"tools": []}})
+
     def request(self, stream, text="Reply exactly OK"):
         with contextlib.closing(http.client.HTTPConnection("127.0.0.1", self.port, timeout=8)) as conn:
             conn.request("POST", "/v1/responses",
@@ -275,6 +289,9 @@ class BuiltinFetchTests(unittest.TestCase):
         self.configure(connect=100, total=250)
         self.mock(delay_ms=1000)
         self.start()
+        self.warm_local_tools()
+        self.assertEqual(self.recorded("fetch"), [])
+        self.assertEqual(self.recorded("aborted"), [])
         status, _, body = self.request(True)
         self.assertEqual(status, 502)
         self.assertIn('provider request timed out', json.loads(body)['error']['message'])

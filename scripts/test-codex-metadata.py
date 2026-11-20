@@ -246,11 +246,15 @@ class CodexMetadataTests(base.BuiltinFetchTests):
         self.configure(total=250)
         self.mock(delay_ms=1000)
         self.start()
+        self.warm_local_tools()
+        self.assertEqual(len(self.recorded("host_started")), 1)
+        self.assertEqual(self.recorded("metadata"), [])
         status, _, body = self.metadata()
         self.assertIn(status, [502, 504], body.decode())
         time.sleep(0.05)
         self.assertEqual(len(self.recorded("metadata")), 1)
         self.assertEqual(len(self.recorded("aborted")), 1)
+        self.assertEqual(len(self.recorded("host_started")), 1)
 
     def test_disable_is_local_and_keeps_old_binding(self):
         self.start()
