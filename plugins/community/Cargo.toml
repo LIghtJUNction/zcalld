@@ -11,5 +11,5 @@ name="zcalld_community"
 crate-type=["cdylib","rlib"]
 [dependencies]
 zplugin={version="=0.3.1",features=["std"], git = "https://github.com/LIghtJUNction/zplugin.git"}
-zcalld-plugin-api={version="=0.4.2",path="../../crates/zcalld-plugin-api"}
-zcalld-compat-client={version="=0.4.2",path="../../crates/zcalld-compat-client"}
+zcalld-plugin-api={version="=0.4.3",path="../../crates/zcalld-plugin-api"}
+zcalld-compat-client={version="=0.4.3",path="../../crates/zcalld-compat-client"}

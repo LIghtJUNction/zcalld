@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.3 — 2026-11-20
+
+- Inspect the full Windows drive root before checking private desktop-plugin paths, preserving ancestor and reparse-point checks.
+- Run the existing desktop and installer tests together in the fast Windows/macOS native candidate gate.
+- Clarify locked Git dependency sources and the scope of the bump workflow.
+- Carry forward the installer lock, Windows ZIP and complete portable-bundle corrections from 0.4.2. That validation candidate did not pass the Windows desktop gate and was not published.
+
 ## 0.4.2 — 2026-11-20
 
 - Explicitly release installer and runtime exclusive locks when their owning operation ends, including when a duplicate descriptor remains open.

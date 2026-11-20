@@ -1,4 +1,4 @@
-name: Installer native candidate check
+name: Installer and desktop native candidate check
 
 # Manual diagnostic gate only. This does not publish a release or replace
 # the five native build and acceptance jobs in release.yml.
@@ -19,7 +19,7 @@ concurrency:
 
 jobs:
   installer-native:
-    name: Installer candidate (${{ matrix.id }})
+    name: Installer and desktop candidate (${{ matrix.id }})
     strategy:
       fail-fast: false
       matrix:
@@ -87,36 +87,36 @@ jobs:
           grep -Fx 'release: 1.100.0' candidate-logs/rustc.txt
           grep -Fx "host: $EXPECTED_HOST" candidate-logs/rustc.txt
 
-      - name: Check installer formatting
+      - name: Check installer and desktop formatting
         id: format
         run: |
           raw_log="$RUNNER_TEMP/zcalld-installer-format-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.log"
           set +e
-          cargo fmt -p zcalld-installer -- --check > "$raw_log" 2>&1
+          cargo fmt -p zcalld-installer -p zcalld-plugin-desktop -- --check > "$raw_log" 2>&1
           result=$?
           tail -c 2097152 "$raw_log" | tee candidate-logs/format.log
           printf '%s\n' "$result" > candidate-logs/format-exit-code.txt
           rm -f -- "$raw_log"
           exit "$result"
 
-      - name: Check installer Clippy
+      - name: Check installer and desktop Clippy
         id: clippy
         run: |
           raw_log="$RUNNER_TEMP/zcalld-installer-clippy-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.log"
           set +e
-          cargo clippy -p zcalld-installer --all-targets --locked -- -D warnings > "$raw_log" 2>&1
+          cargo clippy -p zcalld-installer -p zcalld-plugin-desktop --all-targets --locked -- -D warnings > "$raw_log" 2>&1
           result=$?
           tail -c 2097152 "$raw_log" | tee candidate-logs/clippy.log
           printf '%s\n' "$result" > candidate-logs/clippy-exit-code.txt
           rm -f -- "$raw_log"
           exit "$result"
 
-      - name: Test installer on the native OS
+      - name: Test installer and desktop on the native OS
         id: tests
         run: |
           raw_log="$RUNNER_TEMP/zcalld-installer-tests-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.log"
           set +e
-          cargo test -p zcalld-installer --all-targets --locked > "$raw_log" 2>&1
+          cargo test -p zcalld-installer -p zcalld-plugin-desktop --all-targets --locked > "$raw_log" 2>&1
           result=$?
           tail -c 2097152 "$raw_log" | tee candidate-logs/tests.log
           printf '%s\n' "$result" > candidate-logs/tests-exit-code.txt
