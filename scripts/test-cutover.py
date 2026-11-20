@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
 """Isolated service/filesystem fixtures. Never touch real accounts or services."""
+import argparse
 import contextlib
+import copy
+import http.server
 import importlib.util
 import json
 import os
 from pathlib import Path
+import shutil
 import socket
+import socketserver
 import tempfile
+import threading
 import unittest
 from unittest import mock
 
@@ -20,6 +26,7 @@ class FakeSystem:
         self.root, self.source, self.candidate, self.expected = root, source, candidate, expected
         self.calls = []
         self.old, self.new, self.restarted, self.rotate_after_stop = True, False, False, False
+        self.mcp_backend = None
 
     def run(self, args, label, **_):
         self.calls.append(label)
@@ -49,6 +56,11 @@ class FakeSystem:
         self.calls.append(("GET", port, path, unix))
         return {"status": "ok"} if path == "/healthz" else self.expected
 
+    def mcp(self, port, path=cutover.MCP_PATH, unix=None, protocol=cutover.MCP_PROTOCOL):
+        self.calls.append(("MCP", port, path, unix, self.new))
+        assert self.mcp_backend is not None, "MCP was probed without an active library fixture"
+        return self.mcp_backend(port, path, unix, protocol)
+
     def terminate(self, _):
         self.calls.append("TERM old main")
         self.old = False
@@ -70,6 +82,108 @@ class FakeSystem:
 
     def restored_old(self, _):
         return self.restarted and self.old
+
+
+class MCPFixture:
+    """Real loopback/Unix HTTP framing with fake, metadata-only MCP responses."""
+
+    def __init__(self, case, tools):
+        self.case, self.tools = case, copy.deepcopy(tools)
+        self.records = []
+        self.failure = None
+        self.paginate = False
+        self.duplicate = False
+        self.bad_id = False
+        fixture = self
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *_):
+                pass
+
+            def do_POST(self):
+                body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                method, transport = body.get("method"), self.server.transport
+                fixture.records.append((transport, body, dict(self.headers)))
+                protocol = cutover.MCP_PROTOCOL
+                failing = fixture.case.ops.new and fixture.failure
+                kind = fixture.failure[1] if failing and fixture.failure[0] == transport else None
+                if kind == "protocol":
+                    protocol = "2025-11-25"
+                result = None
+                error = None
+                status = 200
+                if method == "initialize":
+                    result = {"protocolVersion": protocol, "capabilities": {"tools": {}},
+                              "serverInfo": {"name": "fixture", "version": "1"}}
+                elif self.headers.get("Mcp-Session-Id") != "fixture-" + transport or self.headers.get("MCP-Protocol-Version") != protocol:
+                    error = {"code": -32600, "message": "fixture session/protocol header mismatch"}
+                elif method == "notifications/initialized":
+                    self.send_response(202)
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+                elif method == "ping":
+                    result = {}
+                elif method == "tools/list":
+                    if kind == "rejection":
+                        error = {"code": -32000, "message": "fixture metadata rejected"}
+                    elif kind == "http":
+                        status = 403
+                        error = {"code": -32000, "message": "fixture forbidden"}
+                    else:
+                        tools = copy.deepcopy(fixture.tools)
+                        if kind == "catalog":
+                            if tools:
+                                tools[0]["description"] = "changed metadata with the same tool name"
+                            else:
+                                tools = [{"name": "unexpected", "inputSchema": {"type": "object"}}]
+                        if fixture.duplicate and tools:
+                            tools.append(copy.deepcopy(tools[0]))
+                        result = {"tools": tools}
+                        if fixture.paginate and len(tools) > 1:
+                            if body.get("params", {}).get("cursor") == "page-2":
+                                result = {"tools": tools[1:]}
+                            else:
+                                result = {"tools": tools[:1], "nextCursor": "page-2"}
+                else:
+                    error = {"code": -32601, "message": "fixture forbids executable methods"}
+                reply = {"jsonrpc": "2.0", "id": "wrong-id" if fixture.bad_id else body.get("id")}
+                reply["error" if error else "result"] = error if error else result
+                payload = cutover.encoded(reply)
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Content-Length", str(len(payload)))
+                if method == "initialize":
+                    self.send_header("Mcp-Session-Id", "fixture-" + transport)
+                self.end_headers()
+                self.wfile.write(payload)
+
+        self.tcp = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.tcp.transport = "tcp"
+        case.unix.close()
+        case.unix_path.unlink()
+        self.unix = socketserver.ThreadingUnixStreamServer(str(case.unix_path), Handler)
+        self.unix.daemon_threads = True
+        self.unix.transport = "unix"
+        case.unix_path.chmod(0o600)
+        for server in (self.tcp, self.unix):
+            thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.02}, daemon=True)
+            thread.start()
+            def close(server=server, thread=thread):
+                server.shutdown()
+                server.server_close()
+                thread.join(2)
+            case.addCleanup(close)
+        system = cutover.System(case.state)
+        case.ops.mcp_backend = lambda _port, path, unix, protocol: system.mcp(
+            self.tcp.server_port, path, unix, protocol)
+
+    def assert_read_only(self):
+        allowed = {"initialize", "notifications/initialized", "ping", "tools/list"}
+        self.case.assertTrue(self.records)
+        self.case.assertTrue(all(body["method"] in allowed for _, body, _ in self.records))
+        self.case.assertTrue(all(not any(k.lower() in ("authorization", "cookie") for k in headers)
+                                 for _, _, headers in self.records))
 
 
 class Cutover(unittest.TestCase):
@@ -134,6 +248,150 @@ class Cutover(unittest.TestCase):
         for patch in patches:
             patch.start()
             self.addCleanup(patch.stop)
+
+    def enable_mcp(self, tools=None):
+        cutover.save_json(self.source / "library.json", {"mcp": [{
+            "name": "library1", "transport": "http", "url": "http://127.0.0.1:3425/mcp/magpie/tools",
+            "agents": ["fixture-agent"]}]})
+        self.tx.data["topology"]["library.json"] = cutover.file_hash(self.source / "library.json")
+        self.mcp = MCPFixture(self, [] if tools is None else tools)
+        expected = self.ops.mcp(3425)
+        cutover.save_json(self.state / "expected-mcp.json", expected)
+        self.tx.data.update(mcp_required=True, mcp_hash=cutover.digest(expected),
+                            mcp_tool_count=len(expected["tools"]))
+        self.tx.save()
+        return expected
+
+    def assert_mcp_rollback(self):
+        self.assertEqual(self.tx.data["phase"], "rolled_back")
+        self.assertTrue(self.ops.old)
+        self.assertFalse(self.ops.new)
+        self.assertEqual(self.autostart.read_bytes(), self.original_autostart)
+        self.assertLess(self.ops.calls.index(("stop", cutover.UNIT)),
+                        self.ops.calls.index("credential sync-auth"))
+        self.assertLess(self.ops.calls.index("credential sync-auth"),
+                        self.ops.calls.index("restart old"))
+        self.mcp.assert_read_only()
+
+    def test_prepare_captures_private_mcp_metadata_without_starting_candidate(self):
+        self.enable_mcp()
+        snapshot = self.root / "snapshot"
+        snapshot.mkdir(mode=0o700)
+        for name in ("providers.json", "settings.json", "plugin-auth.json", "library.json"):
+            shutil.copy2(self.source / name, snapshot / name)
+        cutover.save_json(self.target / "migration.json", {
+            "source": str(self.source), "snapshot": str(snapshot), "cutover_complete": False})
+        cutover.save_json(self.target / "extensions/host.json", {
+            key: str(self.root / "pluginctl") for key in ("bun", "host", "pi")})
+        cutover.save_json(self.target / "privacy/plugin.json", {"worker": str(self.root / "pluginctl")})
+        fresh = self.root / "fresh-state"
+        fresh.mkdir(mode=0o700)
+        tx = cutover.Transaction(fresh, self.ops)
+        args = argparse.Namespace(config=str(self.config), source=str(self.source),
+                                  binary=str(self.root / "zcalld"), pluginctl=str(self.root / "pluginctl"),
+                                  magpie_pid=101, old_unit=None, external_owners=None, timeout=90)
+        old = {"pid": 101, "start_ticks": 10, "uid": os.getuid(), "exe": str(self.root / "magpie")}
+        self.ops.calls.clear()
+        self.mcp.records.clear()
+        with mock.patch.dict(os.environ, {"XDG_RUNTIME_DIR": str(self.root)}), \
+             mock.patch.object(cutover, "process_identity", return_value=old):
+            tx.prepare(args)
+        self.assertEqual(tx.data["phase"], "prepared")
+        self.assertTrue(tx.data["mcp_required"])
+        self.assertEqual(cutover.read_json(fresh / "expected-mcp.json"),
+                         {"protocolVersion": cutover.MCP_PROTOCOL, "tools": []})
+        self.assertEqual((fresh / "expected-mcp.json").stat().st_mode & 0o777, 0o600)
+        self.assertEqual(tx.data["mcp_hash"], cutover.digest(cutover.read_json(fresh / "expected-mcp.json")))
+        self.assertTrue(self.ops.old)
+        self.assertFalse(self.ops.new)
+        self.assertNotIn(("start", cutover.UNIT), self.ops.calls)
+        self.assertNotIn("credential import-builtin", self.ops.calls)
+        self.assertTrue(all(transport == "tcp" for transport, _, _ in self.mcp.records))
+        self.mcp.assert_read_only()
+
+    def test_mcp_empty_catalog_is_verified_over_tcp_and_unix(self):
+        self.enable_mcp()
+        self.ops.calls.clear()
+        self.tx.apply()
+        self.assertEqual(self.tx.data["phase"], "active")
+        probes = [row for row in self.ops.calls if isinstance(row, tuple) and row[0] == "MCP"]
+        self.assertEqual([(row[3], row[4]) for row in probes], [(None, True), (str(self.unix_path), True)])
+        self.tx.rollback()
+        self.assert_mcp_rollback()
+
+    def test_mcp_unix_catalog_metadata_mismatch_rolls_back(self):
+        self.enable_mcp([{"name": "fixture-tool", "description": "original",
+                          "inputSchema": {"type": "object", "properties": {}}}])
+        self.mcp.failure = ("unix", "catalog")
+        self.ops.rotate_after_stop = True
+        with self.assertRaisesRegex(cutover.CutoverError, "tool metadata differs"):
+            self.tx.apply()
+        self.assert_mcp_rollback()
+        self.assertEqual(cutover.read_json(self.source / "plugin-auth.json")["fixture"]["refresh"], "new-final")
+
+    def test_mcp_rpc_rejection_rolls_back(self):
+        self.enable_mcp()
+        self.mcp.failure = ("tcp", "rejection")
+        with self.assertRaisesRegex(cutover.CutoverError, "JSON-RPC request was rejected"):
+            self.tx.apply()
+        self.assert_mcp_rollback()
+
+    def test_mcp_http_rejection_rolls_back(self):
+        self.enable_mcp()
+        self.mcp.failure = ("unix", "http")
+        with self.assertRaisesRegex(cutover.CutoverError, "HTTP request was rejected"):
+            self.tx.apply()
+        self.assert_mcp_rollback()
+
+    def test_mcp_protocol_change_rolls_back(self):
+        self.enable_mcp()
+        self.mcp.failure = ("tcp", "protocol")
+        with self.assertRaisesRegex(cutover.CutoverError, "protocol differs"):
+            self.tx.apply()
+        self.assert_mcp_rollback()
+
+    def test_mcp_private_baseline_drift_fails_before_stopping_old(self):
+        self.enable_mcp()
+        cutover.save_json(self.state / "expected-mcp.json", {"protocolVersion": "2025-11-25", "tools": []})
+        with self.assertRaisesRegex(cutover.CutoverError, "private MCP baseline changed"):
+            self.tx.apply()
+        self.assertTrue(self.ops.old)
+        self.assertFalse(self.ops.new)
+        self.assertNotIn("TERM old main", self.ops.calls)
+
+    def test_mcp_reader_checks_session_pagination_reply_id_and_duplicate_names(self):
+        tools = [{"name": "z", "description": "last", "inputSchema": {"type": "object"}},
+                 {"name": "a", "description": "first", "inputSchema": {"type": "object"}}]
+        self.enable_mcp(tools)
+        self.mcp.paginate = True
+        for unix in (None, str(self.unix_path)):
+            with self.subTest(unix=bool(unix)):
+                result = self.ops.mcp(3425, unix=unix)
+                self.assertEqual([x["name"] for x in result["tools"]], ["a", "z"])
+        self.mcp.bad_id = True
+        with self.assertRaisesRegex(cutover.CutoverError, "JSON-RPC request was rejected"):
+            self.ops.mcp(3425)
+        self.mcp.bad_id = False
+        self.mcp.duplicate = True
+        with self.assertRaisesRegex(cutover.CutoverError, "duplicate names"):
+            self.ops.mcp(3425)
+        self.mcp.assert_read_only()
+
+    def test_mcp_selection_only_covers_assigned_magpie_loopback_endpoint(self):
+        entry = {"name": "library1", "transport": "http", "agents": ["fixture-agent"],
+                 "url": "http://127.0.0.1:3425/mcp/magpie/tools"}
+        def selected(change):
+            cutover.save_json(self.source / "library.json", {"mcp": [dict(entry, **change)]})
+            return cutover.required_mcp(self.source)
+        self.assertTrue(selected({}))
+        for change in (
+            {"agents": []}, {"disabled": True}, {"hidden": True}, {"offHere": True},
+            {"transport": "stdio"}, {"url": "http://127.0.0.1:9000/mcp/magpie/tools"},
+            {"url": "http://127.0.0.1:3425/mcp/other"}, {"url": "http://other.example:3425/mcp/magpie/tools"},
+            {"url": "http://127.0.0.1:3425/mcp/magpie/tools?token=fixture"},
+        ):
+            with self.subTest(change=change):
+                self.assertFalse(selected(change))
 
     def test_switch_and_rollback_preserve_rotations_usage_and_launch(self):
         native_before = (self.root / "native-auth.json").read_bytes()
