@@ -64,7 +64,7 @@ class Routing(unittest.TestCase):
 
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix='zcalld-routing-')
-        self.root = Path(self.temp.name)
+        self.root = Path(self.temp.name).resolve()
         self.mock = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Mock)
         self.mock.daemon_threads = True
         self.mock.records = []
@@ -80,13 +80,13 @@ class Routing(unittest.TestCase):
         self.process = None
         self.log = tempfile.TemporaryFile()
         settings = self.root / 'settings.json'
-        settings.write_text(json.dumps({'redact': True, 'redactPersonal': True, 'redactModelOff': True}))
+        settings.write_text(json.dumps({'redact': True, 'redactPersonal': True, 'redactModelOff': True}), encoding="utf-8", newline="\n")
         key = self.root / 'redact.key'
         key.write_bytes(b'K' * 32)
         if os.name == 'posix':
             key.chmod(0o600)
         privacy = self.root / 'privacy.json'
-        privacy.write_text(json.dumps({'worker': str(self.args.privacy_worker), 'settings': str(settings), 'key': str(key)}))
+        privacy.write_text(json.dumps({'worker': str(self.args.privacy_worker), 'settings': str(settings), 'key': str(key)}), encoding="utf-8", newline="\n")
         self.state = {'groups': [{'name': 'group/test', 'mode': 'order', 'members': [
             {'model': 'first', 'reasoning_levels': ['low', 'medium', 'high']},
             {'model': 'second', 'reasoning_levels': ['low', 'medium', 'high']}],
@@ -94,7 +94,7 @@ class Routing(unittest.TestCase):
                 {'use': 'first', 'intent': 'simple'}, {'use': 'second', 'intent': 'complex', 'useEffort': 'high'}]}}],
             'deciders': [{'id': 'decider', 'url': f'http://127.0.0.1:{self.mock.server_port}/v1', 'protocol': 'systemone'}],
             'usage_file': str(self.usage)}
-        self.groups.write_text(json.dumps(self.state))
+        self.groups.write_text(json.dumps(self.state), encoding="utf-8", newline="\n")
         self.config.write_text(
             f'[server]\nlisten=127.0.0.1:{self.port}\nunix_socket=none\nworkers=2\nqueue=4\n'
             f'[provider mock]\nbase_url=http://127.0.0.1:{self.mock.server_port}/v1\nprotocol=chat\n'
@@ -102,7 +102,7 @@ class Routing(unittest.TestCase):
             '[route second]\nprovider=mock\nmodel=upstream-second\n'
             '[route group/test]\nprovider=mock\nmodel=upstream-first\n'
             f'[plugin privacy]\npath={self.args.redact_plugin}\nconfig_file={privacy}\n'
-            f'[plugin routing]\npath={self.args.routing_plugin}\nconfig={self.groups}\n')
+            f'[plugin routing]\npath={self.args.routing_plugin}\nconfig={self.groups}\n', encoding="utf-8", newline="\n")
 
     def start(self):
         environment = os.environ.copy()
@@ -169,18 +169,18 @@ class Routing(unittest.TestCase):
         # The same turn keeps its decision even when handled by a different worker.
         self.assertEqual(len([d for d in decisions if 'message' in d['state']]), 1)
         deadline = time.monotonic() + 2
-        while time.monotonic() < deadline and (not self.usage.exists() or len(self.usage.read_text().splitlines()) < 2):
+        while time.monotonic() < deadline and (not self.usage.exists() or len(self.usage.read_text(encoding="utf-8").splitlines()) < 2):
             time.sleep(.02)
-        records = [json.loads(line) for line in self.usage.read_text().splitlines()]
+        records = [json.loads(line) for line in self.usage.read_text(encoding="utf-8").splitlines()]
         self.assertEqual(records[-1]['output_tokens'], 8)
-        self.assertNotIn('jane.doe@acme.io', self.usage.read_text())
+        self.assertNotIn('jane.doe@acme.io', self.usage.read_text(encoding="utf-8"))
 
     def test_unavailable_group_never_generates(self):
         group = self.state['groups'][0]
         group['original'] = {}
         for member in group['members']:
             member['off'] = True
-        self.groups.write_text(json.dumps(self.state))
+        self.groups.write_text(json.dumps(self.state), encoding="utf-8", newline="\n")
         self.start()
         status, _ = self.call({'model': 'group/test', 'messages': [{'role': 'user', 'content': 'hello'}]})
         self.assertEqual(status, 503)
@@ -190,7 +190,7 @@ class Routing(unittest.TestCase):
         group = self.state['groups'][0]
         group['original'] = {'affinity': 'none'}
         group['mode'] = 'rotate'
-        self.groups.write_text(json.dumps(self.state))
+        self.groups.write_text(json.dumps(self.state), encoding="utf-8", newline="\n")
         self.start()
         for n in range(6):
             status, _ = self.call({'model': 'group/test', 'messages': [{'role': 'user', 'content': f'message {n}'}]})
@@ -200,7 +200,7 @@ class Routing(unittest.TestCase):
 
     def test_explicit_refusal_falls_back_before_response_headers(self):
         self.state['groups'][0]['original'] = {'affinity': 'turn'}
-        self.groups.write_text(json.dumps(self.state))
+        self.groups.write_text(json.dumps(self.state), encoding="utf-8", newline="\n")
         self.mock.refuse['upstream-first'] = 429
         self.start()
         original = 'Contact jane.doe@acme.io'
@@ -213,7 +213,7 @@ class Routing(unittest.TestCase):
 
     def test_server_error_with_uncertain_generation_is_not_replayed(self):
         self.state['groups'][0]['original'] = {'affinity': 'turn'}
-        self.groups.write_text(json.dumps(self.state))
+        self.groups.write_text(json.dumps(self.state), encoding="utf-8", newline="\n")
         self.mock.refuse['upstream-first'] = 500
         self.start()
         status, _ = self.call({'model': 'group/test', 'messages': [{'role': 'user', 'content': 'fixture'}]})

@@ -15,7 +15,7 @@ class ReleaseTransactionTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="zcalld-release-test-")
         self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name)
+        self.root = Path(self.temp.name).resolve()
         (self.root / "scripts").mkdir()
         shutil.copyfile(SCRIPT, self.root / "scripts" / "release.py")
         (self.root / "Cargo.toml").write_text(
@@ -25,10 +25,10 @@ class ReleaseTransactionTests(unittest.TestCase):
             '[workspace.package]\nversion = "0.1.0"\nedition = "2024"\n\n'
             '[package]\nname = "zcalld"\nversion.workspace = true\nedition.workspace = true\n\n'
             '[dependencies]\n'
-            'zcalld-plugin-api = { version = "=0.1.0", path = "crates/zcalld-plugin-api" }\n'
+            'zcalld-plugin-api = { version = "=0.1.0", path = "crates/zcalld-plugin-api" }\n', encoding="utf-8", newline="\n"
         )
         (self.root / "src").mkdir()
-        (self.root / "src/main.rs").write_text("fn main() {}\n")
+        (self.root / "src/main.rs").write_text("fn main() {}\n", encoding="utf-8", newline="\n")
         for path, name in [
             ("crates/zcalld-plugin-api", "zcalld-plugin-api"),
             ("crates/zcalld-compat-client", "zcalld-compat-client"),
@@ -51,8 +51,8 @@ class ReleaseTransactionTests(unittest.TestCase):
                     '\n[dependencies]\n'
                     'zcalld-plugin-api = { path = "../../crates/zcalld-plugin-api", version = "=0.1.0" }\n'
                 )
-            (directory / "Cargo.toml").write_text(text)
-            (directory / "src/lib.rs").write_text("#![no_std]\npub fn marker() {}\n")
+            (directory / "Cargo.toml").write_text(text, encoding="utf-8", newline="\n")
+            (directory / "src/lib.rs").write_text("#![no_std]\npub fn marker() {}\n", encoding="utf-8", newline="\n")
         self.command("cargo", "generate-lockfile", "--offline")
         self.command("git", "-c", "init.defaultBranch=main", "init", "-q")
         for key, value in [
@@ -74,7 +74,7 @@ class ReleaseTransactionTests(unittest.TestCase):
         test_env["RUSTC_WORKSPACE_WRAPPER"] = ""
         test_env["GIT_TERMINAL_PROMPT"] = "0"
         result = subprocess.run(args, cwd=self.root, env=test_env, text=True,
-                                capture_output=True, timeout=30)
+                                capture_output=True, timeout=30, encoding="utf-8")
         if success:
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         else:
@@ -95,7 +95,7 @@ class ReleaseTransactionTests(unittest.TestCase):
         self.release("bump", "patch", "--commit", "--tag")
         self.release("verify-ref", "v0.1.1")
         for path in self.root.rglob("Cargo.toml"):
-            data = tomllib.loads(path.read_text())
+            data = tomllib.loads(path.read_text(encoding="utf-8"))
             if path == self.root / "Cargo.toml":
                 self.assertEqual(data["workspace"]["package"]["version"], "0.1.1")
             for dependency in data.get("dependencies", {}).values():
@@ -103,14 +103,14 @@ class ReleaseTransactionTests(unittest.TestCase):
                     self.assertEqual(dependency["version"], "=0.1.1")
         self.assertEqual(self.command("git", "cat-file", "-t", "v0.1.1").stdout.strip(), "tag")
         self.assertEqual(self.command("git", "status", "--porcelain").stdout, "")
-        self.assertIn("feat: fixture gateway", (self.root / "CHANGELOG.md").read_text())
+        self.assertIn("feat: fixture gateway", (self.root / "CHANGELOG.md").read_text(encoding="utf-8"))
 
     def test_lockfile_failure_restores_worktree_without_commit_or_tag(self):
         before = self.snapshot()
         head = self.command("git", "rev-parse", "HEAD").stdout
         with tempfile.TemporaryDirectory(prefix="zcalld-failing-cargo-") as temp:
-            executable = Path(temp) / "cargo"
-            executable.write_text("#!/bin/sh\nexit 27\n")
+            executable = Path(temp).resolve() / "cargo"
+            executable.write_text("#!/bin/sh\nexit 27\n", encoding="utf-8", newline="\n")
             executable.chmod(0o755)
             env = os.environ.copy()
             env["PATH"] = temp + os.pathsep + env["PATH"]
@@ -143,7 +143,7 @@ class ReleaseTransactionTests(unittest.TestCase):
 
     def test_verify_ref_rejects_a_checkout_after_the_tag(self):
         self.command("git", "tag", "v0.1.0")
-        (self.root / "change.txt").write_text("later commit\n")
+        (self.root / "change.txt").write_text("later commit\n", encoding="utf-8", newline="\n")
         self.command("git", "add", "change.txt")
         self.command("git", "commit", "-qm", "feat: later commit")
         self.release("verify-ref", "v0.1.0", success=False)
@@ -164,10 +164,10 @@ class ReleaseTransactionTests(unittest.TestCase):
                 ("core.hooksPath", "/dev/null"),
             ]:
                 self.command("git", "-C", str(seed), "config", key, value)
-            (seed / "PKGBUILD").write_text("# Existing package\n")
+            (seed / "PKGBUILD").write_text("# Existing package\n", encoding="utf-8", newline="\n")
             (seed / ".SRCINFO").write_text(
                 f"pkgbase = {name}\n\tpkgver = {existing_version}\n"
-                f"\tpkgrel = {existing_rel}\n\tepoch = {existing_epoch}\n\npkgname = {name}\n"
+                f"\tpkgrel = {existing_rel}\n\tepoch = {existing_epoch}\n\npkgname = {name}\n", encoding="utf-8", newline="\n"
             )
             self.command("git", "-C", str(seed), "add", ".")
             self.command("git", "-C", str(seed), "commit", "-qm", "Existing AUR version")
@@ -177,9 +177,9 @@ class ReleaseTransactionTests(unittest.TestCase):
                                         "rev-parse", "master").stdout.strip()
             target = incoming / name
             target.mkdir(parents=True)
-            (target / "PKGBUILD").write_text("# Generated package 0.1.0\n")
+            (target / "PKGBUILD").write_text("# Generated package 0.1.0\n", encoding="utf-8", newline="\n")
             (target / ".SRCINFO").write_text(
-                f"pkgbase = {name}\n\tpkgver = 0.1.0\n\tpkgrel = 1\n\npkgname = {name}\n"
+                f"pkgbase = {name}\n\tpkgver = 0.1.0\n\tpkgrel = 1\n\npkgname = {name}\n", encoding="utf-8", newline="\n"
             )
         env = os.environ.copy()
         env.update({

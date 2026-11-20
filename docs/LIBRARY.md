@@ -72,6 +72,11 @@ no script is run. Only Git's `.git` metadata is excluded. Internal symbolic link
 are materialized as ordinary files. Links outside the source, cycles, special
 files, and excessive trees are rejected.
 
+The `files` array returned by `skills show --json` contains relative resource
+names separated by `/` on every platform; pass those names unchanged to
+`skills read/write --file`. Absolute source and destination paths use the native
+filesystem format.
+
 ```sh
 zcalld library skills install review --dir ./skills/review --agents claude,codex
 zcalld library skills create notes --file ./SKILL.md --agents claude

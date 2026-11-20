@@ -21,7 +21,7 @@ class AccountRuntime(transport.TransportTests):
 
     def account(self, *args):
         result = subprocess.run([str(self.pluginctl), "--root", str(self.root), "accounts", *args, "--json"],
-                                capture_output=True, timeout=8, text=True)
+                                capture_output=True, timeout=8, text=True, encoding="utf-8")
         self.assertEqual(result.returncode, 0, result.stderr)
         return json.loads(result.stdout)
 
@@ -41,11 +41,11 @@ class AccountRuntime(transport.TransportTests):
             "const auth=await getAuth();if(!auth)throw new Error('missing fixture auth');"
             "const headers=new Headers(init.headers);headers.set('x-zcalld-account',auth.key);"
             "headers.set('x-zcalld-host-pid',String(process.pid));"
-            "return fetch(url,{...init,headers})}})}})")
+            "return fetch(url,{...init,headers})}})}})", encoding="utf-8", newline="\n")
         (self.root / "plugin-auth.json").write_text(json.dumps({
             "fixture": {"type": "api", "key": "synthetic-first"},
             "fixture#second": {"type": "api", "key": "synthetic-second"},
-        }))
+        }), encoding="utf-8", newline="\n")
         # Canonicalize the fixture before the first host starts.
         self.account("enable", "fixture")
         rows = self.account("list")["accounts"]
@@ -76,7 +76,7 @@ class AccountRuntime(transport.TransportTests):
         self.assertEqual(status, 200)
         self.assertEqual(self.last_headers()["x-zcalld-host-pid"], pid)
         self.account("remove", "fixture#second")
-        self.assertNotIn("fixture#second", json.loads((self.root / "plugin-auth.json").read_text()))
+        self.assertNotIn("fixture#second", json.loads((self.root / "plugin-auth.json").read_text(encoding="utf-8")))
         status, _ = self.call()
         self.assertEqual(status, 200)
         self.assertEqual(self.last_headers().get("x-zcalld-account"), "synthetic-first")

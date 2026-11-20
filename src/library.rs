@@ -473,6 +473,15 @@ fn relative(value: &str) -> Result<PathBuf, String> {
     }
     Ok(path)
 }
+// Public skill resource names use '/' on every platform. The tree reader has
+// already checked that these paths are relative UTF-8; filesystem paths and
+// private ownership records retain their native representation.
+fn resource_path(path: &Path) -> String {
+    path.components()
+        .map(|part| part.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
+}
 fn skills(context: &Context, state: &mut Value, args: &[String]) -> Result<(), String> {
     let action = args.first().map(String::as_str).unwrap_or("list");
     let mut entries = state.get("skills").as_array().to_vec();
@@ -531,7 +540,7 @@ fn skills(context: &Context, state: &mut Value, args: &[String]) -> Result<(), S
             plan.text(root.join(id).join("SKILL.md"), &control::read_text(Path::new(input))?)?;
             entries.push(object([("name", id.into()), ("agents", agents_arg(args)?.unwrap_or(Value::Array(Vec::new())))]));
         }
-        "show" => { let i = index.ok_or("unknown skill")?; let files = read_tree(&root.join(id), true)?; return control::emit(object([("name", id.into()), ("agents", entries[i].get("agents").clone()), ("enabled", (!off(&entries[i])).into()), ("files", Value::Array(files.keys().map(|p| p.to_string_lossy().into_owned().into()).collect()))])); }
+        "show" => { let i = index.ok_or("unknown skill")?; let files = read_tree(&root.join(id), true)?; return control::emit(object([("name", id.into()), ("agents", entries[i].get("agents").clone()), ("enabled", (!off(&entries[i])).into()), ("files", Value::Array(files.keys().map(|p| resource_path(p).into()).collect()))])); }
         "read" | "write" => {
             index.ok_or("unknown skill")?; let file = relative(control::option(args, "--file")?.unwrap_or("SKILL.md"))?; let path = root.join(id).join(file);
             if action == "read" { return control::emit(object([("text", control::read_text(&path)?.into())])); }
@@ -2180,6 +2189,20 @@ fn sha256(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn skill_resource_names_use_portable_separators() {
+        let path = Path::new("references").join("nested").join("说明.md");
+        let resource = resource_path(&path);
+        assert_eq!(resource, "references/nested/说明.md");
+        assert_eq!(relative(&resource).unwrap(), path);
+        // On Unix a literal backslash is a filename character, not a separator.
+        #[cfg(unix)]
+        assert_eq!(
+            resource_path(Path::new(r"literal\name.md")),
+            r"literal\name.md"
+        );
+    }
 
     #[test]
     fn sha256_known_vectors() {

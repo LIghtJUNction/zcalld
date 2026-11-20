@@ -33,7 +33,7 @@ class LibraryTests(unittest.TestCase):
     def cli(self, *args, ok=True):
         result = subprocess.run([str(BINARY), "library", *map(str, args),
                                  "--config", str(self.config), "--json"],
-                                env=self.env, capture_output=True, text=True, timeout=20)
+                                env=self.env, capture_output=True, text=True, timeout=20, encoding="utf-8")
         if ok:
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         else:
@@ -47,7 +47,7 @@ class LibraryTests(unittest.TestCase):
         return path
 
     def state(self):
-        return json.loads((self.directory / "library.json").read_text())
+        return json.loads((self.directory / "library.json").read_text(encoding="utf-8"))
 
     def mcp(self, name="fixture", **kwargs):
         entry = {"name": name, "transport": "stdio", "command": "echo", "args": ["hi"], **kwargs}
@@ -74,15 +74,15 @@ class LibraryTests(unittest.TestCase):
         self.assertNotIn(secret, json.dumps(self.cli("mcp", "show", "fixture")))
         exported = self.home / "private-entry.json"
         self.cli("mcp", "show", "fixture", "--file", exported)
-        self.assertEqual(json.loads(exported.read_text())["env"]["TOKEN"], secret)
+        self.assertEqual(json.loads(exported.read_text(encoding="utf-8"))["env"]["TOKEN"], secret)
         self.cli("apply", "--agent", "claude")
         self.assertFalse((self.home / ".claude.json").exists())
         self.cli("mcp", "assign", "fixture", "--agents", "claude,gemini")
         self.cli("apply", "--agent", "claude")
-        self.assertEqual(json.loads((self.home / ".claude.json").read_text())["mcpServers"]["fixture"]["type"], "stdio")
+        self.assertEqual(json.loads((self.home / ".claude.json").read_text(encoding="utf-8"))["mcpServers"]["fixture"]["type"], "stdio")
         self.cli("mcp", "disable", "fixture")
         self.cli("mcp", "apply", "--agent", "claude")
-        self.assertEqual(json.loads((self.home / ".claude.json").read_text())["mcpServers"], {})
+        self.assertEqual(json.loads((self.home / ".claude.json").read_text(encoding="utf-8"))["mcpServers"], {})
         self.cli("mcp", "enable", "fixture")
         self.assertEqual(self.state()["mcp"][0]["note"], "retain metadata")
         self.cli("mcp", "remove", "fixture")
@@ -94,7 +94,7 @@ class LibraryTests(unittest.TestCase):
         self.cli("apply", "--agent", "gemini")
         self.cli("mcp", "remove", "fixture")
         self.cli("apply", "--agent", "gemini")
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")
         for marker in ['// keep this comment', '"existing":{"command":"true"}', '9007199254740993', '"other":[1,2,3]']:
             self.assertIn(marker, text)
         self.assertNotIn('"fixture"', text)
@@ -119,7 +119,7 @@ class LibraryTests(unittest.TestCase):
         for agent, (file, key, url_key) in matrix.items():
             with self.subTest(agent=agent):
                 self.cli("apply", "--agent", agent)
-                item = json.loads((self.home / file).read_text())[key]["fixture"]
+                item = json.loads((self.home / file).read_text(encoding="utf-8"))[key]["fixture"]
                 self.assertEqual(item[url_key], "https://example.invalid/mcp")
                 self.assertEqual(item["headers"], {"X-Fixture": "literal"})
                 self.assertNotIn("transport", item)
@@ -132,18 +132,18 @@ class LibraryTests(unittest.TestCase):
         self.mcp(transport="http", url="https://example.invalid/mcp", startupTimeout=45,
                  headers={"Authorization": "Bearer ${API_TOKEN}", "X-Other": "${HEADER_TOKEN}"})
         self.cli("apply", "--agent", "codex")
-        current = tomllib.loads(codex.read_text())
+        current = tomllib.loads(codex.read_text(encoding="utf-8"))
         item = current["mcp_servers"]["fixture"]
         self.assertEqual(item["bearer_token_env_var"], "API_TOKEN")
         self.assertEqual(item["env_http_headers"]["X-Other"], "HEADER_TOKEN")
         self.assertEqual(item["startup_timeout_sec"], 45)
         self.assertEqual(current["model"], "native-model")
         self.cli("apply", "--agent", "grok")
-        self.assertEqual(tomllib.loads(grok.read_text())["mcp_servers"]["fixture"]["headers"]["Authorization"], "Bearer ${API_TOKEN}")
+        self.assertEqual(tomllib.loads(grok.read_text(encoding="utf-8"))["mcp_servers"]["fixture"]["headers"]["Authorization"], "Bearer ${API_TOKEN}")
         self.cli("mcp", "disable", "fixture")
         self.cli("apply", "--agent", "codex")
-        self.assertNotIn("mcp_servers", tomllib.loads(codex.read_text()))
-        self.assertTrue(codex.read_text().startswith(source))
+        self.assertNotIn("mcp_servers", tomllib.loads(codex.read_text(encoding="utf-8")))
+        self.assertTrue(codex.read_text(encoding="utf-8").startswith(source))
 
     def test_unowned_collisions_and_explicit_equal_adoption(self):
         self.mcp()
@@ -151,45 +151,45 @@ class LibraryTests(unittest.TestCase):
         original = path.read_bytes()
         self.cli("apply", "--agent", "gemini", ok=False)
         self.assertEqual(path.read_bytes(), original)
-        path.write_text('{"mcpServers":{"fixture":{"command":"echo","args":["hi"]}},"keep":1}')
+        path.write_text('{"mcpServers":{"fixture":{"command":"echo","args":["hi"]}},"keep":1}', encoding="utf-8", newline="\n")
         result = self.cli("apply", "--agent", "gemini")
         self.assertEqual(result["unowned_equal_servers"], 1)
         self.cli("apply", "--agent", "gemini", "--adopt-existing")
         self.cli("revert", "--agent", "gemini")
-        self.assertEqual(json.loads(path.read_text()), {"mcpServers": {}, "keep": 1})
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8")), {"mcpServers": {}, "keep": 1})
 
     def test_external_mcp_edits_stop_whole_apply(self):
         self.mcp(agents=["claude"])
         self.seed_instructions()
         self.cli("apply", "--agent", "claude")
         mcp = self.home / ".claude.json"
-        data = json.loads(mcp.read_text())
+        data = json.loads(mcp.read_text(encoding="utf-8"))
         data["mcpServers"]["fixture"]["command"] = "manual"
-        mcp.write_text(json.dumps(data))
+        mcp.write_text(json.dumps(data), encoding="utf-8", newline="\n")
         before = (self.home / ".claude/CLAUDE.md").read_bytes()
         self.write("prompt.md", "replacement shared prompt")
         self.cli("instructions", "set", "default", "--file", self.home / "prompt.md")
         self.cli("apply", "--agent", "claude", ok=False)
         self.assertEqual((self.home / ".claude/CLAUDE.md").read_bytes(), before)
-        self.assertEqual(json.loads(mcp.read_text())["mcpServers"]["fixture"]["command"], "manual")
+        self.assertEqual(json.loads(mcp.read_text(encoding="utf-8"))["mcpServers"]["fixture"]["command"], "manual")
 
     def test_opencode_v2_layout_and_env_reference_conversion(self):
         path = self.write(".config/opencode/opencode.jsonc", '{// keep\n"mcp":{"servers":{"other":{"type":"remote","url":"https://other.invalid"}}},"theme":"system"}')
         self.mcp(env={"TOKEN": "${TOKEN}"})
         self.cli("apply", "--agent", "opencode")
-        data = json.loads(path.read_text().replace("// keep", ""))
+        data = json.loads(path.read_text(encoding="utf-8").replace("// keep", ""))
         item = data["mcp"]["servers"]["fixture"]
         self.assertEqual(item["command"], ["echo", "hi"])
         self.assertEqual(item["environment"], {"TOKEN": "{env:TOKEN}"})
         self.assertNotIn("enabled", item)
         self.cli("revert", "--agent", "opencode")
-        self.assertIn('"other":{"type":"remote","url":"https://other.invalid"}', path.read_text())
+        self.assertIn('"other":{"type":"remote","url":"https://other.invalid"}', path.read_text(encoding="utf-8"))
 
     def test_opencode_server_named_servers_is_not_a_v2_container(self):
         path = self.write(".config/opencode/opencode.json", '{"mcp":{"servers":{"command":["manual-tool"]}}}')
         self.mcp()
         self.cli("apply", "--agent", "opencode")
-        data = json.loads(path.read_text())["mcp"]
+        data = json.loads(path.read_text(encoding="utf-8"))["mcp"]
         self.assertEqual(data["servers"], {"command": ["manual-tool"]})
         self.assertEqual(data["fixture"]["command"], ["echo", "hi"])
 
@@ -203,23 +203,23 @@ class LibraryTests(unittest.TestCase):
         self.assertEqual(original.read_bytes(), b"User before\r\n")
         self.assertFalse((self.directory / "library-managed.json").exists())
         self.cli("apply", "--agent", "claude")
-        self.assertIn("shared text\n\nClaude-only additions", original.read_text())
+        self.assertIn("shared text\n\nClaude-only additions", original.read_text(encoding="utf-8"))
         self.cli("apply", "--agent", "codex")
-        self.assertNotIn("Claude-only", (self.home / ".codex/AGENTS.md").read_text())
+        self.assertNotIn("Claude-only", (self.home / ".codex/AGENTS.md").read_text(encoding="utf-8"))
         second = self.write("second.md", "second set")
         self.cli("instructions", "create", "second", "--file", second, "--name", "Second")
         self.cli("instructions", "rename", "second", "--name", "Renamed")
         self.cli("instructions", "use", "second")
         self.cli("instructions", "apply", "--agent", "claude")
-        self.assertIn("second set", original.read_text())
-        self.assertNotIn("shared text", original.read_text())
+        self.assertIn("second set", original.read_text(encoding="utf-8"))
+        self.assertNotIn("shared text", original.read_text(encoding="utf-8"))
         with original.open("ab") as stream:
             stream.write(b"User after\r\n")
         self.cli("instructions", "disable", "--agent", "claude")
         self.cli("instructions", "apply", "--agent", "claude")
         self.assertTrue(original.read_bytes().startswith(b"User before\r\n"))
         self.assertTrue(original.read_bytes().endswith(b"User after\r\n"))
-        self.assertNotIn("zcalld:library", original.read_text())
+        self.assertNotIn("zcalld:library", original.read_text(encoding="utf-8"))
         self.cli("instructions", "remove", "second")
         self.assertEqual(self.cli("instructions", "list")["active"], "default")
         self.cli("instructions", "remove", "default", ok=False)
@@ -233,13 +233,13 @@ class LibraryTests(unittest.TestCase):
         target = self.home / ".claude/CLAUDE.md"
         target.write_bytes(target.read_bytes().replace(b"shared text", b"manual edited block"))
         self.cli("revert", "--agent", "claude", ok=False)
-        self.assertIn("manual edited block", target.read_text())
+        self.assertIn("manual edited block", target.read_text(encoding="utf-8"))
         source = self.write("linked.md", "linked prompt")
         self.cli("instructions", "link", "linked", "--file", source)
         self.cli("instructions", "use", "linked")
         source.unlink()
         self.cli("apply", "--agent", "claude", ok=False)
-        self.assertIn("manual edited block", target.read_text())
+        self.assertIn("manual edited block", target.read_text(encoding="utf-8"))
 
     def test_skill_assets_execution_bits_update_and_disable(self):
         self.seed_skill()
@@ -251,12 +251,12 @@ class LibraryTests(unittest.TestCase):
         self.write("source/references/detail.md", "reference material")
         self.cli("skills", "update", "fixture")
         self.cli("skills", "apply", "--agent", "claude")
-        self.assertEqual((target / "references/detail.md").read_text(), "reference material")
+        self.assertEqual((target / "references/detail.md").read_text(encoding="utf-8"), "reference material")
         self.write(".claude/skills/manual/SKILL.md", "user skill")
         self.cli("skills", "disable", "fixture")
         self.cli("skills", "apply", "--agent", "claude")
         self.assertFalse((target / "SKILL.md").exists())
-        self.assertEqual((self.home / ".claude/skills/manual/SKILL.md").read_text(), "user skill")
+        self.assertEqual((self.home / ".claude/skills/manual/SKILL.md").read_text(encoding="utf-8"), "user skill")
         self.cli("skills", "enable", "fixture")
         self.cli("skills", "apply", "--agent", "claude")
         self.cli("skills", "remove", "fixture")
@@ -277,13 +277,27 @@ class LibraryTests(unittest.TestCase):
         self.cli("skills", "write", "new", "--file", "../escape", "--input", source, ok=False)
         self.assertFalse((self.directory / "library/skills/escape").exists())
 
+    def test_skill_resource_names_are_portable_and_roundtrip(self):
+        self.seed_skill()
+        resource = "references/nested/说明.md"
+        source = self.write("source/" + resource, "resource body\r\n")
+        self.cli("skills", "update", "fixture")
+        self.assertIn(resource, self.cli("skills", "show", "fixture")["files"])
+        read = self.cli("skills", "read", "fixture", "--file", resource)
+        self.assertEqual(read["text"].encode("utf-8"), source.read_bytes())
+        replacement = self.write("replacement.md", "replacement body\r\n")
+        self.cli("skills", "write", "fixture", "--file", resource, "--input", replacement)
+        self.cli("skills", "apply", "--agent", "claude")
+        target = self.home / ".claude/skills/fixture" / resource
+        self.assertEqual(target.read_bytes(), replacement.read_bytes())
+
     def test_skill_external_changes_never_get_overwritten_or_removed(self):
         self.seed_skill()
         self.cli("apply", "--agent", "claude")
         target = self.write(".claude/skills/fixture/user-note.md", "added by user")
         self.cli("skills", "disable", "fixture")
         self.cli("apply", "--agent", "claude", ok=False)
-        self.assertEqual(target.read_text(), "added by user")
+        self.assertEqual(target.read_text(encoding="utf-8"), "added by user")
         self.assertTrue((target.parent / "SKILL.md").exists())
 
     @unittest.skipIf(os.name == "nt", "symlinks need Windows developer privileges")
@@ -322,7 +336,7 @@ class LibraryTests(unittest.TestCase):
         metadata = self.home / "export.json"
         assets = self.home / "export-assets"
         self.cli("export", "--file", metadata, "--assets", assets)
-        self.assertTrue(json.loads(metadata.read_text())["future-setting"]["preserve"])
+        self.assertTrue(json.loads(metadata.read_text(encoding="utf-8"))["future-setting"]["preserve"])
         self.assertEqual((assets / "instructions.md").read_bytes(), b"shared text\n")
         self.assertEqual((assets / "skills/fixture/data.bin").read_bytes(), bytes(range(256)))
         self.assertEqual(self.cli("list")["skills"], 1)
@@ -331,9 +345,9 @@ class LibraryTests(unittest.TestCase):
 
     def test_invalid_state_and_duplicate_entries_are_not_reset(self):
         path = self.directory / "library.json"
-        path.write_text("{ invalid")
+        path.write_text("{ invalid", encoding="utf-8", newline="\n")
         self.cli("list", ok=False)
-        self.assertEqual(path.read_text(), "{ invalid")
+        self.assertEqual(path.read_text(encoding="utf-8"), "{ invalid")
         path.unlink()
         bad = self.write("duplicate.json", json.dumps({"mcp": [
             {"name": "same", "command": "echo"}, {"name": "same", "command": "true"}]}))
@@ -345,7 +359,7 @@ class LibraryTests(unittest.TestCase):
         self.mcp(transport="http", url="https://example.invalid/mcp")
         self.cli("apply", "--agent", "pi")
         self.assertFalse((self.home / ".pi/agent/mcp.json").exists())
-        item = json.loads((self.home / ".pi/agent/mcp-adapter.json").read_text())["mcpServers"]["fixture"]
+        item = json.loads((self.home / ".pi/agent/mcp-adapter.json").read_text(encoding="utf-8"))["mcpServers"]["fixture"]
         self.assertEqual(item["httpTransport"], "streamable-http")
         self.write(".pi/agent/settings.json", '{"packages":["npm:pi-mcp-adapter@5.1.0","npm:pi-mcp-extension"]}')
         self.cli("apply", "--agent", "pi", ok=False)

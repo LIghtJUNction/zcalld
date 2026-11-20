@@ -110,7 +110,7 @@ class TransportTests(unittest.TestCase):
 
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory(prefix="zcalld-transport-")
-        self.root = Path(self.directory.name)
+        self.root = Path(self.directory.name).resolve()
         self.socket_path = self.root / "run" / "gateway.sock"
         self.config = self.root / "config.conf"
         self.processes = []
@@ -137,7 +137,7 @@ class TransportTests(unittest.TestCase):
             f"unix_socket={self.socket_path if unix else 'none'}\nworkers=2\nqueue=4\n"
             f"[provider mock]\nbase_url=http://127.0.0.1:{self.upstream.server_port}/v1\nprotocol=chat\n"
             "[route test]\nprovider=mock\nmodel=upstream-test\n" + extra,
-            encoding="utf-8",
+            encoding="utf-8", newline="\n",
         )
 
     def start(self, ready=True, unix=False):
@@ -182,7 +182,7 @@ class TransportTests(unittest.TestCase):
 
     def add_plugin(self, name, library, config):
         path = self.root / f"{name}.json"
-        path.write_text(json.dumps(config))
+        path.write_text(json.dumps(config), encoding="utf-8", newline="\n")
         with self.config.open("a") as file:
             file.write(f"\n[plugin {name}]\npath={library}\nconfig_file={path}\n")
 
@@ -191,7 +191,7 @@ class TransportTests(unittest.TestCase):
             self.skipTest("requires --redact-plugin and --privacy-worker")
         self.write_config()
         settings = self.root / "privacy-settings.json"
-        settings.write_text(json.dumps({"redact": True, "redactPersonal": True, "redactModelOff": True}))
+        settings.write_text(json.dumps({"redact": True, "redactPersonal": True, "redactModelOff": True}), encoding="utf-8", newline="\n")
         key = self.root / "redact.key"
         key.write_bytes(b"K" * 32)
         if os.name == "posix":
@@ -201,7 +201,7 @@ class TransportTests(unittest.TestCase):
             if os.name != "posix":
                 self.skipTest("runtime worker failure fixture uses a POSIX executable")
             worker = self.root / "failed-worker"
-            worker.write_text("#!/bin/sh\nexit 1\n")
+            worker.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8", newline="\n")
             worker.chmod(0o700)
         self.add_plugin("redact", self.redact_plugin, {"worker": str(worker), "settings": str(settings), "key": str(key)})
 
@@ -209,13 +209,13 @@ class TransportTests(unittest.TestCase):
         if not all((self.community_plugin, self.bun, self.community_host, self.community_pi)):
             self.skipTest("requires community plugin, Bun, host and pi paths")
         self.write_config()
-        self.config.write_text(self.config.read_text().replace("protocol=chat", "protocol=chat\nplugin=fixture\nplugin_npm=@ai-sdk/openai-compatible"))
+        self.config.write_text(self.config.read_text(encoding="utf-8").replace("protocol=chat", "protocol=chat\nplugin=fixture\nplugin_npm=@ai-sdk/openai-compatible"), encoding="utf-8", newline="\n")
         provider = self.root / "provider.mjs"
-        provider.write_text("export default async()=>({auth:{provider:'fixture',methods:[{type:'api',label:'Fixture'}],loader:async()=>({apiKey:'fixture-upstream',fetch:async(url,init)=>{const headers=new Headers(init.headers);headers.set('x-zcalld-fixture','community');return fetch(url,{...init,headers})}})}})")
+        provider.write_text("export default async()=>({auth:{provider:'fixture',methods:[{type:'api',label:'Fixture'}],loader:async()=>({apiKey:'fixture-upstream',fetch:async(url,init)=>{const headers=new Headers(init.headers);headers.set('x-zcalld-fixture','community');return fetch(url,{...init,headers})}})}})", encoding="utf-8", newline="\n")
         registry = self.root / "registry.json"
-        registry.write_text(json.dumps({"version": 1, "plugins": [{"name": "fixture", "source": "fixture", "path": str(provider), "kind": "community", "enabled": True}], "config": {"provider": {"fixture": {"name": "Fixture", "npm": "@ai-sdk/openai-compatible", "models": {"upstream-test": {"name": "Model"}}}}}}))
+        registry.write_text(json.dumps({"version": 1, "plugins": [{"name": "fixture", "source": "fixture", "path": str(provider), "kind": "community", "enabled": True}], "config": {"provider": {"fixture": {"name": "Fixture", "npm": "@ai-sdk/openai-compatible", "models": {"upstream-test": {"name": "Model"}}}}}}), encoding="utf-8", newline="\n")
         auth = self.root / "plugin-auth.json"
-        auth.write_text(json.dumps({"fixture": {"type": "api", "key": "fixture-key"}}))
+        auth.write_text(json.dumps({"fixture": {"type": "api", "key": "fixture-key"}}), encoding="utf-8", newline="\n")
         if os.name == "posix":
             auth.chmod(0o600)
         self.add_plugin("community", self.community_plugin, {"bun": str(self.bun), "host": str(self.community_host), "pi": str(self.community_pi), "registry": str(registry), "auth_path": str(auth)})
@@ -275,15 +275,15 @@ class TransportTests(unittest.TestCase):
             self.skipTest("requires the optional builtin provider adapter source")
         origin = f"http://127.0.0.1:{self.upstream.server_port}"
         (self.root / "provider.mjs").write_text(
-            f"import {{createCodex}} from {json.dumps(str(codex))};export default async()=>createCodex({{baseURL:{json.dumps(origin)},tokenURL:{json.dumps(origin + '/token')},testMode:true}});")
-        self.config.write_text(self.config.read_text().replace(
+            f"import {{createCodex}} from {json.dumps(str(codex))};export default async()=>createCodex({{baseURL:{json.dumps(origin)},tokenURL:{json.dumps(origin + '/token')},testMode:true}});", encoding="utf-8", newline="\n")
+        self.config.write_text(self.config.read_text(encoding="utf-8").replace(
             "protocol=chat\nplugin=fixture\nplugin_npm=@ai-sdk/openai-compatible",
-            "protocol=responses\nplugin=builtin:codex\nplugin_account=builtin:codex#fixture\nplugin_npm=@ai-sdk/openai"))
-        registry = json.loads((self.root / "registry.json").read_text())
+            "protocol=responses\nplugin=builtin:codex\nplugin_account=builtin:codex#fixture\nplugin_npm=@ai-sdk/openai"), encoding="utf-8", newline="\n")
+        registry = json.loads((self.root / "registry.json").read_text(encoding="utf-8"))
         registry["config"] = {"provider": {"builtin:codex": {"npm": "@ai-sdk/openai", "models": {"upstream-test": {"name": "Fixture"}}}}}
-        (self.root / "registry.json").write_text(json.dumps(registry))
+        (self.root / "registry.json").write_text(json.dumps(registry), encoding="utf-8", newline="\n")
         auth = self.root / "plugin-auth.json"
-        auth.write_text(json.dumps({"builtin:codex#fixture": {"type": "oauth", "access": "fixture-expired-access", "refresh": "fixture-old-refresh", "expires": 1}}))
+        auth.write_text(json.dumps({"builtin:codex#fixture": {"type": "oauth", "access": "fixture-expired-access", "refresh": "fixture-old-refresh", "expires": 1}}), encoding="utf-8", newline="\n")
         self.upstream.mode = "refresh"
         process = self.start()
         connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
@@ -295,7 +295,7 @@ class TransportTests(unittest.TestCase):
             self.assertIsNone(process.poll(), "gateway killed its refreshing host before the token was saved")
             self.upstream.refresh_release.set()
             self.assertEqual(process.wait(timeout=4), 0)
-            saved = json.loads(auth.read_text())["builtin:codex#fixture"]
+            saved = json.loads(auth.read_text(encoding="utf-8"))["builtin:codex#fixture"]
             self.assertEqual(saved["refresh"], "fixture-rotated-refresh")
             self.assertGreater(saved["expires"], time.time() * 1000)
             self.assertEqual(len(self.upstream.requests), 1, "cancelled generation was replayed after refresh")
@@ -315,16 +315,16 @@ class TransportTests(unittest.TestCase):
     def test_explicit_loopback_trust_still_rejects_browser_origin_and_host(self):
         self.write_config()
         credentials = self.root / "credentials"
-        credentials.write_text('ZCALLD_TRANSPORT_TOKEN="test-local-token"\n')
+        credentials.write_text('ZCALLD_TRANSPORT_TOKEN="test-local-token"\n', encoding="utf-8", newline="\n")
         if os.name == "posix":
             credentials.chmod(0o600)
-        text = self.config.read_text().replace("[server]\n", "[server]\ntoken_env=ZCALLD_TRANSPORT_TOKEN\ntrust_loopback=false\n")
-        self.config.write_text(text)
+        text = self.config.read_text(encoding="utf-8").replace("[server]\n", "[server]\ntoken_env=ZCALLD_TRANSPORT_TOKEN\ntrust_loopback=false\n")
+        self.config.write_text(text, encoding="utf-8", newline="\n")
         process = self.start()
         connection = lambda: http.client.HTTPConnection("127.0.0.1", self.port, timeout=2)
         self.assertEqual(request(connection(), "/v1/models")[0], 401)
         self.stop(process)
-        self.config.write_text(text.replace("trust_loopback=false", "trust_loopback=true"))
+        self.config.write_text(text.replace("trust_loopback=false", "trust_loopback=true"), encoding="utf-8", newline="\n")
         self.start()
         self.assertEqual(request(connection(), "/v1/models", headers={"Authorization": "Bearer old-agent-token"})[0], 200)
         self.assertEqual(request(connection(), "/v1/models", headers={"Origin": "http://evil.example"})[0], 403)
@@ -336,11 +336,11 @@ class TransportTests(unittest.TestCase):
         keys.write_text(json.dumps([
             {"id": "local", "name": "Local fixture", "lan": False, "secret": "fixture-caller-local"},
             {"id": "lan", "name": "LAN fixture", "lan": True, "secret": "fixture-caller-lan"},
-        ]))
+        ]), encoding="utf-8", newline="\n")
         if os.name == "posix":
             keys.chmod(0o600)
-        text = self.config.read_text().replace("[server]\n", "[server]\ncaller_keys_file=caller-keys.json\n")
-        self.config.write_text(text)
+        text = self.config.read_text(encoding="utf-8").replace("[server]\n", "[server]\ncaller_keys_file=caller-keys.json\n")
+        self.config.write_text(text, encoding="utf-8", newline="\n")
         process = self.start()
         connection = lambda: http.client.HTTPConnection("127.0.0.1", self.port, timeout=3)
         for key, status in ((None, 401), ("fixture-caller-local", 200), ("fixture-caller-lan", 200), ("fixture-caller-wrong", 401)):
@@ -352,17 +352,17 @@ class TransportTests(unittest.TestCase):
         self.assertNotIn("authorization", forwarded)
         self.assertNotIn("x-api-key", forwarded)
         self.stop(process)
-        keys.write_text("[]")
+        keys.write_text("[]", encoding="utf-8", newline="\n")
         self.start()
         self.assertEqual(request(connection(), "/v1/models")[0], 401, "an explicitly empty key file must not open the gateway")
 
     def test_nonloopback_listener_requires_a_lan_enabled_credential(self):
         self.write_config()
         keys = self.root / "caller-keys.json"
-        keys.write_text(json.dumps([{"id": "local", "secret": "fixture-local", "lan": False}]))
+        keys.write_text(json.dumps([{"id": "local", "secret": "fixture-local", "lan": False}]), encoding="utf-8", newline="\n")
         if os.name == "posix":
             keys.chmod(0o600)
-        self.config.write_text(self.config.read_text().replace("[server]\n", "[server]\ncaller_keys_file=caller-keys.json\n").replace("listen=127.0.0.1:", "listen=0.0.0.0:"))
+        self.config.write_text(self.config.read_text(encoding="utf-8").replace("[server]\n", "[server]\ncaller_keys_file=caller-keys.json\n").replace("listen=127.0.0.1:", "listen=0.0.0.0:"), encoding="utf-8", newline="\n")
         process = self.start(ready=False)
         self.assertNotEqual(process.wait(timeout=3), 0)
 
@@ -381,8 +381,8 @@ class TransportTests(unittest.TestCase):
         status, _ = request(http.client.HTTPConnection("127.0.0.1", self.port, timeout=2))
         self.assertEqual(status, 200)
         # Give the CLI an unreachable TCP address; health must still use Unix.
-        text = self.config.read_text()
-        self.config.write_text(text.replace(f"listen=127.0.0.1:{self.port}", "listen=127.0.0.1:1"))
+        text = self.config.read_text(encoding="utf-8")
+        self.config.write_text(text.replace(f"listen=127.0.0.1:{self.port}", "listen=127.0.0.1:1"), encoding="utf-8", newline="\n")
         self.assertEqual(self.health_cli().returncode, 0)
 
     @unittest.skipUnless(os.name == "posix", "Unix domain sockets")
