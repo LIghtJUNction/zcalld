@@ -78,10 +78,16 @@ def main():
         shutil.copyfile(here / "Info.plist", bundle / "Info.plist")
     elif system == "Windows":
         binary = out / "zcalld-desktop-notify.exe"
+        # Windows CreateProcess does not search env["PATH"] for argv[0].
+        # Resolve against the discovered toolchain environment before spawning.
+        compiler_env = msvc_environment()
+        compiler = shutil.which("cl", path=compiler_env.get("PATH", ""))
+        if compiler is None:
+            raise SystemExit("installed MSVC compiler is unavailable")
         # The Windows SDK provides C++/WinRT; no downloaded SDK/package is used.
-        subprocess.run(["cl", "/nologo", "/std:c++20", "/EHsc", "/O2", "/MT", "/W4", "/WX", "/DUNICODE", "/D_UNICODE",
+        subprocess.run([compiler, "/nologo", "/std:c++20", "/EHsc", "/O2", "/MT", "/W4", "/WX", "/DUNICODE", "/D_UNICODE",
                         str(here / "windows-notify.cpp"), "/Fe:" + str(binary), "/Fo:" + str(out / "notify.obj"),
-                        "/link", "windowsapp.lib", "runtimeobject.lib", "ole32.lib", "shell32.lib", "propsys.lib"], check=True, cwd=out, env=msvc_environment())
+                        "/link", "windowsapp.lib", "runtimeobject.lib", "ole32.lib", "shell32.lib", "propsys.lib"], check=True, cwd=out, env=compiler_env)
     else:
         print(json.dumps({"platform": system, "helper_required": False}))
         return
