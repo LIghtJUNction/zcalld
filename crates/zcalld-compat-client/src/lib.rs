@@ -83,6 +83,16 @@ impl Host {
         if let Some(cwd) = cwd {
             cmd.current_dir(cwd);
         }
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            // IPC workers do not own the console. Ctrl+Break must reach the
+            // gateway first so it can cancel calls and drain pending auth writes
+            // through stdin EOF, instead of terminating the worker mid-write.
+            cmd.creation_flags(CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW);
+        }
         let mut child = cmd
             .spawn()
             .map_err(|_| "optional compatibility worker is unavailable")?;
