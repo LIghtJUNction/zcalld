@@ -37,6 +37,25 @@ impl Stream {
         }
     }
 
+    /// Kernel-derived connection metadata for optional routing. Caller headers
+    /// cannot supply or replace it. Unsupported peer identity stays unknown.
+    pub fn routing_peer(&self) -> String {
+        match self {
+            Self::Tcp(socket) => match (socket.local_addr(), socket.peer_addr()) {
+                (Ok(local), Ok(remote)) => format!(
+                    "{{\"kind\":\"tcp\",\"local\":{},\"remote\":{}}}",
+                    crate::http::quote(&local.to_string()),
+                    crate::http::quote(&remote.to_string())
+                ),
+                _ => "{}".into(),
+            },
+            #[cfg(target_os = "linux")]
+            Self::Unix(socket) => linux_unix_peer(socket),
+            #[cfg(all(unix, not(target_os = "linux")))]
+            Self::Unix(_) => "{}".into(),
+        }
+    }
+
     pub fn requires_loopback_host(&self) -> bool {
         match self {
             Self::Tcp(socket) => socket.local_addr().is_ok_and(|a| a.ip().is_loopback()),
@@ -60,6 +79,60 @@ impl Stream {
             #[cfg(unix)]
             Self::Unix(_) => true,
         }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn linux_unix_peer(socket: &std::os::unix::net::UnixStream) -> String {
+    use std::os::fd::AsRawFd;
+    #[repr(C)]
+    struct Credentials {
+        pid: i32,
+        uid: u32,
+        gid: u32,
+    }
+    unsafe extern "C" {
+        fn getsockopt(
+            fd: i32,
+            level: i32,
+            option: i32,
+            value: *mut std::ffi::c_void,
+            length: *mut u32,
+        ) -> i32;
+    }
+    let mut credentials = Credentials {
+        pid: 0,
+        uid: 0,
+        gid: 0,
+    };
+    let mut length = std::mem::size_of::<Credentials>() as u32;
+    // Linux SOL_SOCKET/SO_PEERCRED. The kernel fills the fixed-layout ucred.
+    let result = unsafe {
+        getsockopt(
+            socket.as_raw_fd(),
+            1,
+            17,
+            (&mut credentials as *mut Credentials).cast(),
+            &mut length,
+        )
+    };
+    if result != 0 || length as usize != std::mem::size_of::<Credentials>() || credentials.pid <= 0
+    {
+        return "{}".into();
+    }
+    let stat =
+        std::fs::read_to_string(format!("/proc/{}/stat", credentials.pid)).unwrap_or_default();
+    let start = stat
+        .rsplit_once(") ")
+        .and_then(|(_, fields)| fields.split_whitespace().nth(19));
+    match start.filter(|value| !value.is_empty() && value.bytes().all(|c| c.is_ascii_digit())) {
+        Some(start) => format!(
+            "{{\"kind\":\"unix\",\"pid\":{},\"uid\":{},\"start\":{}}}",
+            credentials.pid,
+            credentials.uid,
+            crate::http::quote(start)
+        ),
+        None => "{}".into(),
     }
 }
 

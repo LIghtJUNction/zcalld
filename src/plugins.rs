@@ -6,6 +6,7 @@ use zcalld_plugin_api::{
     ProviderPluginApi, ProviderPluginProxy, ResponsePluginApi, ResponsePluginProxy, RetryPluginApi,
     RetryPluginProxy, protocol, status,
 };
+use zcalld_plugin_api::{HttpPluginApi, HttpPluginProxy};
 use zplugin::{Error, Plugin, UnloadPolicy};
 
 const MAX_PLUGINS: usize = 32;
@@ -34,6 +35,7 @@ struct Entry {
     response: Option<ResponsePluginProxy<'static>>,
     provider: Option<ProviderPluginProxy<'static>>,
     retry: Option<RetryPluginProxy<'static>>,
+    http: Option<HttpPluginProxy<'static>>,
 }
 
 pub struct RetryPlan {
@@ -128,6 +130,17 @@ impl Plugins {
                 Err(Error::InterfaceNotFound) => None,
                 Err(e) => return Err(hook_error(&path, "retry create", e)),
             };
+            let http = match Plugin::create_owned(&library, HttpPluginApi::SPEC) {
+                Ok(instance) => {
+                    let mut p = HttpPluginApi::wrap(instance)
+                        .map_err(|e| hook_error(&path, "HTTP bind", e))?;
+                    p.configure(&spec.config)
+                        .map_err(|e| hook_error(&path, "HTTP configure", e))?;
+                    Some(p)
+                }
+                Err(Error::InterfaceNotFound) => None,
+                Err(e) => return Err(hook_error(&path, "HTTP create", e)),
+            };
             if provider.is_some() && entries.iter().any(|e: &Entry| e.provider.is_some()) {
                 return Err("only one community provider host may be configured".into());
             }
@@ -138,6 +151,7 @@ impl Plugins {
                 response,
                 provider,
                 retry,
+                http,
             });
         }
         Ok(Self { entries })
@@ -183,6 +197,46 @@ impl Plugins {
             changed = Some(output);
         }
         Ok(changed)
+    }
+
+    /// Resolve an optional endpoint before allocating any HTTP metadata.
+    pub fn http_handler(&mut self, path: &str) -> Result<Option<usize>, String> {
+        let mut selected = None;
+        for (index, entry) in self.entries.iter_mut().enumerate() {
+            let Some(http) = &mut entry.http else {
+                continue;
+            };
+            match http
+                .accepts(path)
+                .map_err(|e| hook_error(&entry.path, "HTTP route", e))?
+            {
+                0 => {}
+                1 if selected.is_none() => selected = Some(index),
+                1 => return Err("multiple plugins claim the same HTTP endpoint".into()),
+                _ => return Err("HTTP plugin returned an invalid route decision".into()),
+            }
+        }
+        Ok(selected)
+    }
+
+    pub fn http_fetch(
+        &mut self,
+        handler: usize,
+        metadata: &str,
+        body: &[u8],
+    ) -> Result<ProviderResponse, String> {
+        let entry = self.entries.get_mut(handler).ok_or("unknown HTTP plugin")?;
+        let http = entry.http.as_mut().ok_or("HTTP plugin is unavailable")?;
+        let resource = http
+            .handle(metadata, body)
+            .map_err(|e| hook_error(&entry.path, "HTTP request", e))?;
+        resource
+            .check("dev.zcalld.provider-stream", 1)
+            .map_err(|e| hook_error(&entry.path, "HTTP stream", e))?;
+        Ok(ProviderResponse {
+            resource,
+            ended: false,
+        })
     }
 
     /// Select the first configured custom provider bridge explicitly.
@@ -499,6 +553,7 @@ mod tests {
         let mut plugins = Plugins::load(&[]).unwrap();
         assert!(plugins.is_empty());
         assert!(!plugins.has_retry());
+        assert!(plugins.http_handler("/mcp/example").unwrap().is_none());
         assert!(
             plugins
                 .retry(protocol::OPENAI_CHAT, 429, "local", b"{}", 1024)

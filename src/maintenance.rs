@@ -405,16 +405,93 @@ fn groups(context: &Context, args: &[String]) -> Result<(), String> {
     let section = format!("route {name}");
     match action {
         "set" => {
-            let mode = control::option(args, "--mode")?.unwrap_or("order");
+            let definition = control::option(args, "--file")?
+                .map(|file| json::read(std::path::Path::new(file)))
+                .transpose()?;
+            if let Some(value) = &definition {
+                let fields = value
+                    .as_object()
+                    .ok_or("group definition must be an object")?;
+                if fields.keys().any(|key| {
+                    !matches!(
+                        key.as_str(),
+                        "name"
+                            | "mode"
+                            | "routing"
+                            | "members"
+                            | "original"
+                            | "rules"
+                            | "affinity"
+                            | "effort"
+                            | "classifier"
+                            | "levels"
+                            | "intentSure"
+                            | "effortMaps"
+                    )
+                }) {
+                    return Err("group definition contains an unknown field".into());
+                }
+                if fields.contains_key("name") && value.get("name").as_str() != Some(name) {
+                    return Err("group definition name differs from the selected group".into());
+                }
+                for field in ["mode", "routing"] {
+                    if fields.contains_key(field) && value.get(field).as_str().is_none() {
+                        return Err("group routing mode must be a string".into());
+                    }
+                }
+                if fields.contains_key("members")
+                    && !matches!(value.get("members"), Value::Array(members) if !members.is_empty())
+                {
+                    return Err("group members must be a nonempty array".into());
+                }
+                for original in [value, value.get("original")] {
+                    if !matches!(original.get("rules"), Value::Null | Value::Array(_)) {
+                        return Err("group rules must be an array".into());
+                    }
+                }
+            }
+            let file = definition.as_ref().unwrap_or(&Value::Null);
+            let mode = control::option(args, "--mode")?
+                .or_else(|| file.get("mode").as_str())
+                .or_else(|| file.get("routing").as_str())
+                .or_else(|| {
+                    definition
+                        .as_ref()
+                        .and(previous.as_ref())
+                        .and_then(|value| value.get("mode").as_str())
+                })
+                .unwrap_or("order")
+                .to_string();
             if ![
                 "smart", "order", "rotate", "usage", "pace", "weight", "drain",
             ]
-            .contains(&mode)
+            .contains(&mode.as_str())
             {
                 return Err("unsupported routing mode".into());
             }
+            let file_members = if !file.get("members").as_array().is_empty() {
+                file.get("members").as_array()
+            } else if definition.is_some() {
+                previous
+                    .as_ref()
+                    .map(|value| value.get("members").as_array())
+                    .unwrap_or(&[])
+            } else {
+                &[]
+            };
+            let from_file = file_members
+                .iter()
+                .map(|value| {
+                    value
+                        .as_str()
+                        .or_else(|| value.get("model").as_str())
+                        .ok_or("group members must be route names or member objects")
+                })
+                .collect::<Result<Vec<_>, _>>()?
+                .join(",");
             let names = control::option(args, "--members")?
-                .ok_or("--members requires comma-separated configured routes")?;
+                .or_else(|| (!from_file.is_empty()).then_some(from_file.as_str()))
+                .ok_or("--members or a definition file must name configured routes")?;
             let configured = crate::config::Config::load(&context.path)?;
             if previous.is_none() && configured.routes.iter().any(|r| r.name == *name) {
                 return Err("a non-group route already uses this name".into());
@@ -469,6 +546,42 @@ fn groups(context: &Context, args: &[String]) -> Result<(), String> {
             let mut next = previous.unwrap_or_else(|| object([("name", name.clone().into())]));
             next.set("mode", mode.into());
             next.set("members", Value::Array(members));
+            if let Some(definition) = &definition {
+                let mut original = match definition.get("original") {
+                    Value::Null => next.get("original").clone(),
+                    value @ Value::Object(_) => value.clone(),
+                    _ => return Err("original group settings must be an object".into()),
+                };
+                if matches!(original, Value::Null) {
+                    original = object([]);
+                }
+                for key in [
+                    "rules",
+                    "affinity",
+                    "effort",
+                    "classifier",
+                    "levels",
+                    "intentSure",
+                    "effortMaps",
+                ] {
+                    if definition.as_object().unwrap().contains_key(key) {
+                        original.set(key, definition.get(key).clone());
+                    }
+                }
+                for rule in original.get("rules").as_array() {
+                    for target in
+                        std::iter::once(rule.get("use")).chain(rule.get("more").as_array().iter())
+                    {
+                        let target = target.as_str().ok_or("rule target must be a model name")?;
+                        if !seen.contains(target) {
+                            return Err(
+                                "rule target must be one of the group's configured members".into(),
+                            );
+                        }
+                    }
+                }
+                next.set("original", original);
+            }
             entries.retain(|v| v.get("name").as_str() != Some(name));
             entries.push(next);
             text = control::ini_set(
@@ -489,6 +602,15 @@ fn groups(context: &Context, args: &[String]) -> Result<(), String> {
         _ => return Err("groups expects list, set or remove".into()),
     }
     state.set("groups", Value::Array(entries));
+    if let Some(configuration) =
+        crate::migration::rule_configuration(state.get("groups").as_array())
+    {
+        let worker = crate::migration::validate_rule_configuration(
+            &configuration,
+            state.get("rules_worker").as_str(),
+        )?;
+        state.set("rules_worker", worker.to_string_lossy().into_owned().into());
+    }
     control::replace_files(
         context,
         &[

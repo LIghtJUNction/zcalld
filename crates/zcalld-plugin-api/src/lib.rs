@@ -158,3 +158,24 @@ pub trait RetryPlugin {
         output: &mut [u8],
     ) -> zplugin::Result<u64>;
 }
+
+/// Optional application HTTP endpoint, separate from AI request middleware.
+/// The core authenticates the connection and validates HTTP framing first.
+/// accepts returns 0 (decline) or 1 (owned); it must not execute a tool or
+/// allocate request-specific state. Conflicting endpoint owners are rejected.
+///
+/// metadata is UTF-8 JSON with method, path (without query), a bounded allowlist
+/// of protocol headers, loopback, verified caller_key_id or null, timeout_ms,
+/// and max_response_bytes. It never contains caller credentials or cookies.
+/// body is borrowed for this call and is not implicitly AI-redacted.
+///
+/// handle returns the existing dev.zcalld.provider-stream v1 HTTP resource:
+/// operation 1 yields status/headers JSON; 2 yields body bytes (zero is EOF);
+/// 3 cancels. PluginStatus(3) means pending. Output retries must be replay-safe.
+/// Tools must not be executed again to satisfy a response-buffer retry.
+#[zplugin::interface(id = "dev.zcalld.http", version = 1)]
+pub trait HttpPlugin {
+    fn configure(&mut self, config: &str) -> zplugin::Result<()>;
+    fn accepts(&mut self, path: &str) -> zplugin::Result<u32>;
+    fn handle(&mut self, metadata: &str, body: &[u8]) -> zplugin::Result<zplugin::OwnedResource>;
+}

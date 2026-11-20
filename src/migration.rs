@@ -358,18 +358,6 @@ fn plan_from_active(
                         ));
                     }
                 }
-                for rule in group.get("rules").as_array() {
-                    for field in ["time", "where", "folders", "exceptFolders"] {
-                        let value = rule.get(field);
-                        if !matches!(value, Value::Null | Value::Array(_))
-                            || !value.as_array().is_empty()
-                        {
-                            limitations.push(format!(
-                                "{id}: {field} rule requires the rule compatibility worker"
-                            ));
-                        }
-                    }
-                }
             }
         } else {
             let suffix = canonical_model(name);
@@ -437,6 +425,11 @@ fn plan_from_active(
             route.provider, route.model
         ));
     }
+    if let Some(configuration) = rule_configuration(&groups)
+        && let Err(error) = validate_rule_configuration(&configuration, None)
+    {
+        limitations.push(error);
+    }
     Ok(Plan {
         config,
         credentials,
@@ -447,6 +440,72 @@ fn plan_from_active(
         limitations,
         provider_count,
     })
+}
+
+pub(crate) fn rule_configuration(groups: &[Value]) -> Option<Value> {
+    let selected: Vec<_> = groups
+        .iter()
+        .filter(|group| {
+            group
+                .get("original")
+                .get("rules")
+                .as_array()
+                .iter()
+                .any(|rule| {
+                    ["time", "where", "folders", "exceptFolders"]
+                        .iter()
+                        .any(|key| match rule.get(key) {
+                            Value::Null => false,
+                            Value::Array(values) => !values.is_empty(),
+                            _ => true,
+                        })
+                })
+        })
+        .map(|group| {
+            object([
+                ("name", group.get("name").clone()),
+                ("rules", group.get("original").get("rules").clone()),
+            ])
+        })
+        .collect();
+    if selected.is_empty() {
+        None
+    } else {
+        Some(object([("groups", Value::Array(selected))]))
+    }
+}
+
+pub(crate) fn validate_rule_configuration(
+    configuration: &Value,
+    worker: Option<&str>,
+) -> Result<std::path::PathBuf, String> {
+    let helper = if let Some(worker) = worker {
+        let path = std::path::PathBuf::from(worker);
+        if !path.is_absolute() || !path.is_file() {
+            return Err("rules_worker must name an absolute installed compatibility helper".into());
+        }
+        path
+    } else {
+        crate::extensions::helper()
+            .map_err(|_| "advanced routing requires the optional zcalld-compat 0.1.2 or newer")?
+    };
+    let (code, output, error) = control::command(
+        &helper.to_string_lossy(),
+        &["routing-validate".into()],
+        Some(configuration.stringify().as_bytes()),
+        Duration::from_secs(15),
+    )?;
+    if code != 0 {
+        return Err(format!(
+            "advanced rule validation failed (zcalld-compat >= 0.1.2 required): {}",
+            error.chars().take(512).collect::<String>().trim()
+        ));
+    }
+    let result = json::parse(output.as_bytes())?;
+    if result.get("ok").as_bool() != Some(true) || result.get("version").as_u64() != Some(1) {
+        return Err("advanced routing worker returned an unsupported validation result".into());
+    }
+    Ok(helper)
 }
 
 fn canonical_model(value: &str) -> String {
@@ -772,6 +831,7 @@ fn import(context: &Context, args: &[String]) -> Result<(), String> {
         object([
             ("groups", Value::Array(plan.groups.clone())),
             ("deciders", Value::Array(plan.deciders.clone())),
+            ("rules_worker", helper.clone().into()),
             (
                 "usage_file",
                 context
@@ -870,6 +930,25 @@ fn verify(context: &Context) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn advanced_rule_mapping_preserves_each_original_condition() {
+        let original = crate::state_json::parse(br#"{
+            "rules":[{"use":"p/m","time":{"from":"22:00","to":"08:00","days":["fri"],"zone":"Asia/Shanghai"},
+            "folders":["~/work"],"exceptFolders":["~/work/private"],
+            "where":[{"field":"system","op":"matches","value":"^fixture"}]}]
+        }"#).unwrap();
+        let groups = vec![super::object([
+            ("name", "group/test".into()),
+            ("original", original.clone()),
+        ])];
+        let mapped = super::rule_configuration(&groups).unwrap();
+        assert_eq!(
+            mapped.get("groups").as_array()[0].get("rules"),
+            original.get("rules")
+        );
+        assert!(super::rule_configuration(&[]).is_none());
+    }
+
     use super::*;
     struct LibraryFixture(std::path::PathBuf);
     impl LibraryFixture {
