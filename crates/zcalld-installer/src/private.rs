@@ -75,6 +75,10 @@ pub fn regular(path: &Path, limit: u64) -> Result<fs::Metadata, String> {
 }
 #[cfg(windows)]
 fn windows_regular(file: &File) -> Result<(), String> {
+    windows_regular_links(file, false)
+}
+#[cfg(windows)]
+fn windows_regular_links(file: &File, allow_unlinked: bool) -> Result<(), String> {
     use std::{ffi::c_void, os::windows::io::AsRawHandle};
     #[link(name = "kernel32")]
     unsafe extern "system" {
@@ -85,7 +89,7 @@ fn windows_regular(file: &File) -> Result<(), String> {
     // FILETIME pairs. The handle stays live for this synchronous query.
     if unsafe { GetFileInformationByHandle(file.as_raw_handle(), info.as_mut_ptr()) } == 0
         || info[0] & (0x10 | 0x400) != 0
-        || info[10] != 1
+        || (info[10] != 1 && !(allow_unlinked && info[10] == 0))
     {
         return Err("installation files must be regular and have exactly one link".into());
     }
@@ -252,16 +256,61 @@ pub fn same_file(file: &File, path: &Path) -> Result<(), String> {
     Ok(())
 }
 pub fn read(path: &Path, limit: usize) -> Result<Vec<u8>, String> {
-    let meta = regular(path, limit as u64)?;
+    read_handle(read_open(path)?, limit)
+}
+fn read_open(path: &Path) -> Result<File, String> {
+    no_links(path)?;
+    let mut options = OpenOptions::new();
+    options.read(true);
     #[cfg(unix)]
-    if !own(&meta) {
-        return Err("installation state is not private to this user".into());
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        #[cfg(target_os = "macos")]
+        const NOFOLLOW: i32 = 0x100;
+        #[cfg(not(target_os = "macos"))]
+        const NOFOLLOW: i32 = 0x20000;
+        #[cfg(target_os = "macos")]
+        const NONBLOCK: i32 = 0x4;
+        #[cfg(not(target_os = "macos"))]
+        const NONBLOCK: i32 = 0x800;
+        // A swapped FIFO must not block before the held-file type check.
+        options.custom_flags(NOFOLLOW | NONBLOCK);
     }
-    #[cfg(not(unix))]
-    let _ = meta;
-    let file = File::open(path).map_err(|_| "cannot read installation state")?;
     #[cfg(windows)]
-    privacy_windows::check_private(&file)?;
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        // Inspect a reparse point itself, never its target. Unlike lock files,
+        // state readers allow atomic replacement while this snapshot is open.
+        options.custom_flags(0x00200000).share_mode(0x1 | 0x2 | 0x4);
+    }
+    options
+        .open(path)
+        .map_err(|_| "cannot read installation state".into())
+}
+fn read_handle(file: File, limit: usize) -> Result<Vec<u8>, String> {
+    let meta = file
+        .metadata()
+        .map_err(|_| "cannot inspect installation state".to_owned())?;
+    if !meta.is_file() || meta.len() > limit as u64 {
+        return Err("invalid installation file type or size".into());
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        // atomic() may have replaced the name after open. That private old
+        // snapshot remains readable with zero links; extra aliases never do.
+        if meta.nlink() > 1 {
+            return Err("hard-linked installation file".into());
+        }
+        if !own(&meta) {
+            return Err("installation state is not private to this user".into());
+        }
+    }
+    #[cfg(windows)]
+    {
+        windows_regular_links(&file, true)?;
+        privacy_windows::check_private(&file)?;
+    }
     let mut bytes = Vec::new();
     file.take(limit as u64 + 1)
         .read_to_end(&mut bytes)
@@ -271,6 +320,7 @@ pub fn read(path: &Path, limit: usize) -> Result<Vec<u8>, String> {
     }
     Ok(bytes)
 }
+
 pub fn atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
     no_links(path)?;
     let parent = path.parent().ok_or("installation state has no parent")?;
@@ -345,5 +395,82 @@ mod tests {
         let mut noncanonical = root.0.as_os_str().to_os_string();
         noncanonical.push(r"\..\outside");
         assert!(no_links(Path::new(&noncanonical)).is_err());
+    }
+}
+
+#[cfg(test)]
+mod snapshot_tests {
+    use super::*;
+
+    struct Fixture(PathBuf);
+    impl Fixture {
+        fn new() -> Self {
+            let root = std::env::temp_dir().canonicalize().unwrap().join(format!(
+                "zcalld-installer-snapshot-{}",
+                random_id().unwrap()
+            ));
+            mkdir(&root).unwrap();
+            Self(root)
+        }
+        fn state(&self) -> PathBuf {
+            self.0.join("state.json")
+        }
+    }
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn atomic_replacement_keeps_the_open_private_snapshot_readable() {
+        let fixture = Fixture::new();
+        let path = fixture.state();
+        let old = br#"{"phase":"pending_exit"}"#;
+        let new = br#"{"phase":"committed"}"#;
+        atomic(&path, old).unwrap();
+        let held = read_open(&path).unwrap();
+        atomic(&path, new).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            assert_eq!(held.metadata().unwrap().nlink(), 0);
+        }
+        assert_eq!(read_handle(held, 1024).unwrap(), old);
+        assert_eq!(read(&path, 1024).unwrap(), new);
+        assert!(read(&path, new.len() - 1).is_err());
+    }
+
+    #[test]
+    fn snapshots_reject_real_hardlinks_and_directories() {
+        let fixture = Fixture::new();
+        let path = fixture.state();
+        let alias = fixture.0.join("alias.json");
+        atomic(&path, b"private state").unwrap();
+        fs::hard_link(&path, &alias).unwrap();
+        assert!(regular(&path, 1024).is_err());
+        assert!(read(&path, 1024).is_err());
+        assert!(read_handle(read_open(&path).unwrap(), 1024).is_err());
+        fs::remove_file(alias).unwrap();
+        assert_eq!(read(&path, 1024).unwrap(), b"private state");
+        assert!(read(&fixture.0, 1024).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn snapshots_reject_nonprivate_files_and_symlinks() {
+        use std::os::unix::fs::{PermissionsExt, symlink};
+        let fixture = Fixture::new();
+        let path = fixture.state();
+        atomic(&path, b"private state").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(read(&path, 1024).is_err());
+        assert!(read_handle(read_open(&path).unwrap(), 1024).is_err());
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        let alias = fixture.0.join("symlink.json");
+        symlink(&path, &alias).unwrap();
+        assert!(read_open(&alias).is_err());
+        assert!(read(&alias, 1024).is_err());
+        assert_eq!(read(&path, 1024).unwrap(), b"private state");
     }
 }
