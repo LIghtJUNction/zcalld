@@ -44,6 +44,8 @@ zcalld migrate magpie \
 
 The destination must be new. The importer refuses to replace an existing configuration; keep an existing staged migration and review it rather than running another import over it. If the original providers, plugins, caller keys or relevant privacy settings have changed since the copy, create a fresh candidate before preparing the service transaction.
 
+Import planning rejects mapped upstream model IDs that are empty, contain control characters or exceed 512 UTF-8 bytes. Catalog and plugin model values remain literal strings when written to INI: quotes, backslashes and surrounding spaces are preserved, so reloading the imported configuration selects the same upstream model.
+
 Inspect the report and check the actual configuration:
 
 ~~~sh
