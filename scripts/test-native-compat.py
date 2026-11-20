@@ -43,7 +43,8 @@ subprocess.run([sys.executable, str(root / "scripts/test-mcp.py"),
 subprocess.run([sys.executable, str(root / "scripts/test-builtin-fetch.py"), *common,
                 "--pluginctl", str(pluginctl), "--community-plugin", str(community)],
                cwd=root, check=True)
-for script in ("test-codex-metadata.py", "test-codex-compaction.py", "test-codex-policy.py"):
+for script in ("test-codex-metadata.py", "test-codex-compaction.py", "test-codex-policy.py",
+               "test-http-cancellation.py"):
     subprocess.run([sys.executable, str(root / "scripts" / script), *common,
                     "--pluginctl", str(pluginctl), "--community-plugin", str(community),
                     "--routing-plugin", str(routing)], cwd=root, check=True)

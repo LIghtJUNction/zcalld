@@ -178,7 +178,12 @@ fn relay(socket: &mut Stream, config: &Config, mut response: ProviderResponse, h
         }
         match response.poll_head() {
             Ok(Some(head)) => break head,
-            Ok(None) => std::thread::sleep(Duration::from_millis(1)),
+            Ok(None) => {
+                if socket.is_disconnected() {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(1));
+            }
             Err(_) => {
                 error(
                     socket,
@@ -191,8 +196,10 @@ fn relay(socket: &mut Stream, config: &Config, mut response: ProviderResponse, h
         }
     };
     let (status, content_type, extra) = response_headers(head);
+    let peer = &*socket;
+    let mut connection = peer;
     let mut writer = http::Chunked {
-        socket,
+        socket: &mut connection,
         started: false,
         status,
         content_type,
@@ -239,6 +246,9 @@ fn relay(socket: &mut Stream, config: &Config, mut response: ProviderResponse, h
             }
             Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                if peer.is_disconnected() {
+                    return;
+                }
                 std::thread::sleep(Duration::from_millis(1));
             }
             Err(_) => {
