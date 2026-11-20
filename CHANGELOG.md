@@ -7,6 +7,7 @@
 - Allow the complete Windows release checks to run as a commit-pinned candidate before tagging. Formal releases still require all five native targets.
 - Synchronize the synthetic Windows sign-in failure with the test observer before cleanup using a byte-exact acknowledgement, preserving strict child-exit assertions and production helper behavior.
 - Preserve the provider fixture's no-Bun environment on Windows while staging the same runtime DLL set as the official archive.
+- Preserve inherited private access when protecting existing Windows desktop directories; keep regular-file ACLs strict and validate the real minimal-rights handles.
 - Retain the failed 0.4.3 validation tag. It did not publish release assets because the Windows recovery cancellation check failed.
 
 ## 0.4.3 — 2026-11-20
