@@ -149,6 +149,7 @@ jobs:
             export ZCALLD_TEST_BINARY=target/release/zcalld
           fi
           python3 scripts/test-control.py
+          python3 scripts/test-keys.py
           python3 scripts/test-library.py
           python3 scripts/test-transport.py --binary "$ZCALLD_TEST_BINARY"
           python3 scripts/test-native-runtime.py --binary "$ZCALLD_TEST_BINARY"

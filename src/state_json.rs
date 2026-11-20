@@ -1,5 +1,9 @@
 //! Owned control-plane values, using zconv's bounded validator and decoder.
 //! This module is not used on the gateway request path.
+#[cfg(windows)]
+#[path = "privacy_windows.rs"]
+pub(crate) mod privacy_windows;
+
 use std::{
     collections::BTreeMap,
     fs,
@@ -211,7 +215,14 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
             use std::os::unix::fs::OpenOptionsExt;
             options.mode(0o600);
         }
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            options.access_mode(0x40000000 | 0x00040000); // GENERIC_WRITE | WRITE_DAC
+        }
         let mut file = options.open(&temp).map_err(|e| e.to_string())?;
+        #[cfg(windows)]
+        privacy_windows::protect(&file)?;
         file.write_all(bytes)
             .and_then(|_| file.sync_all())
             .map_err(|e| e.to_string())?;

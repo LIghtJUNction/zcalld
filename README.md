@@ -4,6 +4,8 @@ A native local AI gateway for Linux, macOS and Windows, built on [zcall](https:/
 
 The CLI daemon owns transport, bounded queues, credentials and protocol conversion. Privacy, community providers and model-group decisions are optional plugins. [zcall-gui](https://github.com/LIghtJUNction/zcall-gui) is a separate native application built with [zgpui](https://github.com/LIghtJUNction/zgpui); closing it leaves the gateway running. There is no embedded browser in either application. The optional compatibility package supplies the Go privacy and advanced-rule workers and one lazy Bun host for existing JavaScript community plugins. [zcall-omarchy](https://github.com/LIghtJUNction/zcall-omarchy) is a second, independent frontend that uses Omarchy's native plugin and menu interfaces without another background gateway.
 
+The daemon reuses zcall's optional server module for HTTP framing, protocol conversion and caller-key parsing. zcalld owns worker queues, native plugin instances, upstream transport and bounded gzip/zstd decoding; each worker retains its own plugin state.
+
 ## Install
 
 On Arch Linux, choose one core package and add the capabilities you use:
@@ -82,6 +84,7 @@ Protocol names are `chat`, `responses`, `anthropic`, `gemini`, `completions` and
 ```sh
 zcalld status --json
 zcalld providers list --json
+zcalld keys list --json
 zcalld providers add work --base-url https://api.example.com/v1 --api-key-stdin
 zcalld routes list --json
 zcalld groups set group/work --members work/model-a,work/model-b --mode rotate
@@ -91,6 +94,7 @@ zcalld agents revert claude --json
 zcalld plugins list --json
 zcalld plugins mcp show --json
 zcalld accounts list --json
+zcalld plugins quota list --json
 zcalld privacy show --json
 zcalld profiles save work --json
 zcalld library list --json
@@ -104,6 +108,10 @@ Agent edits preserve unrelated fields and keep exact-byte backups. Revert refuse
 The [agent library](docs/LIBRARY.md) manages MCP definitions, instruction sets and skill files separately from gateway providers. Preview/apply/revert keeps exact owned bytes and refuses conflicting user edits. [Community MCP](docs/MCP.md) uses the optional HTTP plugin interface and the same shared Bun process as community providers; initialize and ping do not start that process. Caller-key permissions remain separate from upstream credentials.
 
 Privacy runs before model-group classification. JSON and fragmented SSE responses restore masked values. If a required privacy worker is unavailable, requests fail closed before upstream generation. With compatibility 0.1.3 or later, private daily audit files continue recording detection metadata and per-agent counters; request bodies and restoration maps are not stored. Audit writes have size and retention bounds. A disk-write failure is reported without discarding a valid redacted request. Group modes include order, smart, rotate, usage, pace, weight and drain; turn affinity is bounded. Explicit upstream 429/503 responses may select another member before downstream headers are committed, with at most four total attempts. An already-started stream or an ambiguous network failure is never replayed. [Advanced rules](docs/ROUTING.md) support IANA time zones, RE2 message conditions and trusted workspace conditions through a lazy optional worker; ordinary groups do not start it.
+
+[Caller-key management](docs/KEYS.md) provides `keys add`, `rotate` and `revoke`; new key material is accepted only through `--api-key-stdin`. Saved key changes require a gateway restart and never restart the service automatically.
+
+`plugins quota list` reads local saved results. With the optional compatibility helper 0.1.6 or newer, `plugins quota refresh --account ACCOUNT_ID` explicitly updates one supported account; ordinary status and quota-list commands do not refresh credentials or contact providers.
 
 ## Services
 

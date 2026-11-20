@@ -625,3 +625,22 @@ mod unix {
         }
     }
 }
+
+// Keep native listener/peer identity policy here while sharing HTTP and protocol I/O.
+impl zcall::server::Connection for Stream {
+    fn set_read_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
+        Stream::set_read_timeout(self, timeout)
+    }
+    fn set_write_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
+        Stream::set_write_timeout(self, timeout)
+    }
+    fn shutdown_write(&self) -> io::Result<()> {
+        Stream::shutdown_write(self)
+    }
+    fn cancelled(&self) -> bool {
+        system::STOPPING.load(std::sync::atomic::Ordering::Relaxed)
+    }
+    fn error_type(&self) -> &'static str {
+        "zcalld_error"
+    }
+}

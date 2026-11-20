@@ -22,15 +22,20 @@ pub struct Context {
 pub fn run(input: &[String]) -> Option<Result<(), String>> {
     let mut args = Vec::new();
     let mut explicit = None;
+    let mut config_count = 0;
+    let mut json_count = 0;
+    let mut invalid_config_value = false;
     let mut index = 0;
     while index < input.len() {
         match input[index].as_str() {
-            "--json" => {}
+            "--json" => json_count += 1,
             "--config" | "-c" => {
                 index += 1;
                 if index >= input.len() {
                     return Some(Err("--config requires a path".into()));
                 }
+                config_count += 1;
+                invalid_config_value |= input[index].starts_with('-');
                 explicit = Some(PathBuf::from(&input[index]));
             }
             _ => args.push(input[index].clone()),
@@ -38,6 +43,9 @@ pub fn run(input: &[String]) -> Option<Result<(), String>> {
         index += 1;
     }
     let command = args.first().map(String::as_str).unwrap_or("");
+    if command == "keys" && (config_count > 1 || json_count > 1 || invalid_config_value) {
+        return Some(Err("duplicate or invalid global caller key option".into()));
+    }
     if !matches!(
         command,
         "status"
@@ -52,6 +60,7 @@ pub fn run(input: &[String]) -> Option<Result<(), String>> {
             | "library"
             | "usage"
             | "routes"
+            | "keys"
     ) && !(matches!(command, "providers" | "plugins") && args.len() > 1)
     {
         return None;
@@ -72,6 +81,7 @@ pub fn run(input: &[String]) -> Option<Result<(), String>> {
         match command {
             "status" => emit(status(&context)),
             "providers" => providers(&context, &args[1..]),
+            "keys" => crate::keys::run(&context, &args[1..]),
             "service" => service(&context, &args[1..]),
             "agents" => crate::adapters::run(&context, &args[1..]),
             "privacy" => privacy(&context, &args[1..]),
