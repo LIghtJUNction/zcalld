@@ -102,6 +102,7 @@ zcalld profiles save work --json
 zcalld library list --json
 zcalld library targets --json
 zcalld usage summary --json
+zcalld usage export --file usage-export.jsonl --json
 zcalld update check --json
 ```
 
@@ -114,6 +115,8 @@ Privacy runs before model-group classification. JSON and fragmented SSE response
 [Caller-key management](docs/KEYS.md) provides `keys add`, `rotate` and `revoke`; new key material is accepted only through `--api-key-stdin`. Saved key changes require a gateway restart and never restart the service automatically.
 
 `plugins quota list` reads local saved results. With the optional compatibility helper 0.1.6 or newer, `plugins quota refresh --account ACCOUNT_ID` explicitly updates one supported account; ordinary status and quota-list commands do not refresh credentials or contact providers.
+
+Usage summaries scan local `usage.jsonl` with bounded record buffering and skip records over 1 MiB, excluding LF or CRLF. `usage export --file PATH` copies the original bytes to a new file, refuses existing destinations and uses mode `0600` on Unix. If the source cannot be opened, no destination is created. See the [usage validation](docs/validation/usage-bounds-20261120.md) for boundary coverage and export limits.
 
 ## Services
 

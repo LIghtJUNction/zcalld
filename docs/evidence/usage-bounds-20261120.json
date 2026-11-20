@@ -1,0 +1,109 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-11-20T18:27:18.384630+08:00",
+  "source": {
+    "baseline": "5cdfcaedab4a2d02b7d3b341528606c47a92e1bf",
+    "validated_parent": "1aaff74a64fefa9db3bcf8b7b085024cf33da0a4",
+    "published_parent": "b46cb34f91358305e633e96289d86a6aafd2ce4a",
+    "fix_commit": "2d19cb884425c8f9d365f23765ad64df31827ce6",
+    "files": [
+      "src/maintenance.rs",
+      "scripts/test-control.py"
+    ]
+  },
+  "build": {
+    "baseline_binary_sha256": "d24520fcfb9f8782bc389260b7546ad6940bfc906d27a9388e6c0fca16779fba",
+    "candidate_binary_sha256": "e3392ab9e2d8056e9acde4cb9010ec479f11c18d5350f2df95dfe0f440de644b",
+    "profile": "dev",
+    "cargo_build_jobs": 4
+  },
+  "environment": {
+    "recorded_at": "2026-11-20T18:27:18.384630+08:00",
+    "platform": "Linux-7.3.4-arch1-1-x86_64-with-glibc2.44",
+    "machine": "x86_64",
+    "rustc": {
+      "exit_code": 0,
+      "stdout": "rustc 1.100.0 (0ef1bc386 2026-11-09)",
+      "stderr": ""
+    },
+    "python": {
+      "exit_code": 0,
+      "stdout": "Python 3.14.10",
+      "stderr": ""
+    },
+    "installed_version": {
+      "exit_code": 0,
+      "stdout": "zcalld 0.3.1",
+      "stderr": ""
+    },
+    "installed_health": {
+      "exit_code": 0,
+      "stdout": "{\"status\":\"ok\",\"version\":\"0.3.1\"}",
+      "stderr": ""
+    },
+    "service": {
+      "exit_code": 0,
+      "stdout": "active\nrunning",
+      "stderr": ""
+    }
+  },
+  "fixtures": {
+    "history_content_limit_bytes": 1048576,
+    "read_prefix_limit_bytes": 1048578,
+    "large_record_bytes": 134217728,
+    "child_address_space_limit_bytes": 100663296,
+    "memory_test_platform": "linux",
+    "size_line_ending_subcases": 9,
+    "real_provider_calls": 0,
+    "user_codex_configuration_modified": false
+  },
+  "baseline": {
+    "new_regressions": 5,
+    "passed": 3,
+    "failed": 2,
+    "raw_output": "test_usage_record_size_limit_and_line_endings (__main__.ControlTests.test_usage_record_size_limit_and_line_endings) ... ok\ntest_usage_invalid_utf8_is_an_error (__main__.ControlTests.test_usage_invalid_utf8_is_an_error) ... ok\ntest_usage_large_record_has_bounded_memory (__main__.ControlTests.test_usage_large_record_has_bounded_memory) ... FAIL\ntest_usage_export_missing_source_leaves_destination_available (__main__.ControlTests.test_usage_export_missing_source_leaves_destination_available) ... FAIL\ntest_usage_export_does_not_overwrite_existing_destination (__main__.ControlTests.test_usage_export_does_not_overwrite_existing_destination) ... ok\n\n======================================================================\nFAIL: test_usage_large_record_has_bounded_memory (__main__.ControlTests.test_usage_large_record_has_bounded_memory)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"<worktree>/scripts/test-control.py\", line 236, in test_usage_large_record_has_bounded_memory\n    self.assertEqual(result.returncode, 0, result.stderr + result.stdout)\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: -6 != 0 : memory allocation of 134217728 bytes failed\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n\n======================================================================\nFAIL: test_usage_export_missing_source_leaves_destination_available (__main__.ControlTests.test_usage_export_missing_source_leaves_destination_available)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"<worktree>/scripts/test-control.py\", line 246, in test_usage_export_missing_source_leaves_destination_available\n    self.assertFalse(target.exists())\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^\nAssertionError: True is not false\n\n----------------------------------------------------------------------\nRan 5 tests in 0.277s\n\nFAILED (failures=2)\n"
+  },
+  "candidate": {
+    "control_tests": 18,
+    "rust_tests": 108,
+    "checks": [
+      {
+        "check": "fmt",
+        "exit_code": 0,
+        "elapsed_seconds": 0.49
+      },
+      {
+        "check": "build",
+        "exit_code": 0,
+        "elapsed_seconds": 38.547
+      },
+      {
+        "check": "control",
+        "exit_code": 0,
+        "elapsed_seconds": 0.958
+      },
+      {
+        "check": "rust",
+        "exit_code": 0,
+        "elapsed_seconds": 25.745
+      },
+      {
+        "check": "clippy",
+        "exit_code": 0,
+        "elapsed_seconds": 2.753
+      }
+    ],
+    "raw_output": {
+      "fmt": "",
+      "build": "   Compiling zcalld v0.3.1 (<worktree>)\n    Finished `dev` profile [unoptimized + debuginfo] target(s) in 38.51s\n",
+      "control": "test_claude_apply_preserves_jsonc_and_revert_checks_external_edits (__main__.ControlTests.test_claude_apply_preserves_jsonc_and_revert_checks_external_edits) ... ok\ntest_codex_apply_preserves_unrelated_tables (__main__.ControlTests.test_codex_apply_preserves_unrelated_tables) ... ok\ntest_custom_agent_refuses_path_escape (__main__.ControlTests.test_custom_agent_refuses_path_escape) ... ok\ntest_editor_catalog_preserves_other_provider_and_comment (__main__.ControlTests.test_editor_catalog_preserves_other_provider_and_comment) ... ok\ntest_group_creates_selectable_route_and_preserves_rules (__main__.ControlTests.test_group_creates_selectable_route_and_preserves_rules) ... ok\ntest_library_apply_keeps_existing_servers (__main__.ControlTests.test_library_apply_keeps_existing_servers) ... ok\ntest_migrated_usage_and_group_listing_do_not_leak_credentials (__main__.ControlTests.test_migrated_usage_and_group_listing_do_not_leak_credentials) ... ok\ntest_migration_dry_run_does_not_change_originals (__main__.ControlTests.test_migration_dry_run_does_not_change_originals) ... ok\ntest_privacy_off_keeps_rules_and_key (__main__.ControlTests.test_privacy_off_keeps_rules_and_key) ... ok\ntest_profile_without_credentials_clears_stale_private_state (__main__.ControlTests.test_profile_without_credentials_clears_stale_private_state) ... ok\ntest_provider_credentials_are_private_and_invalid_route_is_atomic (__main__.ControlTests.test_provider_credentials_are_private_and_invalid_route_is_atomic) ... ok\ntest_provider_discovery_accepts_complete_generation_endpoint (__main__.ControlTests.test_provider_discovery_accepts_complete_generation_endpoint) ... ok\ntest_qwen_keeps_custom_entries (__main__.ControlTests.test_qwen_keeps_custom_entries) ... ok\ntest_usage_export_does_not_overwrite_existing_destination (__main__.ControlTests.test_usage_export_does_not_overwrite_existing_destination) ... ok\ntest_usage_export_missing_source_leaves_destination_available (__main__.ControlTests.test_usage_export_missing_source_leaves_destination_available) ... ok\ntest_usage_invalid_utf8_is_an_error (__main__.ControlTests.test_usage_invalid_utf8_is_an_error) ... ok\ntest_usage_large_record_has_bounded_memory (__main__.ControlTests.test_usage_large_record_has_bounded_memory) ... ok\ntest_usage_record_size_limit_and_line_endings (__main__.ControlTests.test_usage_record_size_limit_and_line_endings) ... ok\n\n----------------------------------------------------------------------\nRan 18 tests in 0.812s\n\nOK\n",
+      "rust": "\nrunning 72 tests\ntest adapters::tests::dotenv_keeps_other_secrets ... ok\ntest adapters::tests::codex_explicit_gateway_disables_openai_login_with_boolean ... ok\ntest adapters::tests::toml_keeps_tables_and_comments ... ok\ntest adapters::tests::toml_rejects_duplicate_scalar ... ok\ntest adapters::tests::yaml_does_not_flatten_mappings ... ok\ntest adapters::tests::mac_bundles_and_windows_installations_are_independent_of_path ... ok\ntest compression::tests::expired_deadlines_do_not_restart_for_decoding ... ok\ntest adapters::tests::zed_unavailable_keychain_does_not_change_settings ... ok\ntest adapters::tests::zed_configuration_write_failure_restores_key_and_previous_file ... ok\ntest adapters::tests::zed_revert_refuses_a_credential_changed_after_apply ... ok\ntest config::tests::credentials_are_strict_and_values_never_enter_errors ... ok\ntest compression::tests::native_gzip_and_zstd_decode_exact_json ... ok\ntest compression::tests::incomplete_and_trailing_frames_are_rejected ... ok\ntest compression::tests::concatenated_members_keep_the_same_total_limit ... ok\ntest compression::tests::decoded_limits_stop_compression_bombs ... ok\ntest adapters::tests::zed_failed_store_write_restores_previous_credential_and_files ... ok\ntest compression::tests::oversized_zstd_window_is_refused_before_allocation ... ok\ntest config::tests::catalog_keeps_metadata_only_for_routes_and_caches_it ... ok\ntest config::tests::environment_takes_precedence_without_reading_a_file ... ok\ntest control::tests::rejects_unsafe_profile_ids ... ok\ntest config::tests::native_protocol_endpoints_preserve_exact_configured_urls ... ok\ntest config::tests::strict_configuration ... ok\ntest digest::tests::standard_vectors ... ok\ntest control::tests::ini_edits_keep_unrelated_sections_and_comments ... ok\ntest config::tests::unix_only_configuration_and_private_credential_file ... ok\ntest maintenance::agent_library::tests::assignment_distinguishes_legacy_missing_and_explicit_empty ... ok\ntest adapters::tests::zed_credentials_are_verified_and_reverted_without_plaintext_backups ... ok\ntest maintenance::agent_library::tests::instructions_preserve_surrounding_text_and_reject_edits ... ok\ntest config::tests::provider_headers_are_case_unique_and_cannot_override_credentials_or_framing ... ok\ntest maintenance::agent_library::tests::codex_maps_environment_references_without_resolving_secrets ... ok\ntest maintenance::agent_library::tests::formats_choose_real_transport_keys_and_overlay_accounts ... ok\ntest keys::tests::invalid_configuration_is_rejected_before_default_file_is_bound ... ok\ntest maintenance::agent_library::tests::toml_collision_recognizes_quoted_and_dotted_headers ... ok\ntest maintenance::tests::version_order_is_numeric ... ok\ntest maintenance::agent_library::tests::plan_rejects_change_after_preview ... ok\ntest migration::tests::importing_unknown_models_does_not_claim_readiness ... ok\ntest migration::tests::advanced_rule_mapping_preserves_each_original_condition ... ok\ntest keys::tests::rollback_includes_failed_post_rename_write_and_removes_new_file ... ok\ntest maintenance::agent_library::tests::sha256_known_vectors ... ok\ntest plugin_http::tests::extension_cannot_change_host_framing_or_set_browser_cookies ... ok\ntest keys::tests::concurrent_lock_rejects_operation_before_mutation ... ok\ntest maintenance::agent_library::tests::skill_resource_names_use_portable_separators ... ok\ntest keys::tests::stdin_and_arguments_are_strict_without_secret_errors ... ok\ntest plugins::tests::empty_chain_preserves_input_without_an_output_allocation ... ok\ntest plugin_http::tests::extension_metadata_has_only_validated_identity_and_protocol_headers ... ok\ntest plugins::tests::http_route_flags_are_explicit_and_reject_unknown_capabilities ... ok\ntest server::tests::gemini_path ... ok\ntest keys::tests::symlink_hardlink_and_public_secret_file_are_rejected ... ok\ntest keys::tests::first_add_preserves_orphan_file_and_binds_default_path ... ok\ntest keys::tests::failed_mutations_preserve_existing_files_and_create_no_backup ... ok\ntest server::tests::context_contains_only_whitelisted_client_metadata ... ok\ntest migration::tests::library_migration_copies_bodies_without_executing_helpers ... ok\ntest plugin_http::tests::route_context_comes_from_config_and_never_claims_group_capabilities ... ok\ntest state_json::tests::edits_only_selected_subtree ... ok\ntest keys::tests::shared_token_allows_last_lan_key_revocation ... ok\ntest maintenance::agent_library::tests::jsonc_removal_preserves_other_members_and_comments ... ok\ntest state_json::tests::preserves_large_numbers_unicode_and_duplicate_rejection ... ok\ntest transport::unix::tests::cleanup_preserves_replaced_path_and_rejects_public_directory ... ok\ntest transport::unix::tests::does_not_replace_files_symlinks_or_unknown_sockets ... ok\ntest transport::unix::tests::drop_releases_lock_while_an_inherited_descriptor_remains_open ... ok\ntest transport::unix::tests::refuses_to_overwrite_an_unrelated_lock_file ... ok\ntest transport::unix::tests::private_socket_exchanges_bytes_and_cleans_up ... ok\ntest transport::unix::tests::reclaims_only_recorded_stale_socket ... ok\ntest plugins::tests::rejects_relative_paths_and_invalid_output_lengths ... ok\ntest server::tests::upstream_headers_preserve_configured_account_without_local_authorization ... ok\ntest server::tests::oversized_refusal_streams_original_response_without_retry ... ok\ntest migration::tests::private_ids_are_path_safe_and_collision_resistant ... ok\ntest migration::tests::library_migration_materializes_internal_links_and_rejects_escape_or_cycle ... ok\ntest state_json::tests::patches_jsonc_without_losing_comments_or_unknown_fields ... ok\ntest keys::tests::add_rotate_revoke_preserve_anonymous_and_named_metadata ... ok\ntest server::tests::only_explicit_refusals_hold_back_downstream_headers ... ok\ntest adapters::tests::secret_service_utility_receives_correct_attributes_and_private_stdin ... ok\n\ntest result: ok. 72 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s\n\n\nrunning 5 tests\ntest helpers::tests::installed_and_portable_layouts_prefer_arch_library_directory ... ok\ntest helpers::tests::dangling_link_and_nonexecutable_replacement_are_not_redirected ... ok\ntest tests::encodings_roundtrip ... ok\ntest helpers::tests::only_missing_exact_default_uses_the_new_executable ... ok\ntest tests::last_lease_drains_stdout_and_waits_for_private_write ... ok\n\ntest result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s\n\n\nrunning 3 tests\ntest tests::bad_configuration_is_atomic_and_short_buffer_is_replay_safe ... ok\ntest tests::rejects_empty_or_control_character_names ... ok\ntest tests::selects_explicit_alias_and_leaves_unknown_model_alone ... ok\n\ntest result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n\nrunning 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n\nrunning 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n\nrunning 15 tests\ntest codex::tests::bindings_reject_unknown_configuration_or_fabricated_model_maps ... ok\ntest codex::tests::metadata_endpoints_are_an_exact_allowlist ... ok\ntest codex::tests::account_hint_is_optional_and_rejects_duplicates_empty_or_controls ... ok\ntest codex::tests::groups_cross_provider_and_disabled_account_are_not_metadata_sources ... ok\ntest mcp::tests::caller_and_issuer_scopes_intersect ... ok\ntest codex::tests::verified_caller_binding_is_required_for_lan ... ok\ntest codex::tests::metadata_has_no_first_enabled_account_fallback ... ok\ntest mcp::tests::disabled_and_expired_keys_are_refused ... ok\ntest mcp::tests::paths_do_not_capture_unrelated_routes ... ok\ntest mcp::tests::unknown_limits_and_cycles_never_relax_permissions ... ok\ntest tests::anthropic_usage_is_merged ... ok\ntest tests::account_selection_checks_runtime_metadata_without_restarting_auth ... ok\ntest tests::body_session_lookup_does_not_invent_identity ... ok\ntest tests::chat_reply_keeps_text_tools_and_usage ... ok\ntest tests::legacy_providers_keep_their_own_account_selection ... ok\n\ntest result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n\nrunning 3 tests\ntest tests::configuration_is_atomic_and_observation_never_overflows ... ok\ntest tests::enforces_allowlist_and_request_size_without_rewriting ... ok\ntest tests::rejects_unknown_duplicate_and_empty_settings ... ok\n\ntest result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n\nrunning 2 tests\ntest tests::audit_context_keeps_only_bounded_labels ... ok\ntest tests::audit_context_rejects_unbounded_or_malformed_labels ... ok\n\ntest result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n\nrunning 8 tests\ntest digest::tests::standard_vectors ... ok\ntest json::tests::edits_only_selected_subtree ... ok\ntest tests::rule_conditions_are_conjunctive ... ok\ntest json::tests::patches_jsonc_without_losing_comments_or_unknown_fields ... ok\ntest json::tests::preserves_large_numbers_unicode_and_duplicate_rejection ... ok\ntest tests::tool_results_do_not_start_a_new_user_turn ... ok\ntest tests::usage_counts_stream_final_totals ... ok\ntest tests::weighted_rotation_and_rate_limit_skip ... ok\n\ntest result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n   Compiling zcalld v0.3.1 (<worktree>)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 25.44s\n     Running unittests src/main.rs (target/debug/build/zcalld/a196acd2d70a4277/out/zcalld-a196acd2d70a4277)\n     Running unittests src/lib.rs (target/debug/build/zcalld-compat-client/4ab46c86f24a6d04/out/zcalld_compat_client-4ab46c86f24a6d04)\n     Running unittests src/lib.rs (target/debug/build/zcalld-plugin-aliases/46c51e06e4985845/out/zcalld_aliases-46c51e06e4985845)\n     Running unittests src/lib.rs (target/debug/build/zcalld-plugin-api/81ea6c48b6a63768/out/zcalld_plugin_api-81ea6c48b6a63768)\n     Running unittests examples/check_plugins.rs (target/debug/build/zcalld-plugin-api/655ce7c4fcf2f1d2/out/check_plugins-655ce7c4fcf2f1d2)\n     Running unittests src/lib.rs (target/debug/build/zcalld-plugin-community/cc9f6477c876c39f/out/zcalld_community-cc9f6477c876c39f)\n     Running unittests src/lib.rs (target/debug/build/zcalld-plugin-policy/079ce8f2e6a027b2/out/zcalld_policy-079ce8f2e6a027b2)\n     Running unittests src/lib.rs (target/debug/build/zcalld-plugin-redact/b2c31db3775c0dd4/out/zcalld_redact-b2c31db3775c0dd4)\n     Running unittests src/lib.rs (target/debug/build/zcalld-plugin-routing/fb79a1381527a468/out/zcalld_plugin_routing-fb79a1381527a468)\n",
+      "clippy": "    Checking zcalld v0.3.1 (<worktree>)\n    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.68s\n"
+    }
+  },
+  "limitations": [
+    "No RSS benchmark; verifies completion within the child's address-space ceiling.",
+    "Post-open copy failures may leave a partial export; no transactional export guarantee.",
+    "No new binary installed, service restart or release tag."
+  ]
+}
