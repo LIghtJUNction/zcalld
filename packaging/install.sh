@@ -17,6 +17,11 @@ for plugin in lib/zcalld/plugins/*.so lib/zcalld/plugins/*.dylib; do
   [[ -f "$plugin" ]] || continue
   install_file 755 "$plugin" "$destdir$prefix/lib/zcalld/plugins/${plugin##*/}"
 done
+if [[ -d libexec/zcalld/zcalld-desktop-notify.app ]]; then
+  app=libexec/zcalld/zcalld-desktop-notify.app
+  install_file 755 "$app/Contents/MacOS/zcalld-desktop-notify" "$destdir$prefix/$app/Contents/MacOS/zcalld-desktop-notify"
+  install_file 644 "$app/Contents/Info.plist" "$destdir$prefix/$app/Contents/Info.plist"
+fi
 if [[ -d lib/systemd ]]; then
 for scope in system user; do
   install -d "$destdir$prefix/lib/systemd/$scope"

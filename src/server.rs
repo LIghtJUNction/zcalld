@@ -2,6 +2,7 @@
 use crate::{
     config::{Auth, Config, Provider},
     curl::{self, Client, Sink},
+    events::{self, Leases},
     http::{self, Chunked, Request},
     plugins::{Plugins, ProviderResponse},
     protocol::{self, Protocol},
@@ -14,6 +15,11 @@ use std::{
     time::{Duration, Instant},
 };
 
+enum Work {
+    ActivateEvents,
+    Request(Stream),
+}
+
 const MAX_GROUP_ATTEMPTS: usize = 4;
 const RETRY_BODY_LIMIT: usize = 64 * 1024;
 
@@ -22,7 +28,7 @@ pub fn serve(config: Config) -> Result<(), String> {
     curl::init()?;
     let mut listeners = Listeners::bind(&config).map_err(|e| format!("listen: {e}"))?;
     let address = listeners.description().to_owned();
-    let (sender, receiver) = mpsc::sync_channel::<Stream>(config.queue);
+    let (sender, receiver) = mpsc::sync_channel::<Work>(config.queue);
     let receiver = Arc::new(Mutex::new(receiver));
     let config = Arc::new(config);
     let (ready_tx, ready_rx) = mpsc::channel();
@@ -48,12 +54,22 @@ pub fn serve(config: Config) -> Result<(), String> {
                                 Ok(lock) => lock.recv(),
                                 Err(_) => break,
                             };
-                            let Ok(mut socket) = next else {
+                            let Ok(work) = next else {
                                 break;
                             };
                             if STOPPING.load(Ordering::Relaxed) {
                                 break;
                             }
+                            let mut socket = match work {
+                                Work::ActivateEvents => {
+                                    plugins.emit_event(
+                                        zcalld_plugin_api::events::CONTROL_ACTIVATE,
+                                        "{}",
+                                    );
+                                    continue;
+                                }
+                                Work::Request(socket) => socket,
+                            };
                             let _ = socket.set_nodelay(true);
                             let _ = socket.set_write_timeout(Some(Duration::from_secs(2)));
                             handle(&mut socket, &config, &mut plugins, &mut client);
@@ -85,6 +101,11 @@ pub fn serve(config: Config) -> Result<(), String> {
         system::notify(&format!("READY=1\nSTATUS=Listening on {address}"))
             .map_err(|e| format!("systemd notification: {e}"))
             .and_then(|()| {
+                // Load/check is side-effect free. Activate the shared optional
+                // event controller only after every gateway worker is ready.
+                sender
+                    .send(Work::ActivateEvents)
+                    .map_err(|_| "gateway event activation queue closed")?;
                 eprintln!(
                     "zcalld {} listening on {address} ({} workers, {} plugins)",
                     env!("CARGO_PKG_VERSION"),
@@ -104,20 +125,23 @@ pub fn serve(config: Config) -> Result<(), String> {
     result
 }
 
-fn accept(listeners: &mut Listeners, sender: &mpsc::SyncSender<Stream>) -> Result<(), String> {
+fn accept(listeners: &mut Listeners, sender: &mpsc::SyncSender<Work>) -> Result<(), String> {
     while !STOPPING.load(Ordering::Relaxed) {
         let Some(socket) = listeners.accept().map_err(|e| format!("accept: {e}"))? else {
             continue;
         };
-        match sender.try_send(socket) {
+        match sender.try_send(Work::Request(socket)) {
             Ok(()) => {}
-            Err(mpsc::TrySendError::Full(mut socket)) => {
+            Err(mpsc::TrySendError::Full(Work::Request(mut socket))) => {
                 let _ = socket.set_write_timeout(Some(Duration::from_millis(100)));
                 let _ = http::error(
                     &mut socket,
                     503,
                     "all gateway workers and queue slots are busy",
                 );
+            }
+            Err(mpsc::TrySendError::Full(Work::ActivateEvents)) => {
+                unreachable!("accept only enqueues connections")
             }
             Err(mpsc::TrySendError::Disconnected(_)) => {
                 return Err("all gateway workers exited".into());
@@ -196,6 +220,11 @@ fn handle(socket: &mut Stream, config: &Config, plugins: &mut Plugins, client: &
             let _ = http::error(socket, 400, &error);
             return;
         }
+    };
+    let mut events = if plugins.has_events() {
+        plugins.begin_events(&events::request_metadata(&request, protocol_id(source)))
+    } else {
+        Leases::default()
     };
     if plugins.has_context() {
         let context = match request_context(
@@ -317,6 +346,10 @@ fn handle(socket: &mut Stream, config: &Config, plugins: &mut Plugins, client: &
             stream,
             maximum: config.max_response,
             defer_rejections: plugins.has_retry() && attempt + 1 < MAX_GROUP_ATTEMPTS,
+            quota_source: plugins
+                .has_events()
+                .then(|| events::codex_source(provider))
+                .flatten(),
         };
         let upstream = Upstream {
             client,
@@ -330,7 +363,16 @@ fn handle(socket: &mut Stream, config: &Config, plugins: &mut Plugins, client: &
                 target_protocol,
                 source,
                 &inspect.model,
-                |transform| execute(upstream, socket, options, forward, Some(transform)),
+                |transform| {
+                    execute(
+                        upstream,
+                        socket,
+                        options,
+                        forward,
+                        Some(transform),
+                        &mut events,
+                    )
+                },
             ) {
                 Ok(outcome) => outcome,
                 Err(error) => {
@@ -343,7 +385,7 @@ fn handle(socket: &mut Stream, config: &Config, plugins: &mut Plugins, client: &
                 }
             }
         } else {
-            execute(upstream, socket, options, forward, None)
+            execute(upstream, socket, options, forward, None, &mut events)
         };
         // Observers see each real upstream attempt before retry selection. The
         // router can cool the refused member without re-running classification.
@@ -363,7 +405,14 @@ fn handle(socket: &mut Stream, config: &Config, plugins: &mut Plugins, client: &
             return;
         };
         if STOPPING.load(Ordering::Relaxed) || Instant::now() >= deadline {
-            send_rejection(socket, plugins, rejected, config.max_response);
+            send_rejection(
+                socket,
+                plugins,
+                rejected,
+                config.max_response,
+                source,
+                &mut events,
+            );
             return;
         }
         let next = match plugins.retry(
@@ -375,7 +424,14 @@ fn handle(socket: &mut Stream, config: &Config, plugins: &mut Plugins, client: &
         ) {
             Ok(Some(next)) => next,
             Ok(None) => {
-                send_rejection(socket, plugins, rejected, config.max_response);
+                send_rejection(
+                    socket,
+                    plugins,
+                    rejected,
+                    config.max_response,
+                    source,
+                    &mut events,
+                );
                 return;
             }
             Err(error) => {
@@ -394,7 +450,14 @@ fn handle(socket: &mut Stream, config: &Config, plugins: &mut Plugins, client: &
                 && *model == next_route.model
         }) || Instant::now() >= deadline
         {
-            send_rejection(socket, plugins, rejected, config.max_response);
+            send_rejection(
+                socket,
+                plugins,
+                rejected,
+                config.max_response,
+                source,
+                &mut events,
+            );
             return;
         }
         if let Some(body) = next.body {
@@ -816,6 +879,7 @@ fn plugin_perform(
 struct ResponseWriter<'a, 's> {
     writer: &'a mut Chunked<'s>,
     plugins: &'a mut Plugins,
+    events: &'a mut Leases,
 }
 
 impl Write for ResponseWriter<'_, '_> {
@@ -829,8 +893,14 @@ impl Write for ResponseWriter<'_, '_> {
             .response_write(bytes, false, maximum)
             .map_err(std::io::Error::other)?
         {
-            Some(output) => self.writer.write_all(&output)?,
-            None => self.writer.write_all(bytes)?,
+            Some(output) => {
+                self.writer.write_all(&output)?;
+                self.events.body(&output);
+            }
+            None => {
+                self.writer.write_all(bytes)?;
+                self.events.body(bytes);
+            }
         }
         Ok(bytes.len())
     }
@@ -847,11 +917,16 @@ struct ForwardOptions<'a> {
     stream: bool,
     maximum: usize,
     defer_rejections: bool,
+    quota_source: Option<String>,
 }
 struct Forward<'s, 't, 'f, 'p> {
     writer: Chunked<'s>,
     peer: &'s Stream,
     plugins: &'p mut Plugins,
+    events: &'p mut Leases,
+    target_protocol: u32,
+    stream: bool,
+    quota_source: Option<String>,
     response_begun: bool,
     transform: Option<&'t mut protocol::StreamTransform<'f>>,
     buffered: Vec<u8>,
@@ -873,6 +948,12 @@ impl Forward<'_, '_, '_, '_> {
         };
         self.plugins
             .response_begin(self.writer.status as u32, content_type)?;
+        self.events.head(
+            self.writer.status,
+            self.target_protocol,
+            self.stream,
+            content_type,
+        );
         self.response_begun = true;
         Ok(())
     }
@@ -959,6 +1040,13 @@ impl Sink for Forward<'_, '_, '_, '_> {
             self.ready = self.writer.status >= 200;
             self.deferred_rejection =
                 self.ready && self.defer_rejections && matches!(self.writer.status, 429 | 503);
+            if self.ready
+                && let Some(source) = &self.quota_source
+                && let Some(event) = events::quota(source, &self.writer.extra, events::now_ms())
+            {
+                self.plugins
+                    .emit_event(zcalld_plugin_api::events::QUOTA_OBSERVED, &event);
+            }
             if self.ready && !self.deferred_rejection {
                 self.begin_response()?;
             }
@@ -995,6 +1083,7 @@ impl Sink for Forward<'_, '_, '_, '_> {
             ResponseWriter {
                 writer: &mut self.writer,
                 plugins: self.plugins,
+                events: self.events,
             }
             .write_all(&buffered)
             .map_err(|e| e.to_string())?;
@@ -1016,12 +1105,14 @@ impl Sink for Forward<'_, '_, '_, '_> {
             let mut output = ResponseWriter {
                 writer: &mut self.writer,
                 plugins: self.plugins,
+                events: self.events,
             };
             return transform(bytes, false, &mut output);
         }
         ResponseWriter {
             writer: &mut self.writer,
             plugins: self.plugins,
+            events: self.events,
         }
         .write_all(bytes)
         .map_err(|e| e.to_string())
@@ -1034,6 +1125,7 @@ fn execute(
     options: curl::Options<'_>,
     forward: ForwardOptions<'_>,
     transform: Option<&mut protocol::StreamTransform<'_>>,
+    events: &mut Leases,
 ) -> Outcome {
     let Upstream {
         client,
@@ -1072,6 +1164,10 @@ fn execute(
         },
         peer,
         plugins,
+        events,
+        target_protocol: protocol_id(forward.target),
+        stream: forward.stream,
+        quota_source: forward.quota_source,
         response_begun: false,
         transform,
         buffered: Vec::new(),
@@ -1121,6 +1217,7 @@ fn execute(
             ResponseWriter {
                 writer: &mut sink.writer,
                 plugins: sink.plugins,
+                events: sink.events,
             }
             .write_all(&body)
             .map_err(|e| e.to_string())?;
@@ -1131,6 +1228,7 @@ fn execute(
             let mut output = ResponseWriter {
                 writer: &mut sink.writer,
                 plugins: sink.plugins,
+                events: sink.events,
             };
             transform(&[], true, &mut output)?;
         }
@@ -1140,16 +1238,21 @@ fn execute(
             sink.writer.maximum.saturating_sub(sink.writer.bytes),
         )? {
             sink.writer.write_all(&bytes).map_err(|e| e.to_string())?;
+            sink.events.body(&bytes);
         }
         sink.writer.finish().map_err(|e| e.to_string())
     });
     match result {
-        Ok(()) => Outcome {
-            status: sink.writer.status,
-            bytes: sink.writer.bytes,
-            rejected: None,
-        },
+        Ok(()) => {
+            sink.events.finish(sink.writer.status, true);
+            Outcome {
+                status: sink.writer.status,
+                bytes: sink.writer.bytes,
+                rejected: None,
+            }
+        }
         Err(error) => {
+            sink.events.finish(502, false);
             if !sink.writer.started {
                 let _ = http::error(sink.writer.socket, 502, &error);
             }
@@ -1169,6 +1272,8 @@ fn send_rejection(
     plugins: &mut Plugins,
     rejected: RejectedResponse,
     maximum: usize,
+    source: Protocol,
+    events: &mut Leases,
 ) {
     let mut writer = Chunked {
         socket,
@@ -1181,9 +1286,16 @@ fn send_rejection(
     };
     let result = (|| -> Result<(), String> {
         plugins.response_begin(writer.status as u32, &writer.content_type)?;
+        events.head(
+            writer.status,
+            protocol_id(source),
+            false,
+            &writer.content_type,
+        );
         ResponseWriter {
             writer: &mut writer,
             plugins,
+            events,
         }
         .write_all(&rejected.body)
         .map_err(|e| e.to_string())?;
@@ -1191,9 +1303,11 @@ fn send_rejection(
             plugins.response_write(&[], true, maximum.saturating_sub(writer.bytes))?
         {
             writer.write_all(&bytes).map_err(|e| e.to_string())?;
+            events.body(&bytes);
         }
         writer.finish().map_err(|e| e.to_string())
     })();
+    events.finish(writer.status, result.is_ok());
     if let Err(error) = result
         && !writer.started
     {
@@ -1224,6 +1338,7 @@ mod tests {
         socket: &'a mut dyn zcall::server::Connection,
         peer: &'a Stream,
         plugins: &'a mut Plugins,
+        events: &'a mut Leases,
     ) -> Forward<'a, 'a, 'a, 'a> {
         Forward {
             writer: Chunked {
@@ -1237,6 +1352,10 @@ mod tests {
             },
             peer,
             plugins,
+            events,
+            target_protocol: protocol_id(Protocol::OpenAiResponses),
+            stream: false,
+            quota_source: None,
             response_begun: false,
             transform: None,
             buffered: Vec::new(),
@@ -1255,9 +1374,10 @@ mod tests {
             let mut plugins = Plugins::load(&[]).unwrap();
             let deferred = matches!(status, 429 | 503);
             {
+                let mut events = Leases::default();
                 let peer = &socket;
                 let mut connection = peer;
-                let mut sink = rejection_forward(&mut connection, peer, &mut plugins);
+                let mut sink = rejection_forward(&mut connection, peer, &mut plugins, &mut events);
                 sink.header(format!("HTTP/1.1 {status} Fixture\r\n").as_bytes())
                     .unwrap();
                 sink.header(b"Content-Type: application/json\r\n").unwrap();
@@ -1281,9 +1401,10 @@ mod tests {
         let (socket, output) = downstream();
         let mut plugins = Plugins::load(&[]).unwrap();
         {
+            let mut events = Leases::default();
             let peer = &socket;
             let mut connection = peer;
-            let mut sink = rejection_forward(&mut connection, peer, &mut plugins);
+            let mut sink = rejection_forward(&mut connection, peer, &mut plugins, &mut events);
             sink.header(b"HTTP/1.1 503 Service Unavailable\r\n")
                 .unwrap();
             sink.header(b"Retry-After: 9\r\n").unwrap();

@@ -49,6 +49,13 @@ for script in ("test-codex-metadata.py", "test-codex-compaction.py", "test-codex
     subprocess.run([sys.executable, str(root / "scripts" / script), *common,
                     "--pluginctl", str(pluginctl), "--community-plugin", str(community),
                     "--routing-plugin", str(routing)], cwd=root, check=True)
+desktop = (binary.parent / (library_prefix + "zcalld_desktop" + library_suffix)).resolve(strict=True)
+subprocess.run([sys.executable, str(root / "scripts/test-desktop.py"),
+                "--binary", str(binary), "--desktop-plugin", str(desktop)], cwd=root, check=True)
+subprocess.run([sys.executable, str(root / "scripts/test-desktop-host.py"), *common,
+                "--pluginctl", str(pluginctl), "--routing-plugin", str(routing),
+                "--desktop-plugin", str(desktop), "--expect-privacy-events"],
+               cwd=root, check=True)
 bun = shutil.which("bun")
 if bun is None:
     raise SystemExit("native generation cancellation acceptance requires Bun")
@@ -58,4 +65,4 @@ subprocess.run([sys.executable, str(root / "scripts/test-generation-cancellation
                 "--community-host", str(root / "extensions/compat/community/vendor/host.js"),
                 "--community-pi", str(root / "extensions/compat/community/vendor/pi.js")],
                cwd=root, check=True)
-print("Native compatibility accepted: privacy, routing, MCP, generated builtin fetch and Codex metadata/compaction/credit policy over real Rust/Go/Bun IPC")
+print("Native compatibility accepted: privacy, routing, MCP, Codex metadata/credit policy, generation cancellation and desktop lifecycle over real Rust/Go/Bun IPC")
