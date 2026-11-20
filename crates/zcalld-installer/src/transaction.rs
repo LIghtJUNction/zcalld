@@ -833,16 +833,18 @@ mod tests {
             file.write_all(manifest.stringify().as_bytes()).unwrap();
             private::mode(&file, 0o644).unwrap();
             drop(file);
-            let output = self.0.join(format!("bundle-{version}.tar"));
-            let status = std::process::Command::new(process::executable("tar").unwrap())
-                .arg("-cf")
-                .arg(&output)
+            let extension = if cfg!(windows) { "zip" } else { "tar" };
+            let output = self.0.join(format!("bundle-{version}.{extension}"));
+            let status = std::process::Command::new(archive::tar().unwrap())
+                .current_dir(&self.0)
+                .arg(if cfg!(windows) { "-caf" } else { "-cf" })
+                .arg(output.file_name().unwrap())
                 .arg("-C")
-                .arg(&input)
+                .arg(input.file_name().unwrap())
                 .arg(&stem)
                 .status()
                 .unwrap();
-            assert!(status.success());
+            assert!(status.success(), "native archive creation failed: {status}");
             Plan::local(
                 &output,
                 &hash::sha256_file(&output, crate::MAX_ARCHIVE).unwrap(),

@@ -5,6 +5,7 @@
 - Explicitly release installer and runtime exclusive locks when their owning operation ends, including when a duplicate descriptor remains open.
 - Inspect canonical Windows drive roots as complete paths while retaining all ancestor, reparse-point and noncanonical-path checks.
 - Add deterministic lock-lifetime regressions and a native Windows canonical-path regression.
+- Use the native Windows archive tool for ZIP support and pass archive names relative to their private directory, independent of Git Bash PATH ordering.
 - Carry forward the Claude provider and complete portable compat bundle from the 0.4.1 validation candidate; that candidate did not pass the full native release gate and was not published.
 
 ## 0.4.1 — 2026-11-20
