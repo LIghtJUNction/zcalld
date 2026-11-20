@@ -17,6 +17,8 @@ import time
 import unittest
 import zipfile
 
+from package import COMPAT_TARGETS, compat_required, merge_compat_archive
+
 
 def digest(data):
     return hashlib.sha256(data).hexdigest()
@@ -41,6 +43,94 @@ def required(target):
 def snapshot(root):
     return {p.relative_to(root).as_posix(): digest(p.read_bytes())
             for p in root.rglob("*") if p.is_file()} if root.exists() else {}
+
+
+class CompatPackageTests(unittest.TestCase):
+    """Exercise portable paths and provenance without compiling or running Go."""
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="zci-package-")
+        self.root = Path(self.temp.name)
+        self.stage = self.root / "stage"
+        self.stage.mkdir()
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def archive(self, target, change=None, extras=()):
+        windows = "windows" in target
+        prefix = "" if windows else "usr/"
+        files = {path: b"packaged fixture\n" for path in compat_required(target)}
+        build = dict(version="0.3.1", revision="b" * 40, target=COMPAT_TARGETS[target],
+                     cgo=False, model_weights_included=False)
+        if change:
+            change(files, build)
+        files["share/doc/zcalld-compat/BUILD.json"] = json.dumps(build).encode()
+        archive = self.root / ("compat.zip" if windows else "compat.tar.gz")
+        if windows:
+            with zipfile.ZipFile(archive, "w") as out:
+                for path, data in files.items():
+                    out.writestr(prefix + path, data)
+        else:
+            with tarfile.open(archive, "w:gz") as out:
+                for path, data in files.items():
+                    item = tarfile.TarInfo(prefix + path)
+                    item.size = len(data)
+                    out.addfile(item, io.BytesIO(data))
+                for path, kind in extras:
+                    item = tarfile.TarInfo(prefix + path)
+                    if kind == "symlink":
+                        item.type, item.linkname = tarfile.SYMTYPE, "outside"
+                    elif kind == "hardlink":
+                        item.type, item.linkname = tarfile.LNKTYPE, prefix + compat_required(target)[0]
+                    out.addfile(item)
+        return archive
+
+    def test_layout_and_executable_modes_for_all_native_targets(self):
+        # The official Go dependency notices include a module version after @.
+        license_path = "share/licenses/zcalld-compat/third-party/golang.org__x__text@v0.39.0.txt"
+        license_data = b"fixture third-party license\n"
+        for target in COMPAT_TARGETS:
+            with self.subTest(target=target):
+                stage = self.stage / target
+                stage.mkdir()
+                archive = self.archive(target, lambda files, build: files.update({license_path: license_data}))
+                merge_compat_archive(archive, stage, target, "0.3.1", "b" * 40)
+                self.assertEqual(set(snapshot(stage)), set(compat_required(target)) | {license_path})
+                self.assertEqual((stage / license_path).read_bytes(), license_data)
+                self.assertFalse((stage / "usr").exists())
+                if os.name != "nt":
+                    for index, path in enumerate([*compat_required(target), license_path]):
+                        self.assertEqual(stat.S_IMODE((stage / path).stat().st_mode),
+                                         0o755 if index < 3 else 0o644)
+
+    def test_missing_helper_wrong_source_and_core_collision_are_rejected(self):
+        target = "x86_64-unknown-linux-gnu"
+        changes = [lambda files, build: files.pop(compat_required(target)[2])]
+        for field, value in (("version", "dev"), ("revision", "c" * 40),
+                             ("target", "windows-x86_64"), ("cgo", True)):
+            changes.append(lambda files, build, field=field, value=value: build.update({field: value}))
+        for change in changes:
+            with self.subTest(change=change):
+                with self.assertRaises(ValueError):
+                    merge_compat_archive(self.archive(target, change), self.stage, target, "0.3.1", "b" * 40)
+                self.assertEqual(snapshot(self.stage), {})
+        occupied = self.stage / compat_required(target)[0]
+        occupied.parent.mkdir(parents=True)
+        occupied.write_bytes(b"existing core-owned bytes")
+        with self.assertRaises(ValueError):
+            merge_compat_archive(self.archive(target), self.stage, target, "0.3.1", "b" * 40)
+        self.assertEqual(occupied.read_bytes(), b"existing core-owned bytes")
+
+    def test_links_escape_and_case_collisions_are_rejected_before_writes(self):
+        target = "x86_64-unknown-linux-gnu"
+        for path, kind in (("../escape", "file"), ("libexec/zcalld/link", "symlink"),
+                           ("libexec/zcalld/hard", "hardlink"),
+                           ("libexec/zcalld/CON.txt", "file"),
+                           ("libexec/Zcalld/extra", "file")):
+            with self.subTest(path=path, kind=kind), self.assertRaises(ValueError):
+                merge_compat_archive(self.archive(target, extras=[(path, kind)]),
+                                     self.stage, target, "0.3.1", "b" * 40)
+            self.assertEqual(snapshot(self.stage), {})
 
 
 class InstallerTests(unittest.TestCase):
@@ -326,15 +416,100 @@ class InstallerTests(unittest.TestCase):
             with tarfile.open(archive) as package:
                 raw = package.extractfile(root + "/INSTALL.json").read()
         manifest = json.loads(raw)
-        self.serial += 1
-        plan = self.root / f"private-plan-{self.serial}" / "plan.json"
-        self.call("plan", "--archive", archive, "--sha256", digest(archive.read_bytes()),
-                  "--version", self.version, "--source", manifest["source"],
-                  "--prefix", self.prefix, "--out", plan)
+        self.assertTrue(set(compat_required(self.target)).issubset(manifest["required"]))
+        def published_plan(prefix):
+            self.serial += 1
+            plan = self.root / f"private-plan-{self.serial}" / "plan.json"
+            self.call("plan", "--archive", archive, "--sha256", digest(archive.read_bytes()),
+                      "--version", self.version, "--source", manifest["source"],
+                      "--prefix", prefix, "--out", plan)
+            return plan
+        plan = published_plan(self.prefix)
         result = self.call("apply", "--plan", plan)
         self.assertEqual(result["phase"], "committed")
         helper = self.prefix / "bin" / ("zcalld-installer.exe" if os.name == "nt" else "zcalld-installer")
         self.assertEqual(digest(helper.read_bytes()), digest(self.helper))
+        self.assert_installed_compat(self.prefix, "fresh")
+
+        # A previous legitimate core-only manifest must remain upgradable and
+        # reversible; the new required helpers must not invalidate its receipt.
+        legacy = self.root / "legacy-runtime"
+        self.call("apply", "--plan", self.plan(self.bundle("legacy-core-only"), prefix=legacy))
+        before = snapshot(legacy)
+        updated = self.call("apply", "--plan", published_plan(legacy))
+        self.assertEqual(updated["phase"], "committed")
+        self.assert_installed_compat(legacy, "updated")
+        self.assertEqual(self.call("rollback", "--transaction", updated["transaction"])["phase"], "rolled_back")
+        self.assertEqual(snapshot(legacy), before)
+        self.assertEqual(self.call("apply", "--plan", published_plan(legacy))["phase"], "committed")
+        self.assert_installed_compat(legacy, "reapplied")
+
+        if self.target.endswith("linux-gnu"):
+            # AUR -bin deliberately uses this core-only install entry point.
+            dest = self.root / "aur-core-only"
+            result = subprocess.run(["bash", str(self.prefix / "install.sh")],
+                                    env={**self.env, "DESTDIR": str(dest), "PREFIX": "/usr"},
+                                    capture_output=True, text=True, timeout=20)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertTrue((dest / "usr/bin/zcalld").is_file())
+            self.assertFalse((dest / "usr/libexec/zcalld").exists())
+            self.assertFalse((dest / "usr/share/licenses/zcalld-compat").exists())
+
+    def assert_installed_compat(self, prefix, label):
+        suffix = ".exe" if os.name == "nt" else ""
+        build = json.loads((prefix / "share/doc/zcalld-compat/BUILD.json").read_bytes())
+        repo = Path(__file__).resolve().parent.parent
+        pin = subprocess.check_output(["git", "ls-tree", "HEAD", "--", "extensions/compat"],
+                                      cwd=repo, text=True).split()
+        self.assertEqual(pin[:2], ["160000", "commit"])
+        self.assertEqual(build["revision"], pin[2])
+        self.assertEqual(build["version"], (repo / "extensions/compat/VERSION").read_text().strip())
+        self.assertEqual(build["target"], COMPAT_TARGETS[self.target])
+        self.assertIs(build["cgo"], False)
+        compat = repo / "extensions/compat"
+        resources = [(compat / "community/vendor" / name, "libexec/zcalld/" + name)
+                     for name in ("host.js", "pi.js", "mcp-tools.mjs")]
+        resources += [(path, "libexec/zcalld/builtin/" + path.name)
+                      for path in sorted((compat / "community/builtin").glob("*.mjs"))]
+        resources.append((compat / "community/builtin/catalog.json", "libexec/zcalld/builtin/catalog.json"))
+        resources += [(path, "share/licenses/zcalld-compat/third-party/"
+                        + path.relative_to(compat / "LICENSES").as_posix())
+                      for path in (compat / "LICENSES").rglob("*") if path.is_file()]
+        for source, path in resources:
+            self.assertEqual((prefix / path).read_bytes(), source.read_bytes(), path)
+        for name in ("zcalld-pluginctl", "zcalld-privacy", "zcalld-claude-tui"):
+            binary = prefix / "libexec/zcalld" / (name + suffix)
+            output = subprocess.check_output([str(binary), "--version"], env=self.env,
+                                             text=True, timeout=10).strip()
+            self.assertEqual(output, f"{name} {build['version']} ({build['revision']})")
+            if os.name != "nt":
+                self.assertEqual(stat.S_IMODE(binary.stat().st_mode), 0o755)
+
+        directory = self.home / ("portable-" + label)
+        directory.mkdir(mode=0o700)
+        config = directory / "config.conf"
+        original = ("[server]\nlisten = 127.0.0.1:39415\nunix_socket = none\n"
+                    "[provider fixture]\nbase_url = http://127.0.0.1:1/v1\nauth = none\n"
+                    "[route fixture]\nprovider = fixture\nmodel = fixture\n")
+        config.write_text(original, encoding="utf-8", newline="\n")
+        core = prefix / "bin" / ("zcalld" + suffix)
+        # No helper environment override: this proves the installed locator,
+        # not a build-tree or /usr fallback. Configure never starts Bun/auth.
+        self.call("plugins", "runtime", "configure", "--config", config, "--json", executable=core)
+        host = json.loads((directory / "extensions/host.json").read_bytes())
+        self.assertEqual(Path(host["pluginctl"]).resolve(),
+                         (prefix / "libexec/zcalld" / ("zcalld-pluginctl" + suffix)).resolve())
+        for key, name in (("host", "host.js"), ("pi", "pi.js")):
+            self.assertEqual(Path(host[key]).read_bytes(), (prefix / "libexec/zcalld" / name).read_bytes())
+        result = subprocess.run([str(core), "privacy", "set", "secrets", "--config", str(config), "--json"],
+                                env=self.env, capture_output=True, text=True, timeout=35)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        privacy = json.loads(result.stdout)
+        self.assertTrue(privacy["configured"])
+        binding = json.loads((directory / "privacy/plugin.json").read_bytes())
+        self.assertEqual(Path(binding["worker"]).resolve(),
+                         (prefix / "libexec/zcalld" / ("zcalld-privacy" + suffix)).resolve())
+        self.assertEqual(config.read_text(encoding="utf-8"), original)
 
 
 if __name__ == "__main__":

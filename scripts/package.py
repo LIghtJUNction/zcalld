@@ -8,8 +8,11 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import shutil
+import stat
 import subprocess
+import sys
 import tarfile
 import tempfile
 import tomllib
@@ -19,6 +22,146 @@ ROOT = Path(__file__).resolve().parent.parent
 PLUGINS = ('zcalld_aliases', 'zcalld_policy', 'zcalld_redact', 'zcalld_community', 'zcalld_plugin_routing', 'zcalld_desktop')
 TARGETS = ('x86_64-unknown-linux-gnu', 'aarch64-unknown-linux-gnu',
            'x86_64-pc-windows-msvc', 'aarch64-apple-darwin', 'x86_64-apple-darwin')
+COMPAT_TARGETS = dict(zip(TARGETS, ('linux-x86_64', 'linux-aarch64',
+                                  'windows-x86_64', 'macos-aarch64', 'macos-x86_64')))
+COMPAT_HELPERS = ('zcalld-pluginctl', 'zcalld-privacy', 'zcalld-claude-tui')
+
+
+def compat_required(target):
+    suffix = '.exe' if 'windows' in target else ''
+    return ([f'libexec/zcalld/{name}{suffix}' for name in COMPAT_HELPERS]
+            + ['libexec/zcalld/' + name for name in
+               ('host.js', 'pi.js', 'mcp-tools.mjs', 'builtin/catalog.json')]
+            + ['share/doc/zcalld-compat/BUILD.json',
+               'share/licenses/zcalld-compat/LICENSE',
+               'share/licenses/zcalld-compat/LICENSE.magpie'])
+
+
+def compat_source():
+    """Build the exact gitlink, including official Version/Revision injection."""
+    source = ROOT / 'extensions/compat'
+    entry = run('git', 'ls-tree', 'HEAD', '--', 'extensions/compat').split()
+    if (len(entry) != 4 or entry[:2] != ['160000', 'commit']
+            or entry[3] != 'extensions/compat' or not re.fullmatch('[0-9a-f]{40}', entry[2])):
+        raise ValueError('native packaging requires the pinned compat gitlink')
+    revision = entry[2]
+    if (run('git', 'rev-parse', 'HEAD', cwd=source) != revision
+            or run('git', 'status', '--porcelain', '--untracked-files=all', cwd=source)):
+        raise ValueError('compat checkout differs from its clean pinned source')
+    version = (source / 'VERSION').read_text(encoding='utf-8').strip()
+    if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', version):
+        raise ValueError('invalid pinned compat version')
+    return source, version, revision
+
+
+def merge_compat_archive(archive, stage, target, version, revision):
+    """Merge only regular, bounded official compat files into the core prefix."""
+    windows = 'windows' in target
+    if archive.stat().st_size > 256 * 1024 * 1024:
+        raise ValueError('compat archive exceeds its limit')
+    helpers = set(compat_required(target)[:3])
+    with (zipfile.ZipFile(archive) if windows else tarfile.open(archive, 'r:gz')) as package:
+        members = package.infolist() if windows else package.getmembers()
+        if len(members) > 2048:
+            raise ValueError('compat archive has too many entries')
+        files, folded, names, total = {}, {}, set(), 0
+        for member in members:
+            name = member.filename if windows else member.name
+            directory = member.is_dir() if windows else member.isdir()
+            if windows:
+                kind = stat.S_IFMT(member.external_attr >> 16)
+                regular = kind in (0, stat.S_IFREG) and not member.flag_bits & 1
+            else:
+                regular = member.isfile()
+            if (not directory and not regular) or (windows and directory and kind not in (0, stat.S_IFDIR)):
+                raise ValueError('compat archive contains a link or special entry')
+            plain = name[:-1] if directory and name.endswith('/') else name
+            parts = plain.split('/')
+            devices = {'CON', 'PRN', 'AUX', 'NUL'} | {f'{p}{n}' for p in ('COM', 'LPT') for n in range(1, 10)}
+            if (not re.fullmatch(r'[A-Za-z0-9/._+@-]+', plain) or len(plain) > 384
+                    or len(parts) > 20 or any(p in ('', '.', '..') or len(p) > 128
+                    or p.endswith('.') or p.split('.')[0].upper() in devices for p in parts)):
+                raise ValueError('compat archive contains an unsafe path')
+            if plain.casefold() in names:
+                raise ValueError('compat archive contains duplicate paths')
+            names.add(plain.casefold())
+            if not windows:
+                if parts[0] != 'usr':
+                    raise ValueError('compat archive has an unexpected prefix')
+                parts = parts[1:]
+            for count in range(1, len(parts) + 1):
+                prefix = '/'.join(parts[:count])
+                if folded.setdefault(prefix.casefold(), prefix) != prefix:
+                    raise ValueError('compat archive contains case-colliding paths')
+            if directory:
+                continue
+            path = '/'.join(parts)
+            if not (path.startswith(('libexec/zcalld/', 'share/doc/zcalld-compat/',
+                                     'share/licenses/zcalld-compat/')) or path in (
+                    'lib/systemd/user/zcalld-maintenance.service',
+                    'lib/systemd/user/zcalld-maintenance.timer')):
+                raise ValueError('compat archive contains an unexpected component')
+            size = member.file_size if windows else member.size
+            total += size
+            if size < 0 or size > 128 * 1024 * 1024 or total > 512 * 1024 * 1024:
+                raise ValueError('compat contents exceed their size limit')
+            files[path] = (member, size)
+        for path in compat_required(target):
+            if path not in files or files[path][1] == 0:
+                raise ValueError('compat archive is missing a required helper or runtime asset')
+        for path in files:
+            if any('/'.join(path.split('/')[:i]) in files for i in range(1, len(path.split('/')))):
+                raise ValueError('compat file is also a parent directory')
+        opener = package.open if windows else package.extractfile
+        build_member, build_size = files['share/doc/zcalld-compat/BUILD.json']
+        if build_size > 65536:
+            raise ValueError('compat build metadata exceeds its limit')
+        with opener(build_member) as stream:
+            build = json.loads(stream.read(65537))
+        if (not isinstance(build, dict) or build.get('version') != version
+                or build.get('revision') != revision or build.get('target') != COMPAT_TARGETS[target]
+                or build.get('cgo') is not False or build.get('model_weights_included') is not False):
+            raise ValueError('compat archive does not match the pinned release build')
+        existing = {p.relative_to(stage).as_posix().casefold(): p
+                    for p in stage.rglob('*')}
+        for path in files:
+            if path.casefold() in existing:
+                raise ValueError('compat archive would overwrite a core component')
+            for parent in Path(path).parents:
+                if parent == Path('.'):
+                    continue
+                found = existing.get(parent.as_posix().casefold())
+                if found is not None and (found.is_symlink() or not found.is_dir()
+                        or found.relative_to(stage).as_posix() != parent.as_posix()):
+                    raise ValueError('compat archive has a conflicting parent')
+        for path, (member, size) in files.items():
+            destination = stage / path
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            with opener(member) as source, destination.open('xb') as output:
+                remaining = size
+                while remaining:
+                    chunk = source.read(min(remaining, 65536))
+                    if not chunk:
+                        raise ValueError('compat archive entry ended early')
+                    output.write(chunk)
+                    remaining -= len(chunk)
+                if source.read(1):
+                    raise ValueError('compat archive entry exceeds its declared size')
+            destination.chmod(0o755 if path in helpers else 0o644)
+
+
+def stage_compat(stage, target):
+    source, version, revision = compat_source()
+    with tempfile.TemporaryDirectory(prefix='zcalld-compat-package-') as directory:
+        output = Path(directory)
+        subprocess.run([sys.executable, str(source / 'scripts/release.py'), 'build',
+                        '--target', COMPAT_TARGETS[target], '--out', str(output)],
+                       cwd=source, check=True)
+        if compat_source() != (source, version, revision):
+            raise ValueError('compat source changed during its build')
+        suffix = '.zip' if 'windows' in target else '.tar.gz'
+        archive = output / f'zcalld-compat-{version}-{COMPAT_TARGETS[target]}{suffix}'
+        merge_compat_archive(archive, stage, target, version, revision)
 
 
 def run(*args, cwd=ROOT):
@@ -86,6 +229,9 @@ def install_manifest(stage, version, target, source):
     darwin = 'darwin' in target
     suffix = '.exe' if windows else ''
     required = [f'bin/zcalld{suffix}', f'bin/zcalld-installer{suffix}']
+    # Keep the installer's legacy minimum compatible with old prefix receipts.
+    # New portable archives explicitly require the complete compat cohort.
+    required.extend(compat_required(target))
     required.extend('lib/zcalld/plugins/' + (name + '.dll' if windows else 'lib' + name + ('.dylib' if darwin else '.so'))
                     for name in (*PLUGINS, *(() if 'zcalld_desktop' in PLUGINS else ('zcalld_desktop',))))
     if windows:
@@ -199,6 +345,7 @@ def native_archive(args, output):
             if codec_licenses:
                 for copyright_file in Path(codec_licenses).glob('*/copyright'):
                     shutil.copy2(copyright_file, licenses / (copyright_file.parent.name + '.txt'))
+        stage_compat(stage, target)
         install_manifest(stage, ver(), target, run('git', 'rev-parse', 'HEAD'))
         if windows:
             name = output / (stem + '.zip')

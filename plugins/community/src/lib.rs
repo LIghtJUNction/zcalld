@@ -17,6 +17,7 @@ use zcalld_plugin_api::{
     ProviderPluginExport, ResponsePlugin, ResponsePluginExport, status,
 };
 use zplugin::{Error, OwnedResource, ResourceHandler, Result};
+mod claude;
 mod codex;
 mod maintenance;
 mod mcp;
@@ -40,6 +41,7 @@ struct Context {
 struct Community {
     config: Value,
     host: Option<(u64, Host)>,
+    claude_host: Option<Host>,
     pending: Option<(Vec<u8>, Vec<u8>)>,
     ctx: Rc<RefCell<Context>>,
 }
@@ -56,13 +58,19 @@ fn read(path: &str) -> Result<Value> {
 impl Community {
     fn configure_host(&mut self, c: &str) -> Result<()> {
         let config = json::parse(c.as_bytes()).map_err(|_| Error::InvalidArgument)?;
-        for k in ["bun", "host", "pi", "registry"] {
-            let path = config.get(k).as_str().ok_or(Error::InvalidArgument)?;
-            if !Path::new(path).is_absolute() || !Path::new(path).is_file() {
-                return Err(Error::InvalidArgument);
+        let native_only = claude::validate_configuration(&config)?;
+        if !native_only {
+            for k in ["bun", "host", "pi", "registry"] {
+                let path = config.get(k).as_str().ok_or(Error::InvalidArgument)?;
+                if !Path::new(path).is_absolute() || !Path::new(path).is_file() {
+                    return Err(Error::InvalidArgument);
+                }
             }
         }
         let key = config.stringify();
+        if self.config.stringify() != key {
+            self.claude_host = None;
+        }
         self.ctx = CONTEXTS.with(|all| {
             let mut all = all.borrow_mut();
             if let Some(value) = all.get(&key).and_then(Weak::upgrade) {
@@ -198,6 +206,9 @@ impl GatewayPlugin for Community {
         Ok(0)
     }
     fn request(&mut self, protocol: u32, input: &[u8], output: &mut [u8]) -> Result<u64> {
+        if claude::native_only(&self.config) {
+            return Ok(0);
+        }
         if !self.pending.as_ref().is_some_and(|p| p.0 == input) {
             self.pending = None;
             self.close_gateway();
@@ -381,6 +392,13 @@ impl ProviderPlugin for Community {
     fn fetch(&mut self, request: &[u8]) -> Result<OwnedResource> {
         let started = Instant::now();
         let mut params = json::parse(request).map_err(|_| Error::InvalidArgument)?;
+        // The native CLI provider never enters Bun or legacy account fallback.
+        if params.get("provider").as_str() == Some("builtin:claude") {
+            return claude::fetch(self, params, started);
+        }
+        if claude::native_only(&self.config) {
+            return Err(Error::Unsupported);
+        }
         // Maintenance may use only an explicit configured provider account,
         // never the legacy default/first-account generation fallback.
         let explicit_account = params

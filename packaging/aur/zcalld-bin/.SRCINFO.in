@@ -12,7 +12,7 @@ pkgbase = zcalld-bin
 	depends = zstd
 	depends = zlib
 	optdepends = systemd: system and user service management
-	optdepends = zcalld-compat>=0.1.6: privacy, audit history, OAuth accounts and community plugins
+	optdepends = zcalld-compat>=0.3.1: privacy, audit history, OAuth accounts and community plugins
 	optdepends = zcall-gui: optional native desktop interface
 	optdepends = libsecret: configure Zed credentials through Secret Service
 	provides = zcalld=@VERSION@

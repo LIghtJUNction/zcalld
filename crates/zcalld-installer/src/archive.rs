@@ -33,7 +33,7 @@ pub fn safe_path(path: &str) -> Result<(), String> {
         || path.ends_with('/')
         || !path
             .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b"/._-+".contains(&b))
+            .all(|b| b.is_ascii_alphanumeric() || b"/._-+@".contains(&b))
     {
         return Err("archive contains an unsafe path".into());
     }
@@ -531,6 +531,7 @@ mod tests {
             "bin/zcalld",
             "lib/zcalld/plugins/libzcalld_desktop.so",
             "share/doc/NOTICE.txt",
+            "share/licenses/zcalld-compat/third-party/golang.org__x__text@v0.39.0.txt",
         ] {
             assert!(safe_path(name).is_ok());
         }

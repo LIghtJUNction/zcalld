@@ -21,6 +21,8 @@ check-native: build
 	mkdir -p _release/native-compat
 	go -C extensions/compat build -mod=readonly -trimpath -o "../../_release/native-compat/zcalld-pluginctl$(ZCALLD_NATIVE_EXE)" ./cmd/zcalld-pluginctl
 	go -C extensions/compat build -mod=readonly -trimpath -o "../../_release/native-compat/zcalld-privacy$(ZCALLD_NATIVE_EXE)" ./cmd/zcalld-privacy
+	go -C extensions/compat build -mod=readonly -trimpath -o "../../_release/native-compat/zcalld-claude-tui$(ZCALLD_NATIVE_EXE)" ./cmd/zcalld-claude-tui
+	go -C extensions/compat test -mod=readonly -c -o "../../_release/native-compat/fake-claude$(ZCALLD_NATIVE_EXE)" ./internal/claudetui
 	python3 scripts/test-native-compat.py --binary "$(CARGO_OUTPUT_DIR)/release/zcalld$(ZCALLD_NATIVE_EXE)"
 
 install:

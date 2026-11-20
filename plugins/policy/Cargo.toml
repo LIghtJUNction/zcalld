@@ -13,5 +13,5 @@ name = "zcalld_policy"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-zcalld-plugin-api = { path = "../../crates/zcalld-plugin-api", version = "=0.4.0" }
+zcalld-plugin-api = { path = "../../crates/zcalld-plugin-api", version = "=0.4.1" }
 zplugin = { version = "=0.3.1", default-features = false, features = ["std", "macros"], git = "https://github.com/LIghtJUNction/zplugin.git"}
