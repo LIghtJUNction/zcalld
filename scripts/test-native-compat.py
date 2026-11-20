@@ -12,6 +12,8 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--binary", type=Path)
 parser.add_argument("--pluginctl", type=Path)
 parser.add_argument("--privacy-worker", type=Path)
+parser.add_argument("--claude-helper", type=Path)
+parser.add_argument("--claude-fake", type=Path)
 args = parser.parse_args()
 executable_suffix = ".exe" if os.name == "nt" else ""
 library_prefix = "" if os.name == "nt" else "lib"
@@ -25,9 +27,24 @@ pluginctl = (args.pluginctl or Path(os.environ.get(
 privacy_worker = (args.privacy_worker or Path(os.environ.get(
     "ZCALLD_TEST_PRIVACY_WORKER", str(root / "_release/native-compat" / ("zcalld-privacy" + executable_suffix))
 ))).resolve(strict=True)
+claude_helper = (args.claude_helper or Path(os.environ.get(
+    "ZCALLD_TEST_CLAUDE_HELPER", str(root / "_release/native-compat" / ("zcalld-claude-tui" + executable_suffix))
+))).resolve(strict=True)
+claude_fake = (args.claude_fake or Path(os.environ.get(
+    "ZCALLD_TEST_CLAUDE_FAKE", str(root / "_release/native-compat" / ("fake-claude" + executable_suffix))
+))).resolve(strict=True)
+# Both binaries are built on this runner. The fake is a test-only Go binary;
+# it exercises the real PTY/ConPTY helper without installing Claude or any auth.
+subprocess.run([sys.executable, str(root / "extensions/compat/scripts/test-claude-tui.py"),
+                "--helper", str(claude_helper), "--fake-claude", str(claude_fake), "-v"],
+               cwd=root, check=True)
 redact = (binary.parent / (library_prefix + "zcalld_redact" + library_suffix)).resolve(strict=True)
 routing = (binary.parent / (library_prefix + "zcalld_plugin_routing" + library_suffix)).resolve(strict=True)
 community = (binary.parent / (library_prefix + "zcalld_community" + library_suffix)).resolve(strict=True)
+subprocess.run([sys.executable, str(root / "extensions/compat/scripts/test-claude-provider.py"),
+                "--binary", str(binary), "--community-plugin", str(community),
+                "--pluginctl", str(pluginctl), "--claude-helper", str(claude_helper),
+                "--fake-claude", str(claude_fake), "-v"], cwd=root, check=True)
 common = ["--binary", str(binary), "--redact-plugin", str(redact),
           "--privacy-worker", str(privacy_worker)]
 subprocess.run([sys.executable, str(root / "scripts/test-privacy-init.py"), *common],
@@ -68,4 +85,4 @@ subprocess.run([sys.executable, str(root / "scripts/test-generation-cancellation
                 "--community-host", str(root / "extensions/compat/community/vendor/host.js"),
                 "--community-pi", str(root / "extensions/compat/community/vendor/pi.js")],
                cwd=root, check=True)
-print("Native compatibility accepted: privacy, routing, MCP, Codex metadata/credit policy, generation cancellation, weekly maintenance and desktop lifecycle over real Rust/Go/Bun IPC")
+print("Native compatibility accepted: privacy, routing, MCP, Codex metadata/credit policy, generation cancellation, weekly maintenance, Claude PTY/ConPTY provider and desktop lifecycle over real Rust/Go/Bun IPC")

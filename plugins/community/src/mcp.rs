@@ -233,6 +233,9 @@ pub(super) fn failure(status: u64, message: &str) -> Result<OwnedResource> {
 impl HttpPlugin for Community {
     fn configure(&mut self, config: &str) -> Result<()> {
         self.configure_host(config)?;
+        if super::claude::native_only(&self.config) {
+            return Ok(());
+        }
         let registry = read(
             self.config
                 .get("registry")
@@ -244,6 +247,9 @@ impl HttpPlugin for Community {
     }
 
     fn accepts(&mut self, path: &str) -> Result<u32> {
+        if super::claude::native_only(&self.config) {
+            return Ok(0);
+        }
         if super::codex::endpoint(path).is_some() {
             return super::codex::accepts(self, path);
         }
@@ -251,6 +257,9 @@ impl HttpPlugin for Community {
     }
 
     fn handle(&mut self, metadata: &str, body: &[u8]) -> Result<OwnedResource> {
+        if super::claude::native_only(&self.config) {
+            return Err(Error::Unsupported);
+        }
         let meta = json::parse(metadata.as_bytes()).map_err(fail)?;
         if super::codex::endpoint(meta.get("path").as_str().unwrap_or("")).is_some() {
             return super::codex::handle(self, &meta, body);
