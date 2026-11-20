@@ -131,6 +131,13 @@ Cannot be combined with
 .B \-\-api-key-stdin
 in the same operation.
 .TP
+.BI "\-\-model " value
+Set an upstream model for provider or route edits. INI value quoting rules apply;
+the parsed model must be nonempty, contain no control characters, and fit in
+512 UTF-8 bytes. Provider model and route validation finishes before reading
+.B \-\-api-key-stdin
+or creating backups. Group routes preserve the selected model's parsed value.
+.TP
 .B \-\-help
 Print the command overview.
 .TP

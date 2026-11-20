@@ -590,7 +590,8 @@ fn groups(context: &Context, args: &[String]) -> Result<(), String> {
                 "provider",
                 &configured.providers[first.provider].name,
             )?;
-            text = control::ini_set(&text, &section, "model", &first.model)?;
+            // This model is already parsed; preserve literal quotes and whitespace.
+            text = control::ini_set(&text, &section, "model", &format!("\"{}\"", first.model))?;
         }
         "remove" => {
             if previous.is_none() {
@@ -658,6 +659,9 @@ fn routes(context: &Context, args: &[String]) -> Result<(), String> {
         "set" => {
             let provider = control::option(args, "--provider")?.ok_or("--provider required")?;
             let model = control::option(args, "--model")?.ok_or("--model required")?;
+            if !crate::config::valid_model(crate::config::parse_ini_value(model)?) {
+                return Err("model must be nonempty and at most 512 bytes".into());
+            }
             if !control::sections(&text)
                 .iter()
                 .any(|(s, _)| s == &format!("provider {provider}"))
