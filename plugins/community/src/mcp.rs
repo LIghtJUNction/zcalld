@@ -212,7 +212,7 @@ fn tool_error(text: &str) -> Value {
     ])
 }
 
-fn immediate(status: u64, headers: Value, bytes: Vec<u8>) -> Result<OwnedResource> {
+pub(super) fn immediate(status: u64, headers: Value, bytes: Vec<u8>) -> Result<OwnedResource> {
     OwnedResource::new(MemoryStream {
         head: object([("status", status.into()), ("headers", headers)])
             .stringify()
@@ -222,7 +222,7 @@ fn immediate(status: u64, headers: Value, bytes: Vec<u8>) -> Result<OwnedResourc
     })
 }
 
-fn failure(status: u64, message: &str) -> Result<OwnedResource> {
+pub(super) fn failure(status: u64, message: &str) -> Result<OwnedResource> {
     immediate(
         status,
         object([("content-type", "application/json".into())]),
@@ -233,20 +233,28 @@ fn failure(status: u64, message: &str) -> Result<OwnedResource> {
 impl HttpPlugin for Community {
     fn configure(&mut self, config: &str) -> Result<()> {
         self.configure_host(config)?;
-        validate_registry(&read(
+        let registry = read(
             self.config
                 .get("registry")
                 .as_str()
                 .ok_or(Error::InvalidArgument)?,
-        )?)
+        )?;
+        validate_registry(&registry)?;
+        super::codex::validate_registry(&registry)
     }
 
     fn accepts(&mut self, path: &str) -> Result<u32> {
+        if super::codex::endpoint(path).is_some() {
+            return super::codex::accepts(self, path);
+        }
         Ok(u32::from(endpoint(path).is_some()))
     }
 
     fn handle(&mut self, metadata: &str, body: &[u8]) -> Result<OwnedResource> {
         let meta = json::parse(metadata.as_bytes()).map_err(fail)?;
+        if super::codex::endpoint(meta.get("path").as_str().unwrap_or("")).is_some() {
+            return super::codex::handle(self, &meta, body);
+        }
         let one = endpoint(meta.get("path").as_str().ok_or(Error::InvalidArgument)?)
             .ok_or(Error::InvalidArgument)?;
         let registry = read(
@@ -470,6 +478,7 @@ impl HttpPlugin for Community {
             .map_err(fail)?;
         OwnedResource::new(Stream {
             call,
+            initialization: None,
             head: None,
             bytes: Vec::new(),
             offset: 0,
