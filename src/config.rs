@@ -87,6 +87,8 @@ pub struct Config {
     pub caller_keys: Option<CallerKeys>,
     pub providers: Vec<Provider>,
     pub routes: Vec<Route>,
+    /// Managed group names are dynamic decisions, not a single provider's capabilities.
+    pub dynamic_routes: Vec<String>,
     pub plugins: Vec<PluginSpec>,
     pub models_json: String,
 }
@@ -132,7 +134,8 @@ impl Config {
         if let Some(privacy) = crate::extensions::privacy_plugin(path)? {
             config.plugins.push(privacy);
         }
-        if let Some(routing) = crate::extensions::routing_plugin(path)? {
+        if let Some((routing, groups)) = crate::extensions::routing_plugin(path)? {
+            config.dynamic_routes = groups;
             config.plugins.push(routing);
         }
         if config.plugins.len() > 32 {
@@ -370,6 +373,7 @@ impl Config {
             caller_keys,
             providers,
             routes,
+            dynamic_routes: Vec::new(),
             plugins,
             models_json,
         })

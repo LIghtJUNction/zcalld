@@ -7,5 +7,7 @@ credentials
 /packaging/aur/*/pkg/
 *.pkg.tar.*
 /_release/
+/.ssmcp/
+/.worktrees/
 __pycache__/
 *.py[cod]
