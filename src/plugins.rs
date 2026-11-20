@@ -476,6 +476,20 @@ fn hook_error(path: &std::path::Path, hook: &str, error: Error) -> String {
     format!("plugin {} {hook}: {reason}", path.display())
 }
 
+// Provider errors cross an untrusted transport boundary. Only these fixed
+// categories reach clients; arbitrary worker messages can contain credentials.
+fn provider_stream_error(error: Error) -> &'static str {
+    match error {
+        Error::PluginStatus(status::PROVIDER_REQUEST_FAILED) => "provider request failed",
+        Error::PluginStatus(status::PROVIDER_TRANSPORT_FAILED) => {
+            "provider worker or transport ended"
+        }
+        Error::PluginStatus(status::PROVIDER_TIMED_OUT) => "provider request timed out",
+        Error::PluginStatus(status::PROVIDER_HEAD_INVALID) => "invalid provider response metadata",
+        _ => "provider stream resource failed",
+    }
+}
+
 /// Worker-local native stream. Drop cancels upstream work even on client failure.
 pub struct ProviderResponse {
     resource: zplugin::Resource<'static>,
@@ -487,9 +501,12 @@ impl ProviderResponse {
         let count = match self.resource.call(1, &[], &mut output) {
             Ok(n) if n <= output.len() => n,
             Err(Error::PluginStatus(3)) => return Ok(None),
-            _ => return Err("invalid provider response metadata".into()),
+            Err(Error::BufferTooSmall) => return Err("invalid provider response metadata".into()),
+            Err(error) => return Err(provider_stream_error(error).into()),
+            Ok(_) => return Err("invalid provider response metadata".into()),
         };
-        let value = crate::state_json::parse(&output[..count])?;
+        let value = crate::state_json::parse(&output[..count])
+            .map_err(|_| "invalid provider response metadata")?;
         let status = value
             .get("status")
             .as_u64()
@@ -523,7 +540,8 @@ impl std::io::Read for ProviderResponse {
         let count = match self.resource.call(2, &[], output) {
             Ok(n) if n <= output.len() => n,
             Err(Error::PluginStatus(3)) => return Err(std::io::ErrorKind::WouldBlock.into()),
-            _ => return Err(std::io::Error::other("invalid community provider output")),
+            Err(error) => return Err(std::io::Error::other(provider_stream_error(error))),
+            Ok(_) => return Err(std::io::Error::other("invalid community provider output")),
         };
         if count == 0 {
             self.ended = true;
