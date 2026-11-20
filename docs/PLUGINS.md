@@ -278,3 +278,5 @@ The core permits only complete 429/503 refusals before downstream headers. It li
 
 - [zplugin native ABI and lifetime contract](https://github.com/LIghtJUNction/zplugin/blob/main/README.md)
 - [zcall semantic and transport boundary](https://github.com/LIghtJUNction/zcall/blob/main/README.md)
+
+Community tool exports can be served over the optional [MCP endpoint](MCP.md).

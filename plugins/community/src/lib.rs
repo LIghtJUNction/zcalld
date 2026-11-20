@@ -17,6 +17,8 @@ use zcalld_plugin_api::{
     ProviderPluginExport, ResponsePlugin, ResponsePluginExport,
 };
 use zplugin::{Error, OwnedResource, ResourceHandler, Result};
+mod mcp;
+use zcalld_plugin_api::HttpPluginExport;
 static INIT: Mutex<()> = Mutex::new(());
 thread_local! {static CONTEXTS:RefCell<HashMap<String,Weak<RefCell<Context>>>>=RefCell::new(HashMap::new());}
 #[derive(Default)]
@@ -517,6 +519,7 @@ zplugin::export_interfaces!(
  ProviderPluginExport<Community> => create,
  ContextPluginExport<Community> => create,
  ResponsePluginExport<Community> => create,
+ HttpPluginExport<Community> => create,
 );
 
 impl ContextPlugin for Community {
