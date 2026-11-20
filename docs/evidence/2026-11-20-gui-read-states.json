@@ -1,0 +1,76 @@
+{
+  "gui_commit": "da6b56d2cd286a9bf699cb3ee3d0a4f7db755e9f",
+  "core_commit": "6aea363671a9eb6a210cdf88dff22f34d1c829f8",
+  "binary_sha256": "7462df8163c1027ca0c69c3a91084f9735b670100e069dd87929bbb80413aaf9",
+  "display": "private Xvfb",
+  "data": "synthetic local CLI only",
+  "host_input": false,
+  "cases": [
+    {
+      "case": "overview-loading-dark-zh-CN",
+      "retry_refreshed": false,
+      "read_only_calls": 6,
+      "renderer": "zcall-gui 0.1.2; renderer: llvmpipe (LLVM 23.1.5, 256 bits)\nSmoke ready: state loaded and presented\nPresented frames: 5"
+    },
+    {
+      "case": "providers-loading-dark-zh-CN",
+      "retry_refreshed": false,
+      "read_only_calls": 6,
+      "renderer": "zcall-gui 0.1.2; renderer: llvmpipe (LLVM 23.1.5, 256 bits)\nSmoke ready: state loaded and presented\nPresented frames: 5"
+    },
+    {
+      "case": "overview-unavailable-dark-zh-CN",
+      "retry_refreshed": true,
+      "read_only_calls": 12,
+      "renderer": "zcall-gui 0.1.2; renderer: llvmpipe (LLVM 23.1.5, 256 bits)\nSmoke ready: state loaded and presented\nPresented frames: 9"
+    },
+    {
+      "case": "overview-offline-dark-zh-CN",
+      "retry_refreshed": false,
+      "read_only_calls": 6,
+      "renderer": "zcall-gui 0.1.2; renderer: llvmpipe (LLVM 23.1.5, 256 bits)\nSmoke ready: state loaded and presented\nPresented frames: 5"
+    },
+    {
+      "case": "overview-healthy-dark-zh-CN",
+      "retry_refreshed": false,
+      "read_only_calls": 6,
+      "renderer": "zcall-gui 0.1.2; renderer: llvmpipe (LLVM 23.1.5, 256 bits)\nSmoke ready: state loaded and presented\nPresented frames: 5"
+    },
+    {
+      "case": "overview-endpoint-unknown-dark-zh-CN",
+      "retry_refreshed": false,
+      "read_only_calls": 6,
+      "renderer": "zcall-gui 0.1.2; renderer: llvmpipe (LLVM 23.1.5, 256 bits)\nSmoke ready: state loaded and presented\nPresented frames: 5"
+    },
+    {
+      "case": "providers-providers-unavailable-dark-zh-CN",
+      "retry_refreshed": true,
+      "read_only_calls": 12,
+      "renderer": "zcall-gui 0.1.2; renderer: llvmpipe (LLVM 23.1.5, 256 bits)\nSmoke ready: state loaded and presented\nPresented frames: 9"
+    },
+    {
+      "case": "providers-empty-providers-dark-zh-CN",
+      "retry_refreshed": false,
+      "read_only_calls": 6,
+      "renderer": "zcall-gui 0.1.2; renderer: llvmpipe (LLVM 23.1.5, 256 bits)\nSmoke ready: state loaded and presented\nPresented frames: 5"
+    },
+    {
+      "case": "agents-catalog-unavailable-dark-zh-CN",
+      "retry_refreshed": true,
+      "read_only_calls": 12,
+      "renderer": "zcall-gui 0.1.2; renderer: llvmpipe (LLVM 23.1.5, 256 bits)\nSmoke ready: state loaded and presented\nPresented frames: 9"
+    },
+    {
+      "case": "agents-empty-catalog-dark-zh-CN",
+      "retry_refreshed": false,
+      "read_only_calls": 6,
+      "renderer": "zcall-gui 0.1.2; renderer: llvmpipe (LLVM 23.1.5, 256 bits)\nSmoke ready: state loaded and presented\nPresented frames: 5"
+    },
+    {
+      "case": "privacy-privacy-unavailable-dark-zh-CN",
+      "retry_refreshed": false,
+      "read_only_calls": 6,
+      "renderer": "zcall-gui 0.1.2; renderer: llvmpipe (LLVM 23.1.5, 256 bits)\nSmoke ready: state loaded and presented\nPresented frames: 5"
+    }
+  ]
+}
