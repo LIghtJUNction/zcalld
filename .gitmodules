@@ -16,3 +16,6 @@
 [submodule "apps/zcall-gui"]
 	path = apps/zcall-gui
 	url = https://github.com/LIghtJUNction/zcall-gui.git
+[submodule "apps/zcall-omarchy"]
+	path = apps/zcall-omarchy
+	url = https://github.com/LIghtJUNction/zcall-omarchy.git
