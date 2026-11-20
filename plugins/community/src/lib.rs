@@ -17,6 +17,7 @@ use zcalld_plugin_api::{
     ProviderPluginExport, ResponsePlugin, ResponsePluginExport, status,
 };
 use zplugin::{Error, OwnedResource, ResourceHandler, Result};
+mod codex;
 mod mcp;
 use zcalld_plugin_api::HttpPluginExport;
 static INIT: Mutex<()> = Mutex::new(());
@@ -71,7 +72,9 @@ impl Community {
         self.config = config;
         Ok(())
     }
-    fn host(&mut self) -> Result<Host> {
+    // Start shared initialization without waiting for plugin code. Every operation
+    // still waits on the same host-side ready promise, including failures.
+    fn host_start(&mut self) -> Result<(Host, Option<Call>)> {
         let registry_path = self
             .config
             .get("registry")
@@ -82,7 +85,7 @@ impl Community {
         if let Some((g, h)) = &self.host
             && *g == generation
         {
-            return Ok(h.clone());
+            return Ok((h.clone(), None));
         }
         let _lock = INIT.lock().map_err(fail)?;
         let key = format!("community:{registry_path}:{generation}");
@@ -101,7 +104,7 @@ impl Community {
             .ok_or(Error::InvalidArgument)?;
         let (host, fresh) =
             Host::shared(&key, Path::new(bun), &[script.into()], Some(directory)).map_err(fail)?;
-        if fresh {
+        let initialization = if fresh {
             let mut plugins = Vec::new();
             for p in registry.get("plugins").as_array() {
                 if p.get("enabled").as_bool() != Some(true)
@@ -134,20 +137,32 @@ impl Community {
                 ("prefer", registry.get("prefer").clone()),
                 ("options", registry.get("provider_options").clone()),
                 ("modelsDevPath", registry.get("models_dev_path").clone()),
+                ("nativeStrict", true.into()),
             ]);
-            let result = host
-                .rpc(object([("method", "init".into()), ("params", params)]))
-                .map_err(fail)?;
-            if result
-                .get("plugins")
-                .as_array()
-                .iter()
-                .any(|p| p.get("error").as_str().is_some_and(|e| !e.is_empty()))
-            {
-                return Err(Error::PluginStatus(6));
+            Some(
+                host.start(object([("method", "init".into()), ("params", params)]))
+                    .map_err(fail)?,
+            )
+        } else {
+            None
+        };
+        self.host = Some((generation, host.clone()));
+        Ok((host, initialization))
+    }
+    fn host(&mut self) -> Result<Host> {
+        let (host, initialization) = self.host_start()?;
+        if let Some(mut call) = initialization {
+            loop {
+                let event = call.recv().map_err(fail)?;
+                if !matches!(event.get("error"), Value::Null) {
+                    return Err(Error::PluginStatus(6));
+                }
+                if event.as_object().is_some_and(|v| v.contains_key("result")) {
+                    call.finish();
+                    break;
+                }
             }
         }
-        self.host = Some((generation, host.clone()));
         Ok(host)
     }
     fn close_gateway(&mut self) {
@@ -388,6 +403,7 @@ impl ProviderPlugin for Community {
             .map_err(fail)?;
         OwnedResource::new(Stream {
             call,
+            initialization: None,
             head: None,
             bytes: Vec::new(),
             offset: 0,
@@ -398,6 +414,7 @@ impl ProviderPlugin for Community {
 }
 struct Stream {
     call: Call,
+    initialization: Option<Call>,
     head: Option<Vec<u8>>,
     bytes: Vec<u8>,
     offset: usize,
@@ -408,6 +425,25 @@ impl Stream {
     fn event(&mut self) -> Result<()> {
         if Instant::now() >= self.deadline {
             return Err(Error::PluginStatus(status::PROVIDER_TIMED_OUT));
+        }
+        if let Some(initialization) = &mut self.initialization {
+            let Some(event) = initialization
+                .poll()
+                .map_err(|_| Error::PluginStatus(status::PROVIDER_TRANSPORT_FAILED))?
+            else {
+                return Err(Error::PluginStatus(3));
+            };
+            if !matches!(event.get("error"), Value::Null) {
+                return Err(Error::PluginStatus(status::PROVIDER_REQUEST_FAILED));
+            }
+            if !event.as_object().is_some_and(|v| v.contains_key("result")) {
+                return Err(Error::PluginStatus(3));
+            }
+            initialization.finish();
+            self.initialization = None;
+            if Instant::now() >= self.deadline {
+                return Err(Error::PluginStatus(status::PROVIDER_TIMED_OUT));
+            }
         }
         let Some(event) = self
             .call

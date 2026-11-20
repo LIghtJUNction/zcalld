@@ -1,0 +1,1718 @@
+{
+  "schema": "zcalld.codex-quota-families.v1",
+  "date": "2026-11-20",
+  "timezone": "Asia/Taipei",
+  "source_commit": "a4216ef24b5ce5b8375aaf2ab1415c47af02e536",
+  "source_base": "2f91c56166d24fe0a311b8bf58ab167fa1ca1145",
+  "platform": "linux-x86_64",
+  "checks": {
+    "rust_tests_passed": 102,
+    "http_tests_passed": 22,
+    "quota_subcases_passed": 12,
+    "quota_subcases_are_part_of_http_tests": true,
+    "fmt_passed": true,
+    "clippy_warnings_denied_passed": true
+  },
+  "baseline": {
+    "schema_version": 1,
+    "kind": "isolated_real_codex_transport",
+    "codex_version": "codex-cli 0.170.0",
+    "source_ref": "rust-v0.170.0",
+    "source_url": "https://github.com/openai/codex/blob/rust-v0.170.0/codex-rs/core/src/client.rs",
+    "provider_source_url": "https://github.com/openai/codex/blob/rust-v0.170.0/codex-rs/model-provider-info/src/lib.rs",
+    "chatgpt_default_base_path": "/backend-api/codex",
+    "separate_network_namespace": true,
+    "inherited_credentials": false,
+    "real_model_requests": 0,
+    "fixture_replays": 0,
+    "passed": false,
+    "cases": [
+      {
+        "case": "mock_custom_400",
+        "auth_shape": "custom",
+        "passed": true,
+        "exit_code": 1,
+        "expected_response_path": "/v1/responses",
+        "builtin_endpoint_override": null,
+        "expected_completion": false,
+        "retry_policy": "http_0_stream_0",
+        "timed_out": false,
+        "completed": false,
+        "exact_ok": false,
+        "tool_outputs": false,
+        "rate_limits_verified_in_client": false,
+        "rate_limits_event_count": 0,
+        "rate_limits_family": "codex",
+        "rate_limits": null,
+        "model_rate_limits_verified_in_client": false,
+        "elapsed_seconds": 0.401,
+        "event_types": [
+          "error",
+          "item.completed",
+          "thread.started",
+          "turn.failed",
+          "turn.started"
+        ],
+        "stderr_bytes": 301,
+        "http": [
+          {
+            "method": "GET",
+            "path": "/v1/responses",
+            "websocket": true,
+            "content_encoding": "",
+            "authorization_present": false,
+            "status": 400
+          },
+          {
+            "method": "GET",
+            "path": "/v1/responses",
+            "websocket": true,
+            "content_encoding": "",
+            "authorization_present": false,
+            "status": 400
+          }
+        ],
+        "response_path_verified": true
+      },
+      {
+        "case": "mock_custom_426",
+        "auth_shape": "custom",
+        "passed": true,
+        "exit_code": 0,
+        "expected_response_path": "/v1/responses",
+        "builtin_endpoint_override": null,
+        "expected_completion": true,
+        "retry_policy": "http_0_stream_0",
+        "timed_out": false,
+        "completed": true,
+        "exact_ok": true,
+        "tool_outputs": false,
+        "rate_limits_verified_in_client": true,
+        "rate_limits_event_count": 1,
+        "rate_limits_family": "codex",
+        "rate_limits": {
+          "limit_id": "codex",
+          "limit_name": "Codex",
+          "primary": {
+            "used_percent": 37.5,
+            "window_minutes": 300,
+            "resets_at": 1900000000
+          },
+          "secondary": {
+            "used_percent": 12.0,
+            "window_minutes": 10080,
+            "resets_at": 1900500000
+          },
+          "credits": {
+            "has_credits": true,
+            "unlimited": false,
+            "balance": "4.25"
+          }
+        },
+        "model_rate_limits_verified_in_client": false,
+        "elapsed_seconds": 0.405,
+        "event_types": [
+          "item.completed",
+          "thread.started",
+          "turn.completed",
+          "turn.started"
+        ],
+        "stderr_bytes": 170,
+        "http": [
+          {
+            "method": "GET",
+            "path": "/v1/responses",
+            "websocket": true,
+            "content_encoding": "",
+            "authorization_present": false,
+            "status": 426
+          },
+          {
+            "method": "POST",
+            "path": "/v1/responses",
+            "websocket": false,
+            "content_encoding": "",
+            "authorization_present": false,
+            "model_is_fixture": true,
+            "stream": true,
+            "status": 200
+          }
+        ],
+        "response_path_verified": true
+      },
+      {
+        "case": "mock_api_key_426",
+        "auth_shape": "api_key",
+        "passed": true,
+        "exit_code": 0,
+        "expected_response_path": "/v1/responses",
+        "builtin_endpoint_override": "loopback_origin_only_preserving_default_path",
+        "expected_completion": true,
+        "retry_policy": "builtin_defaults",
+        "timed_out": false,
+        "completed": true,
+        "exact_ok": true,
+        "tool_outputs": false,
+        "rate_limits_verified_in_client": true,
+        "rate_limits_event_count": 1,
+        "rate_limits_family": "codex",
+        "rate_limits": {
+          "limit_id": "codex",
+          "limit_name": "Codex",
+          "primary": {
+            "used_percent": 37.5,
+            "window_minutes": 300,
+            "resets_at": 1900000000
+          },
+          "secondary": {
+            "used_percent": 12.0,
+            "window_minutes": 10080,
+            "resets_at": 1900500000
+          },
+          "credits": {
+            "has_credits": true,
+            "unlimited": false,
+            "balance": "4.25"
+          }
+        },
+        "model_rate_limits_verified_in_client": false,
+        "elapsed_seconds": 0.371,
+        "event_types": [
+          "item.completed",
+          "thread.started",
+          "turn.completed",
+          "turn.started"
+        ],
+        "stderr_bytes": 170,
+        "http": [
+          {
+            "method": "GET",
+            "path": "/v1/responses",
+            "websocket": true,
+            "content_encoding": "",
+            "authorization_present": true,
+            "status": 426
+          },
+          {
+            "method": "POST",
+            "path": "/v1/responses",
+            "websocket": false,
+            "content_encoding": "",
+            "authorization_present": true,
+            "model_is_fixture": true,
+            "stream": true,
+            "status": 200
+          }
+        ],
+        "response_path_verified": true
+      },
+      {
+        "case": "mock_chatgpt_400",
+        "auth_shape": "chatgpt",
+        "passed": true,
+        "exit_code": 1,
+        "expected_response_path": "/backend-api/codex/responses",
+        "builtin_endpoint_override": "loopback_origin_only_preserving_default_path",
+        "expected_completion": false,
+        "retry_policy": "builtin_defaults",
+        "timed_out": false,
+        "completed": false,
+        "exact_ok": false,
+        "tool_outputs": false,
+        "rate_limits_verified_in_client": false,
+        "rate_limits_event_count": 0,
+        "rate_limits_family": "codex",
+        "rate_limits": null,
+        "model_rate_limits_verified_in_client": false,
+        "elapsed_seconds": 0.403,
+        "event_types": [
+          "error",
+          "item.completed",
+          "thread.started",
+          "turn.failed",
+          "turn.started"
+        ],
+        "stderr_bytes": 943,
+        "http": [
+          {
+            "method": "GET",
+            "path": "/backend-api/codex/models?client_version=0.170.0",
+            "websocket": false,
+            "content_encoding": "",
+            "authorization_present": true,
+            "status": 404
+          },
+          {
+            "method": "GET",
+            "path": "/backend-api/codex/models?client_version=0.170.0",
+            "websocket": false,
+            "content_encoding": "",
+            "authorization_present": true,
+            "status": 404
+          },
+          {
+            "method": "GET",
+            "path": "/backend-api/codex/models?client_version=0.170.0",
+            "websocket": false,
+            "content_encoding": "",
+            "authorization_present": true,
+            "status": 404
+          },
+          {
+            "method": "GET",
+            "path": "/backend-api/codex/responses",
+            "websocket": true,
+            "content_encoding": "",
+            "authorization_present": true,
+            "status": 400
+          },
+          {
+            "method": "GET",
+            "path": "/backend-api/codex/responses",
+            "websocket": true,
+            "content_encoding": "",
+            "authorization_present": true,
+            "status": 400
+          }
+        ],
+        "response_path_verified": true
+      },
+      {
+        "case": "mock_chatgpt_426",
+        "auth_shape": "chatgpt",
+        "passed": true,
+        "exit_code": 0,
+        "expected_response_path": "/backend-api/codex/responses",
+        "builtin_endpoint_override": "loopback_origin_only_preserving_default_path",
+        "expected_completion": true,
+        "retry_policy": "builtin_defaults",
+        "timed_out": false,
+        "completed": true,
+        "exact_ok": true,
+        "tool_outputs": false,
+        "rate_limits_verified_in_client": true,
+        "rate_limits_event_count": 1,
+        "rate_limits_family": "codex",
+        "rate_limits": {
+          "limit_id": "codex",
+          "limit_name": "Codex",
+          "primary": {
+            "used_percent": 37.5,
+            "window_minutes": 300,
+            "resets_at": 1900000000
+          },
+          "secondary": {
+            "used_percent": 12.0,
+            "window_minutes": 10080,
+            "resets_at": 1900500000
+          },
+          "credits": {
+            "has_credits": true,
+            "unlimited": false,
+            "balance": "4.25"
+          }
+        },
+        "model_rate_limits_verified_in_client": false,
+        "elapsed_seconds": 0.82,
+        "event_types": [
+          "item.completed",
+          "thread.started",
+          "turn.completed",
+          "turn.started"
+        ],
+        "stderr_bytes": 812,
+        "http": [
+          {
+            "method": "GET",
+            "path": "/backend-api/codex/models?client_version=0.170.0",
+            "websocket": false,
+            "content_encoding": "",
+            "authorization_present": true,
+            "status": 404
+          },
+          {
+            "method": "GET",
+            "path": "/backend-api/codex/models?client_version=0.170.0",
+            "websocket": false,
+            "content_encoding": "",
+            "authorization_present": true,
+            "status": 404
+          },
+          {
+            "method": "GET",
+            "path": "/backend-api/codex/models?client_version=0.170.0",
+            "websocket": false,
+            "content_encoding": "",
+            "authorization_present": true,
+            "status": 404
+          },
+          {
+            "method": "GET",
+            "path": "/backend-api/codex/responses",
+            "websocket": true,
+            "content_encoding": "",
+            "authorization_present": true,
+            "status": 426
+          },
+          {
+            "method": "POST",
+            "path": "/backend-api/codex/responses",
+            "websocket": false,
+            "content_encoding": "zstd",
+            "authorization_present": true,
+            "model_is_fixture": true,
+            "stream": true,
+            "status": 200
+          }
+        ],
+        "response_path_verified": true
+      },
+      {
+        "case": "gateway_api_key_426",
+        "auth_shape": "api_key",
+        "passed": true,
+        "exit_code": 0,
+        "expected_response_path": "/v1/responses",
+        "builtin_endpoint_override": "loopback_origin_only_preserving_default_path",
+        "expected_completion": true,
+        "retry_policy": "builtin_defaults",
+        "timed_out": false,
+        "completed": true,
+        "exact_ok": true,
+        "tool_outputs": false,
+        "rate_limits_verified_in_client": true,
+        "rate_limits_event_count": 1,
+        "rate_limits_family": "codex",
+        "rate_limits": {
+          "limit_id": "codex",
+          "limit_name": "Codex",
+          "primary": {
+            "used_percent": 37.5,
+            "window_minutes": 300,
+            "resets_at": 1900000000
+          },
+          "secondary": {
+            "used_percent": 12.0,
+            "window_minutes": 10080,
+            "resets_at": 1900500000
+          },
+          "credits": {
+            "has_credits": true,
+            "unlimited": false,
+            "balance": "4.25"
+          }
+        },
+        "model_rate_limits_verified_in_client": false,
+        "elapsed_seconds": 0.434,
+        "event_types": [
+          "item.completed",
+          "thread.started",
+          "turn.completed",
+          "turn.started"
+        ],
+        "stderr_bytes": 170,
+        "http": [
+          {
+            "method": "GET",
+            "path": "/v1/responses",
+            "websocket": true,
+            "content_encoding": "",
+            "authorization_present": true,
+            "status": 426
+          },
+          {
+            "method": "POST",
+            "path": "/v1/responses",
+            "websocket": false,
+            "content_encoding": "",
+            "authorization_present": true,
+            "status": 200
+          }
+        ],
+        "upstream_http": [
+          {
+            "method": "POST",
+            "path": "/v1/responses",
+            "websocket": false,
+            "content_encoding": "",
+            "authorization_present": false,
+            "model_is_fixture": true,
+            "stream": true,
+            "status": 200
+          }
+        ],
+        "response_path_verified": true
+      },
+      {
+        "case": "gateway_api_key_codex_bengalfox_426",
+        "auth_shape": "api_key",
+        "passed": false,
+        "exit_code": 0,
+        "expected_response_path": "/v1/responses",
+        "builtin_endpoint_override": "loopback_origin_only_preserving_default_path",
+        "expected_completion": true,
+        "retry_policy": "builtin_defaults",
+        "timed_out": false,
+        "completed": true,
+        "exact_ok": true,
+        "tool_outputs": false,
+        "rate_limits_verified_in_client": false,
+        "rate_limits_event_count": 1,
+        "rate_limits_family": "codex_bengalfox",
+        "rate_limits": null,
+        "model_rate_limits_verified_in_client": false,
+        "elapsed_seconds": 0.375,
+        "event_types": [
+          "item.completed",
+          "thread.started",
+          "turn.completed",
+          "turn.started"
+        ],
+        "stderr_bytes": 170,
+        "http": [
+          {
+            "method": "GET",
+            "path": "/v1/responses",
+            "websocket": true,
+            "content_encoding": "",
+            "authorization_present": true,
+            "status": 426
+          },
+          {
+            "method": "POST",
+            "path": "/v1/responses",
+            "websocket": false,
+            "content_encoding": "",
+            "authorization_present": true,
+            "status": 200
+          }
+        ],
+        "upstream_http": [
+          {
+            "method": "POST",
+            "path": "/v1/responses",
+            "websocket": false,
+            "content_encoding": "",
+            "authorization_present": false,
+            "model_is_fixture": true,
+            "stream": true,
+            "status": 200
+          }
+        ],
+        "response_path_verified": true
+      },
+      {
+        "case": "gateway_api_key_codex_other_v2_426",
+        "auth_shape": "api_key",
+        "passed": false,
+        "exit_code": 0,
+        "expected_response_path": "/v1/responses",
+        "builtin_endpoint_override": "loopback_origin_only_preserving_default_path",
+        "expected_completion": true,
+        "retry_policy": "builtin_defaults",
+        "timed_out": false,
+        "completed": true,
+        "exact_ok": true,
+        "tool_outputs": false,
+        "rate_limits_verified_in_client": false,
+        "rate_limits_event_count": 1,
+        "rate_limits_family": "codex_other_v2",
+        "rate_limits": null,
+        "model_rate_limits_verified_in_client": false,
+        "elapsed_seconds": 0.596,
+        "event_types": [
+          "item.completed",
+          "thread.started",
+          "turn.completed",
+          "turn.started"
+        ],
+        "stderr_bytes": 170,
+        "http": [
+          {
+            "method": "GET",
+            "path": "/v1/responses",
+            "websocket": true,
+            "content_encoding": "",
+            "authorization_present": true,
+            "status": 426
+          },
+          {
+            "method": "POST",
+            "path": "/v1/responses",
+            "websocket": false,
+            "content_encoding": "",
+            "authorization_present": true,
+            "status": 200
+          }
+        ],
+        "upstream_http": [
+          {
+            "method": "POST",
+            "path": "/v1/responses",
+            "websocket": false,
+            "content_encoding": "",
+            "authorization_present": false,
+            "model_is_fixture": true,
+            "stream": true,
+            "status": 200
+          }
+        ],
+        "response_path_verified": true
+      },
+      {
+        "case": "gateway_chatgpt_426",
+        "auth_shape": "chatgpt",
+        "passed": true,
+        "exit_code": 0,
+        "expected_response_path": "/backend-api/codex/responses",
+        "builtin_endpoint_override": "loopback_origin_only_preserving_default_path",
+        "expected_completion": true,
+        "retry_policy": "builtin_defaults",
+        "timed_out": false,
+        "completed": true,
+        "exact_ok": true,
+        "tool_outputs": false,
+        "rate_limits_verified_in_client": true,
+        "rate_limits_event_count": 1,
+        "rate_limits_family": "codex",
+        "rate_limits": {
+          "limit_id": "codex",
+          "limit_name": "Codex",
+          "primary": {
+            "used_percent": 37.5,
+            "window_minutes": 300,
+            "resets_at": 1900000000
+          },
+          "secondary": {
+            "used_percent": 12.0,
+            "window_minutes": 10080,
+            "resets_at": 1900500000
+          },
+          "credits": {
+            "has_credits": true,
+            "unlimited": false,
+            "balance": "4.25"
+          }
+        },
+        "model_rate_limits_verified_in_client": false,
+        "elapsed_seconds": 0.6,
+        "event_types": [
+          "item.completed",
+          "thread.started",
+          "turn.completed",
+          "turn.started"
+        ],
+        "stderr_bytes": 812,
+        "http": [
+          {
+            "method": "GET",
+            "path": "/backend-api/codex/models?client_version=0.170.0",
+            "websocket": false,
+            "content_encoding": "",
+            "authorization_present": true,
+            "status": 404
+          },
+          {
+            "method": "GET",
+            "path": "/backend-api/codex/models?client_version=0.170.0",
+            "websocket": false,
+            "content_encoding": "",
+            "authorization_present": true,
+            "status": 404
+          },
+          {
+            "method": "GET",
+            "path": "/backend-api/codex/models?client_version=0.170.0",
+            "websocket": false,
+            "content_encoding": "",
+            "authorization_present": true,
+            "status": 404
+          },
+          {
+            "method": "GET",
+            "path": "/backend-api/codex/responses",
+            "websocket": true,
+            "content_encoding": "",
+            "authorization_present": true,
+            "status": 426
+          },
+          {
+            "method": "POST",
+            "path": "/backend-api/codex/responses",
+            "websocket": false,
+            "content_encoding": "zstd",
+            "authorization_present": true,
+            "status": 200
+          }
+        ],
+        "upstream_http": [
+          {
+            "method": "POST",
+            "path": "/v1/responses",
+            "websocket": false,
+            "content_encoding": "",
+            "authorization_present": false,
+            "model_is_fixture": true,
+            "stream": true,
+            "status": 200
+          }
+        ],
+        "response_path_verified": true
+      },
+      {
+        "case": "gateway_chatgpt_codex_bengalfox_426",
+        "auth_shape": "chatgpt",
+        "passed": false,
+        "exit_code": 0,
+        "expected_response_path": "/backend-api/codex/responses",
+        "builtin_endpoint_override": "loopback_origin_only_preserving_default_path",
+        "expected_completion": true,
+        "retry_policy": "builtin_defaults",
+        "timed_out": false,
+        "completed": true,
+        "exact_ok": true,
+        "tool_outputs": false,
+        "rate_limits_verified_in_client": false,
+        "rate_limits_event_count": 1,
+        "rate_limits_family": "codex_bengalfox",
+        "rate_limits": null,
+        "model_rate_limits_verified_in_client": false,
+        "elapsed_seconds": 0.499,
+        "event_types": [
+          "item.completed",
+          "thread.started",
+          "turn.completed",
+          "turn.started"
+        ],
+        "stderr_bytes": 812,
+        "http": [
+          {
+            "method": "GET",
+            "path": "/backend-api/codex/models?client_version=0.170.0",
+            "websocket": false,
+            "content_encoding": "",
+            "authorization_present": true,
+            "status": 404
+          },
+          {
+            "method": "GET",
+            "path": "/backend-api/codex/models?client_version=0.170.0",
+            "websocket": false,
+            "content_encoding": "",
+            "authorization_present": true,
+            "status": 404
+          },
+          {
+            "method": "GET",
+            "path": "/backend-api/codex/models?client_version=0.170.0",
+            "websocket": false,
+            "content_encoding": "",
+            "authorization_present": true,
+            "status": 404
+          },
+          {
+            "method": "GET",
+            "path": "/backend-api/codex/responses",
+            "websocket": true,
+            "content_encoding": "",
+            "authorization_present": true,
+            "status": 426
+          },
+          {
+            "method": "POST",
+            "path": "/backend-api/codex/responses",
+            "websocket": false,
+            "content_encoding": "zstd",
+            "authorization_present": true,
+            "status": 200
+          }
+        ],
+        "upstream_http": [
+          {
+            "method": "POST",
+            "path": "/v1/responses",
+            "websocket": false,
+            "content_encoding": "",
+            "authorization_present": false,
+            "model_is_fixture": true,
+            "stream": true,
+            "status": 200
+          }
+        ],
+        "response_path_verified": true
+      },
+      {
+        "case": "gateway_chatgpt_codex_other_v2_426",
+        "auth_shape": "chatgpt",
+        "passed": false,
+        "exit_code": 0,
+        "expected_response_path": "/backend-api/codex/responses",
+        "builtin_endpoint_override": "loopback_origin_only_preserving_default_path",
+        "expected_completion": true,
+        "retry_policy": "builtin_defaults",
+        "timed_out": false,
+        "completed": true,
+        "exact_ok": true,
+        "tool_outputs": false,
+        "rate_limits_verified_in_client": false,
+        "rate_limits_event_count": 1,
+        "rate_limits_family": "codex_other_v2",
+        "rate_limits": null,
+        "model_rate_limits_verified_in_client": false,
+        "elapsed_seconds": 0.507,
+        "event_types": [
+          "item.completed",
+          "thread.started",
+          "turn.completed",
+          "turn.started"
+        ],
+        "stderr_bytes": 812,
+        "http": [
+          {
+            "method": "GET",
+            "path": "/backend-api/codex/models?client_version=0.170.0",
+            "websocket": false,
+            "content_encoding": "",
+            "authorization_present": true,
+            "status": 404
+          },
+          {
+            "method": "GET",
+            "path": "/backend-api/codex/models?client_version=0.170.0",
+            "websocket": false,
+            "content_encoding": "",
+            "authorization_present": true,
+            "status": 404
+          },
+          {
+            "method": "GET",
+            "path": "/backend-api/codex/models?client_version=0.170.0",
+            "websocket": false,
+            "content_encoding": "",
+            "authorization_present": true,
+            "status": 404
+          },
+          {
+            "method": "GET",
+            "path": "/backend-api/codex/responses",
+            "websocket": true,
+            "content_encoding": "",
+            "authorization_present": true,
+            "status": 426
+          },
+          {
+            "method": "POST",
+            "path": "/backend-api/codex/responses",
+            "websocket": false,
+            "content_encoding": "zstd",
+            "authorization_present": true,
+            "status": 200
+          }
+        ],
+        "upstream_http": [
+          {
+            "method": "POST",
+            "path": "/v1/responses",
+            "websocket": false,
+            "content_encoding": "",
+            "authorization_present": false,
+            "model_is_fixture": true,
+            "stream": true,
+            "status": 200
+          }
+        ],
+        "response_path_verified": true
+      }
+    ],
+    "codex_sha256": "880819aab735adcf16f36cd628940b9f1e652a36c01d10a5d32f83cc84902971",
+    "gateway_sha256": "48685ef204561880583771e6f94a0532ff66e7a4795131fe0a28181f61f6eba8",
+    "script_sha256": "5910a4c16e60c8812ec90aee2a660108ff8095e3ad21e928af9d37e27f98bf65"
+  },
+  "candidate": {
+    "schema_version": 1,
+    "kind": "isolated_real_codex_transport",
+    "codex_version": "codex-cli 0.170.0",
+    "source_ref": "rust-v0.170.0",
+    "source_url": "https://github.com/openai/codex/blob/rust-v0.170.0/codex-rs/core/src/client.rs",
+    "provider_source_url": "https://github.com/openai/codex/blob/rust-v0.170.0/codex-rs/model-provider-info/src/lib.rs",
+    "chatgpt_default_base_path": "/backend-api/codex",
+    "separate_network_namespace": true,
+    "inherited_credentials": false,
+    "real_model_requests": 0,
+    "fixture_replays": 0,
+    "passed": true,
+    "cases": [
+      {
+        "case": "mock_custom_400",
+        "auth_shape": "custom",
+        "passed": true,
+        "exit_code": 1,
+        "expected_response_path": "/v1/responses",
+        "builtin_endpoint_override": null,
+        "expected_completion": false,
+        "retry_policy": "http_0_stream_0",
+        "timed_out": false,
+        "completed": false,
+        "exact_ok": false,
+        "tool_outputs": false,
+        "rate_limits_verified_in_client": false,
+        "rate_limits_event_count": 0,
+        "rate_limits_family": "codex",
+        "rate_limits": null,
+        "model_rate_limits_verified_in_client": false,
+        "elapsed_seconds": 0.39,
+        "event_types": [
+          "error",
+          "item.completed",
+          "thread.started",
+          "turn.failed",
+          "turn.started"
+        ],
+        "stderr_bytes": 301,
+        "http": [
+          {
+            "method": "GET",
+            "path": "/v1/responses",
+            "websocket": true,
+            "content_encoding": "",
+            "authorization_present": false,
+            "status": 400
+          },
+          {
+            "method": "GET",
+            "path": "/v1/responses",
+            "websocket": true,
+            "content_encoding": "",
+            "authorization_present": false,
+            "status": 400
+          }
+        ],
+        "response_path_verified": true
+      },
+      {
+        "case": "mock_custom_426",
+        "auth_shape": "custom",
+        "passed": true,
+        "exit_code": 0,
+        "expected_response_path": "/v1/responses",
+        "builtin_endpoint_override": null,
+        "expected_completion": true,
+        "retry_policy": "http_0_stream_0",
+        "timed_out": false,
+        "completed": true,
+        "exact_ok": true,
+        "tool_outputs": false,
+        "rate_limits_verified_in_client": true,
+        "rate_limits_event_count": 1,
+        "rate_limits_family": "codex",
+        "rate_limits": {
+          "limit_id": "codex",
+          "limit_name": "Codex",
+          "primary": {
+            "used_percent": 37.5,
+            "window_minutes": 300,
+            "resets_at": 1900000000
+          },
+          "secondary": {
+            "used_percent": 12.0,
+            "window_minutes": 10080,
+            "resets_at": 1900500000
+          },
+          "credits": {
+            "has_credits": true,
+            "unlimited": false,
+            "balance": "4.25"
+          }
+        },
+        "model_rate_limits_verified_in_client": false,
+        "elapsed_seconds": 0.423,
+        "event_types": [
+          "item.completed",
+          "thread.started",
+          "turn.completed",
+          "turn.started"
+        ],
+        "stderr_bytes": 170,
+        "http": [
+          {
+            "method": "GET",
+            "path": "/v1/responses",
+            "websocket": true,
+            "content_encoding": "",
+            "authorization_present": false,
+            "status": 426
+          },
+          {
+            "method": "POST",
+            "path": "/v1/responses",
+            "websocket": false,
+            "content_encoding": "",
+            "authorization_present": false,
+            "model_is_fixture": true,
+            "stream": true,
+            "status": 200
+          }
+        ],
+        "response_path_verified": true
+      },
+      {
+        "case": "mock_api_key_426",
+        "auth_shape": "api_key",
+        "passed": true,
+        "exit_code": 0,
+        "expected_response_path": "/v1/responses",
+        "builtin_endpoint_override": "loopback_origin_only_preserving_default_path",
+        "expected_completion": true,
+        "retry_policy": "builtin_defaults",
+        "timed_out": false,
+        "completed": true,
+        "exact_ok": true,
+        "tool_outputs": false,
+        "rate_limits_verified_in_client": true,
+        "rate_limits_event_count": 1,
+        "rate_limits_family": "codex",
+        "rate_limits": {
+          "limit_id": "codex",
+          "limit_name": "Codex",
+          "primary": {
+            "used_percent": 37.5,
+            "window_minutes": 300,
+            "resets_at": 1900000000
+          },
+          "secondary": {
+            "used_percent": 12.0,
+            "window_minutes": 10080,
+            "resets_at": 1900500000
+          },
+          "credits": {
+            "has_credits": true,
+            "unlimited": false,
+            "balance": "4.25"
+          }
+        },
+        "model_rate_limits_verified_in_client": false,
+        "elapsed_seconds": 0.35,
+        "event_types": [
+          "item.completed",
+          "thread.started",
+          "turn.completed",
+          "turn.started"
+        ],
+        "stderr_bytes": 170,
+        "http": [
+          {
+            "method": "GET",
+            "path": "/v1/responses",
+            "websocket": true,
+            "content_encoding": "",
+            "authorization_present": true,
+            "status": 426
+          },
+          {
+            "method": "POST",
+            "path": "/v1/responses",
+            "websocket": false,
+            "content_encoding": "",
+            "authorization_present": true,
+            "model_is_fixture": true,
+            "stream": true,
+            "status": 200
+          }
+        ],
+        "response_path_verified": true
+      },
+      {
+        "case": "mock_chatgpt_400",
+        "auth_shape": "chatgpt",
+        "passed": true,
+        "exit_code": 1,
+        "expected_response_path": "/backend-api/codex/responses",
+        "builtin_endpoint_override": "loopback_origin_only_preserving_default_path",
+        "expected_completion": false,
+        "retry_policy": "builtin_defaults",
+        "timed_out": false,
+        "completed": false,
+        "exact_ok": false,
+        "tool_outputs": false,
+        "rate_limits_verified_in_client": false,
+        "rate_limits_event_count": 0,
+        "rate_limits_family": "codex",
+        "rate_limits": null,
+        "model_rate_limits_verified_in_client": false,
+        "elapsed_seconds": 0.37,
+        "event_types": [
+          "error",
+          "item.completed",
+          "thread.started",
+          "turn.failed",
+          "turn.started"
+        ],
+        "stderr_bytes": 943,
+        "http": [
+          {
+            "method": "GET",
+            "path": "/backend-api/codex/models?client_version=0.170.0",
+            "websocket": false,
+            "content_encoding": "",
+            "authorization_present": true,
+            "status": 404
+          },
+          {
+            "method": "GET",
+            "path": "/backend-api/codex/models?client_version=0.170.0",
+            "websocket": false,
+            "content_encoding": "",
+            "authorization_present": true,
+            "status": 404
+          },
+          {
+            "method": "GET",
+            "path": "/backend-api/codex/models?client_version=0.170.0",
+            "websocket": false,
+            "content_encoding": "",
+            "authorization_present": true,
+            "status": 404
+          },
+          {
+            "method": "GET",
+            "path": "/backend-api/codex/responses",
+            "websocket": true,
+            "content_encoding": "",
+            "authorization_present": true,
+            "status": 400
+          },
+          {
+            "method": "GET",
+            "path": "/backend-api/codex/responses",
+            "websocket": true,
+            "content_encoding": "",
+            "authorization_present": true,
+            "status": 400
+          }
+        ],
+        "response_path_verified": true
+      },
+      {
+        "case": "mock_chatgpt_426",
+        "auth_shape": "chatgpt",
+        "passed": true,
+        "exit_code": 0,
+        "expected_response_path": "/backend-api/codex/responses",
+        "builtin_endpoint_override": "loopback_origin_only_preserving_default_path",
+        "expected_completion": true,
+        "retry_policy": "builtin_defaults",
+        "timed_out": false,
+        "completed": true,
+        "exact_ok": true,
+        "tool_outputs": false,
+        "rate_limits_verified_in_client": true,
+        "rate_limits_event_count": 1,
+        "rate_limits_family": "codex",
+        "rate_limits": {
+          "limit_id": "codex",
+          "limit_name": "Codex",
+          "primary": {
+            "used_percent": 37.5,
+            "window_minutes": 300,
+            "resets_at": 1900000000
+          },
+          "secondary": {
+            "used_percent": 12.0,
+            "window_minutes": 10080,
+            "resets_at": 1900500000
+          },
+          "credits": {
+            "has_credits": true,
+            "unlimited": false,
+            "balance": "4.25"
+          }
+        },
+        "model_rate_limits_verified_in_client": false,
+        "elapsed_seconds": 0.973,
+        "event_types": [
+          "item.completed",
+          "thread.started",
+          "turn.completed",
+          "turn.started"
+        ],
+        "stderr_bytes": 812,
+        "http": [
+          {
+            "method": "GET",
+            "path": "/backend-api/codex/models?client_version=0.170.0",
+            "websocket": false,
+            "content_encoding": "",
+            "authorization_present": true,
+            "status": 404
+          },
+          {
+            "method": "GET",
+            "path": "/backend-api/codex/models?client_version=0.170.0",
+            "websocket": false,
+            "content_encoding": "",
+            "authorization_present": true,
+            "status": 404
+          },
+          {
+            "method": "GET",
+            "path": "/backend-api/codex/responses",
+            "websocket": true,
+            "content_encoding": "",
+            "authorization_present": true,
+            "status": 426
+          },
+          {
+            "method": "GET",
+            "path": "/backend-api/codex/models?client_version=0.170.0",
+            "websocket": false,
+            "content_encoding": "",
+            "authorization_present": true,
+            "status": 404
+          },
+          {
+            "method": "POST",
+            "path": "/backend-api/codex/responses",
+            "websocket": false,
+            "content_encoding": "zstd",
+            "authorization_present": true,
+            "model_is_fixture": true,
+            "stream": true,
+            "status": 200
+          }
+        ],
+        "response_path_verified": true
+      },
+      {
+        "case": "gateway_api_key_426",
+        "auth_shape": "api_key",
+        "passed": true,
+        "exit_code": 0,
+        "expected_response_path": "/v1/responses",
+        "builtin_endpoint_override": "loopback_origin_only_preserving_default_path",
+        "expected_completion": true,
+        "retry_policy": "builtin_defaults",
+        "timed_out": false,
+        "completed": true,
+        "exact_ok": true,
+        "tool_outputs": false,
+        "rate_limits_verified_in_client": true,
+        "rate_limits_event_count": 1,
+        "rate_limits_family": "codex",
+        "rate_limits": {
+          "limit_id": "codex",
+          "limit_name": "Codex",
+          "primary": {
+            "used_percent": 37.5,
+            "window_minutes": 300,
+            "resets_at": 1900000000
+          },
+          "secondary": {
+            "used_percent": 12.0,
+            "window_minutes": 10080,
+            "resets_at": 1900500000
+          },
+          "credits": {
+            "has_credits": true,
+            "unlimited": false,
+            "balance": "4.25"
+          }
+        },
+        "model_rate_limits_verified_in_client": false,
+        "elapsed_seconds": 0.413,
+        "event_types": [
+          "item.completed",
+          "thread.started",
+          "turn.completed",
+          "turn.started"
+        ],
+        "stderr_bytes": 170,
+        "http": [
+          {
+            "method": "GET",
+            "path": "/v1/responses",
+            "websocket": true,
+            "content_encoding": "",
+            "authorization_present": true,
+            "status": 426
+          },
+          {
+            "method": "POST",
+            "path": "/v1/responses",
+            "websocket": false,
+            "content_encoding": "",
+            "authorization_present": true,
+            "status": 200
+          }
+        ],
+        "upstream_http": [
+          {
+            "method": "POST",
+            "path": "/v1/responses",
+            "websocket": false,
+            "content_encoding": "",
+            "authorization_present": false,
+            "model_is_fixture": true,
+            "stream": true,
+            "status": 200
+          }
+        ],
+        "response_path_verified": true
+      },
+      {
+        "case": "gateway_api_key_codex_bengalfox_426",
+        "auth_shape": "api_key",
+        "passed": true,
+        "exit_code": 0,
+        "expected_response_path": "/v1/responses",
+        "builtin_endpoint_override": "loopback_origin_only_preserving_default_path",
+        "expected_completion": true,
+        "retry_policy": "builtin_defaults",
+        "timed_out": false,
+        "completed": true,
+        "exact_ok": true,
+        "tool_outputs": false,
+        "rate_limits_verified_in_client": true,
+        "rate_limits_event_count": 1,
+        "rate_limits_family": "codex_bengalfox",
+        "rate_limits": {
+          "limit_id": "codex_bengalfox",
+          "limit_name": "fixture-bengalfox",
+          "primary": {
+            "used_percent": 82.5,
+            "window_minutes": 300,
+            "resets_at": 1900100000
+          },
+          "secondary": {
+            "used_percent": 45.25,
+            "window_minutes": 10080,
+            "resets_at": 1900700000
+          },
+          "credits": {
+            "has_credits": true,
+            "unlimited": false,
+            "balance": "4.25"
+          }
+        },
+        "model_rate_limits_verified_in_client": true,
+        "elapsed_seconds": 0.301,
+        "event_types": [
+          "item.completed",
+          "thread.started",
+          "turn.completed",
+          "turn.started"
+        ],
+        "stderr_bytes": 170,
+        "http": [
+          {
+            "method": "GET",
+            "path": "/v1/responses",
+            "websocket": true,
+            "content_encoding": "",
+            "authorization_present": true,
+            "status": 426
+          },
+          {
+            "method": "POST",
+            "path": "/v1/responses",
+            "websocket": false,
+            "content_encoding": "",
+            "authorization_present": true,
+            "status": 200
+          }
+        ],
+        "upstream_http": [
+          {
+            "method": "POST",
+            "path": "/v1/responses",
+            "websocket": false,
+            "content_encoding": "",
+            "authorization_present": false,
+            "model_is_fixture": true,
+            "stream": true,
+            "status": 200
+          }
+        ],
+        "response_path_verified": true
+      },
+      {
+        "case": "gateway_api_key_codex_other_v2_426",
+        "auth_shape": "api_key",
+        "passed": true,
+        "exit_code": 0,
+        "expected_response_path": "/v1/responses",
+        "builtin_endpoint_override": "loopback_origin_only_preserving_default_path",
+        "expected_completion": true,
+        "retry_policy": "builtin_defaults",
+        "timed_out": false,
+        "completed": true,
+        "exact_ok": true,
+        "tool_outputs": false,
+        "rate_limits_verified_in_client": true,
+        "rate_limits_event_count": 1,
+        "rate_limits_family": "codex_other_v2",
+        "rate_limits": {
+          "limit_id": "codex_other_v2",
+          "limit_name": "fixture-other-v2",
+          "primary": {
+            "used_percent": 0.0,
+            "window_minutes": 60,
+            "resets_at": 1900200000
+          },
+          "secondary": {
+            "used_percent": 99.9,
+            "window_minutes": 1440,
+            "resets_at": 1900800000
+          },
+          "credits": {
+            "has_credits": true,
+            "unlimited": false,
+            "balance": "4.25"
+          }
+        },
+        "model_rate_limits_verified_in_client": true,
+        "elapsed_seconds": 0.537,
+        "event_types": [
+          "item.completed",
+          "thread.started",
+          "turn.completed",
+          "turn.started"
+        ],
+        "stderr_bytes": 170,
+        "http": [
+          {
+            "method": "GET",
+            "path": "/v1/responses",
+            "websocket": true,
+            "content_encoding": "",
+            "authorization_present": true,
+            "status": 426
+          },
+          {
+            "method": "POST",
+            "path": "/v1/responses",
+            "websocket": false,
+            "content_encoding": "",
+            "authorization_present": true,
+            "status": 200
+          }
+        ],
+        "upstream_http": [
+          {
+            "method": "POST",
+            "path": "/v1/responses",
+            "websocket": false,
+            "content_encoding": "",
+            "authorization_present": false,
+            "model_is_fixture": true,
+            "stream": true,
+            "status": 200
+          }
+        ],
+        "response_path_verified": true
+      },
+      {
+        "case": "gateway_chatgpt_426",
+        "auth_shape": "chatgpt",
+        "passed": true,
+        "exit_code": 0,
+        "expected_response_path": "/backend-api/codex/responses",
+        "builtin_endpoint_override": "loopback_origin_only_preserving_default_path",
+        "expected_completion": true,
+        "retry_policy": "builtin_defaults",
+        "timed_out": false,
+        "completed": true,
+        "exact_ok": true,
+        "tool_outputs": false,
+        "rate_limits_verified_in_client": true,
+        "rate_limits_event_count": 1,
+        "rate_limits_family": "codex",
+        "rate_limits": {
+          "limit_id": "codex",
+          "limit_name": "Codex",
+          "primary": {
+            "used_percent": 37.5,
+            "window_minutes": 300,
+            "resets_at": 1900000000
+          },
+          "secondary": {
+            "used_percent": 12.0,
+            "window_minutes": 10080,
+            "resets_at": 1900500000
+          },
+          "credits": {
+            "has_credits": true,
+            "unlimited": false,
+            "balance": "4.25"
+          }
+        },
+        "model_rate_limits_verified_in_client": false,
+        "elapsed_seconds": 0.626,
+        "event_types": [
+          "item.completed",
+          "thread.started",
+          "turn.completed",
+          "turn.started"
+        ],
+        "stderr_bytes": 812,
+        "http": [
+          {
+            "method": "GET",
+            "path": "/backend-api/codex/models?client_version=0.170.0",
+            "websocket": false,
+            "content_encoding": "",
+            "authorization_present": true,
+            "status": 404
+          },
+          {
+            "method": "GET",
+            "path": "/backend-api/codex/models?client_version=0.170.0",
+            "websocket": false,
+            "content_encoding": "",
+            "authorization_present": true,
+            "status": 404
+          },
+          {
+            "method": "GET",
+            "path": "/backend-api/codex/models?client_version=0.170.0",
+            "websocket": false,
+            "content_encoding": "",
+            "authorization_present": true,
+            "status": 404
+          },
+          {
+            "method": "GET",
+            "path": "/backend-api/codex/responses",
+            "websocket": true,
+            "content_encoding": "",
+            "authorization_present": true,
+            "status": 426
+          },
+          {
+            "method": "POST",
+            "path": "/backend-api/codex/responses",
+            "websocket": false,
+            "content_encoding": "zstd",
+            "authorization_present": true,
+            "status": 200
+          }
+        ],
+        "upstream_http": [
+          {
+            "method": "POST",
+            "path": "/v1/responses",
+            "websocket": false,
+            "content_encoding": "",
+            "authorization_present": false,
+            "model_is_fixture": true,
+            "stream": true,
+            "status": 200
+          }
+        ],
+        "response_path_verified": true
+      },
+      {
+        "case": "gateway_chatgpt_codex_bengalfox_426",
+        "auth_shape": "chatgpt",
+        "passed": true,
+        "exit_code": 0,
+        "expected_response_path": "/backend-api/codex/responses",
+        "builtin_endpoint_override": "loopback_origin_only_preserving_default_path",
+        "expected_completion": true,
+        "retry_policy": "builtin_defaults",
+        "timed_out": false,
+        "completed": true,
+        "exact_ok": true,
+        "tool_outputs": false,
+        "rate_limits_verified_in_client": true,
+        "rate_limits_event_count": 1,
+        "rate_limits_family": "codex_bengalfox",
+        "rate_limits": {
+          "limit_id": "codex_bengalfox",
+          "limit_name": "fixture-bengalfox",
+          "primary": {
+            "used_percent": 82.5,
+            "window_minutes": 300,
+            "resets_at": 1900100000
+          },
+          "secondary": {
+            "used_percent": 45.25,
+            "window_minutes": 10080,
+            "resets_at": 1900700000
+          },
+          "credits": {
+            "has_credits": true,
+            "unlimited": false,
+            "balance": "4.25"
+          }
+        },
+        "model_rate_limits_verified_in_client": true,
+        "elapsed_seconds": 0.578,
+        "event_types": [
+          "item.completed",
+          "thread.started",
+          "turn.completed",
+          "turn.started"
+        ],
+        "stderr_bytes": 812,
+        "http": [
+          {
+            "method": "GET",
+            "path": "/backend-api/codex/models?client_version=0.170.0",
+            "websocket": false,
+            "content_encoding": "",
+            "authorization_present": true,
+            "status": 404
+          },
+          {
+            "method": "GET",
+            "path": "/backend-api/codex/models?client_version=0.170.0",
+            "websocket": false,
+            "content_encoding": "",
+            "authorization_present": true,
+            "status": 404
+          },
+          {
+            "method": "GET",
+            "path": "/backend-api/codex/models?client_version=0.170.0",
+            "websocket": false,
+            "content_encoding": "",
+            "authorization_present": true,
+            "status": 404
+          },
+          {
+            "method": "GET",
+            "path": "/backend-api/codex/responses",
+            "websocket": true,
+            "content_encoding": "",
+            "authorization_present": true,
+            "status": 426
+          },
+          {
+            "method": "POST",
+            "path": "/backend-api/codex/responses",
+            "websocket": false,
+            "content_encoding": "zstd",
+            "authorization_present": true,
+            "status": 200
+          }
+        ],
+        "upstream_http": [
+          {
+            "method": "POST",
+            "path": "/v1/responses",
+            "websocket": false,
+            "content_encoding": "",
+            "authorization_present": false,
+            "model_is_fixture": true,
+            "stream": true,
+            "status": 200
+          }
+        ],
+        "response_path_verified": true
+      },
+      {
+        "case": "gateway_chatgpt_codex_other_v2_426",
+        "auth_shape": "chatgpt",
+        "passed": true,
+        "exit_code": 0,
+        "expected_response_path": "/backend-api/codex/responses",
+        "builtin_endpoint_override": "loopback_origin_only_preserving_default_path",
+        "expected_completion": true,
+        "retry_policy": "builtin_defaults",
+        "timed_out": false,
+        "completed": true,
+        "exact_ok": true,
+        "tool_outputs": false,
+        "rate_limits_verified_in_client": true,
+        "rate_limits_event_count": 1,
+        "rate_limits_family": "codex_other_v2",
+        "rate_limits": {
+          "limit_id": "codex_other_v2",
+          "limit_name": "fixture-other-v2",
+          "primary": {
+            "used_percent": 0.0,
+            "window_minutes": 60,
+            "resets_at": 1900200000
+          },
+          "secondary": {
+            "used_percent": 99.9,
+            "window_minutes": 1440,
+            "resets_at": 1900800000
+          },
+          "credits": {
+            "has_credits": true,
+            "unlimited": false,
+            "balance": "4.25"
+          }
+        },
+        "model_rate_limits_verified_in_client": true,
+        "elapsed_seconds": 0.498,
+        "event_types": [
+          "item.completed",
+          "thread.started",
+          "turn.completed",
+          "turn.started"
+        ],
+        "stderr_bytes": 812,
+        "http": [
+          {
+            "method": "GET",
+            "path": "/backend-api/codex/models?client_version=0.170.0",
+            "websocket": false,
+            "content_encoding": "",
+            "authorization_present": true,
+            "status": 404
+          },
+          {
+            "method": "GET",
+            "path": "/backend-api/codex/models?client_version=0.170.0",
+            "websocket": false,
+            "content_encoding": "",
+            "authorization_present": true,
+            "status": 404
+          },
+          {
+            "method": "GET",
+            "path": "/backend-api/codex/models?client_version=0.170.0",
+            "websocket": false,
+            "content_encoding": "",
+            "authorization_present": true,
+            "status": 404
+          },
+          {
+            "method": "GET",
+            "path": "/backend-api/codex/responses",
+            "websocket": true,
+            "content_encoding": "",
+            "authorization_present": true,
+            "status": 426
+          },
+          {
+            "method": "POST",
+            "path": "/backend-api/codex/responses",
+            "websocket": false,
+            "content_encoding": "zstd",
+            "authorization_present": true,
+            "status": 200
+          }
+        ],
+        "upstream_http": [
+          {
+            "method": "POST",
+            "path": "/v1/responses",
+            "websocket": false,
+            "content_encoding": "",
+            "authorization_present": false,
+            "model_is_fixture": true,
+            "stream": true,
+            "status": 200
+          }
+        ],
+        "response_path_verified": true
+      }
+    ],
+    "codex_sha256": "880819aab735adcf16f36cd628940b9f1e652a36c01d10a5d32f83cc84902971",
+    "gateway_sha256": "c09e6a3536523618c29da293275fc95db17ba1257f81b300688b80cc938b9683",
+    "script_sha256": "5910a4c16e60c8812ec90aee2a660108ff8095e3ad21e928af9d37e27f98bf65"
+  }
+}
