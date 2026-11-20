@@ -14,7 +14,7 @@ use zcalld_compat_client::{
 };
 use zcalld_plugin_api::{
     ContextPlugin, ContextPluginExport, GatewayPlugin, GatewayPluginExport, ProviderPlugin,
-    ProviderPluginExport, ResponsePlugin, ResponsePluginExport,
+    ProviderPluginExport, ResponsePlugin, ResponsePluginExport, status,
 };
 use zplugin::{Error, OwnedResource, ResourceHandler, Result};
 mod mcp;
@@ -378,11 +378,10 @@ impl ProviderPlugin for Community {
             .as_u64()
             .unwrap_or(300_000)
             .clamp(1, 3_600_000);
-        let head_timeout = params
-            .get("connect_timeout_ms")
-            .as_u64()
-            .unwrap_or(10_000)
-            .clamp(1, timeout);
+        // The host returns only HTTP headers/body events, not connection progress.
+        // Waiting for its head also includes provider setup, reasoning, and an
+        // optional SSE-to-JSON collection. Only the overall request deadline
+        // applies here; the direct curl transport owns a separate connect budget.
         let call = self
             .host()?
             .start(object([("method", "fetch".into()), ("params", params)]))
@@ -394,7 +393,6 @@ impl ProviderPlugin for Community {
             offset: 0,
             ended: false,
             deadline: Instant::now() + Duration::from_millis(timeout),
-            head_deadline: Instant::now() + Duration::from_millis(head_timeout),
         })
     }
 }
@@ -405,25 +403,26 @@ struct Stream {
     offset: usize,
     ended: bool,
     deadline: Instant,
-    head_deadline: Instant,
 }
 impl Stream {
     fn event(&mut self) -> Result<()> {
-        if Instant::now() >= self.deadline
-            || (self.head.is_none() && Instant::now() >= self.head_deadline)
-        {
-            return Err(Error::PluginStatus(6));
+        if Instant::now() >= self.deadline {
+            return Err(Error::PluginStatus(status::PROVIDER_TIMED_OUT));
         }
-        let Some(event) = self.call.poll().map_err(fail)? else {
+        let Some(event) = self
+            .call
+            .poll()
+            .map_err(|_| Error::PluginStatus(status::PROVIDER_TRANSPORT_FAILED))?
+        else {
             return Err(Error::PluginStatus(3));
         };
         if !matches!(event.get("error"), Value::Null) {
-            return Err(Error::PluginStatus(6));
+            return Err(Error::PluginStatus(status::PROVIDER_REQUEST_FAILED));
         }
         match event.get("event").as_str() {
             Some("head") => {
                 if self.head.is_some() {
-                    return Err(Error::InvalidArgument);
+                    return Err(Error::PluginStatus(status::PROVIDER_HEAD_INVALID));
                 }
                 let bytes = object([
                     ("status", event.get("status").clone()),
@@ -432,13 +431,17 @@ impl Stream {
                 .stringify()
                 .into_bytes();
                 if bytes.len() > 16_384 {
-                    return Err(Error::InvalidArgument);
+                    return Err(Error::PluginStatus(status::PROVIDER_HEAD_INVALID));
                 }
                 self.head = Some(bytes);
             }
             Some("chunk") => {
-                let bytes = decode(event.get("data").as_str().ok_or(Error::InvalidArgument)?)
-                    .map_err(fail)?;
+                if self.head.is_none() {
+                    return Err(Error::PluginStatus(status::PROVIDER_HEAD_INVALID));
+                }
+                let invalid = || Error::PluginStatus(status::PROVIDER_TRANSPORT_FAILED);
+                let bytes = decode(event.get("data").as_str().ok_or_else(invalid)?)
+                    .map_err(|_| invalid())?;
                 if bytes.is_empty() || bytes.len() > 65536 {
                     return Err(Error::InvalidArgument);
                 }
@@ -447,6 +450,9 @@ impl Stream {
             }
             _ => {
                 if event.as_object().is_some_and(|v| v.contains_key("result")) {
+                    if self.head.is_none() {
+                        return Err(Error::PluginStatus(status::PROVIDER_HEAD_INVALID));
+                    }
                     self.ended = true;
                     self.call.finish();
                 }

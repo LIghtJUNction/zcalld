@@ -25,6 +25,17 @@ pub mod status {
     pub const MODEL_DENIED: i32 = 1;
     /// The plugin's configured request-body limit was exceeded.
     pub const REQUEST_TOO_LARGE: i32 = 2;
+
+    // Optional application statuses for dev.zcalld.provider-stream resources.
+    // These expose static failure categories, never upstream text or secrets.
+    /// The provider RPC reported a request failure.
+    pub const PROVIDER_REQUEST_FAILED: i32 = 9;
+    /// The worker exited or its transport/protocol became unavailable.
+    pub const PROVIDER_TRANSPORT_FAILED: i32 = 10;
+    /// The overall provider request deadline expired.
+    pub const PROVIDER_TIMED_OUT: i32 = 11;
+    /// Response metadata was malformed, oversized, or arrived out of order.
+    pub const PROVIDER_HEAD_INVALID: i32 = 12;
 }
 
 /// Maximum UTF-8 model or route-name length accepted by the host.

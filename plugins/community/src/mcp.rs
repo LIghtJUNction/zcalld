@@ -475,7 +475,6 @@ impl HttpPlugin for Community {
             offset: 0,
             ended: false,
             deadline: Instant::now() + Duration::from_millis(timeout),
-            head_deadline: Instant::now() + Duration::from_millis(timeout),
         })
     }
 }
