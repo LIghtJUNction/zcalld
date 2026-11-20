@@ -13,8 +13,8 @@ name = "zcalld_desktop"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-zplugin = { version = "=0.3.1", features = ["std"] }
+zplugin = { version = "=0.3.1", features = ["std"], git = "https://github.com/LIghtJUNction/zplugin.git"}
 zcalld-plugin-api = { version = "=0.4.0", path = "../../crates/zcalld-plugin-api" }
 zcalld-compat-client = { version = "=0.4.0", path = "../../crates/zcalld-compat-client" }
-zsys = { version = "=0.1.1", default-features = false, features = ["std", "dylib"] }
-zconv = { version = "=0.4.0", default-features = false }
+zsys = { version = "=0.1.1", default-features = false, features = ["std", "dylib"], git = "https://github.com/LIghtJUNction/zsys.git"}
+zconv = { version = "=0.4.0", default-features = false, git = "https://github.com/LIghtJUNction/zconv.git"}

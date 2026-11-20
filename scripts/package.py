@@ -126,10 +126,8 @@ def native_archive(args, output):
         raise ValueError(f'unsupported release target: {target}')
     if not args.no_build:
         subprocess.run(['cargo', 'build', '--release', '--workspace', '--locked'], cwd=ROOT, check=True)
-    build = Path(os.environ.get('CARGO_TARGET_DIR', ROOT / 'target'))
-    if not build.is_absolute():
-        build = ROOT / build
-    build /= 'release'
+    metadata = json.loads(run('cargo', 'metadata', '--no-deps', '--format-version', '1', '--locked', '--offline'))
+    build = Path(metadata['target_directory']) / 'release'
     windows = 'windows' in target
     darwin = 'darwin' in target
     executable = 'zcalld.exe' if windows else 'zcalld'

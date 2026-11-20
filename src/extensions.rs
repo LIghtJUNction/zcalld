@@ -124,6 +124,8 @@ pub(crate) fn library(kind: &str) -> Result<PathBuf, String> {
     if let Ok(exe) = std::env::current_exe()
         && let Some(dir) = exe.parent()
     {
+        // Cargo may place development artifacts outside the source checkout.
+        candidates.insert(0, dir.join(&name));
         candidates.insert(0, dir.join("plugins").join(&name));
         if let Some(prefix) = dir.parent() {
             candidates.insert(0, prefix.join("lib/zcalld/plugins").join(&name));
