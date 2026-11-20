@@ -15,11 +15,11 @@ BINARY = Path(os.environ.get("ZCALLD_TEST_BINARY", "target/debug/zcalld")).resol
 class LibraryTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="zcalld-library-")
-        self.home = Path(self.temp.name)
+        self.home = Path(self.temp.name).resolve()
         self.directory = self.home / ".config/zcalld"
         self.directory.mkdir(parents=True)
         self.config = self.directory / "config.conf"
-        self.config.write_text("[server]\nlisten = 127.0.0.1:39415\n")
+        self.config.write_bytes(b"[server]\nlisten = 127.0.0.1:39415\n")
         self.env = {k: v for k, v in os.environ.items() if not k.startswith((
             "ZCALLD_", "CODEX_", "XDG_", "CLAUDE_", "COPILOT_", "OPENCODE_", "PI_", "OMP_", "OMO_", "SENPI_", "GROK_", "DSH_", "QWEN_"))}
         self.env.update(HOME=str(self.home), USERPROFILE=str(self.home),
@@ -43,7 +43,7 @@ class LibraryTests(unittest.TestCase):
     def write(self, path, text):
         path = self.home / path
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text)
+        path.write_bytes(text.encode("utf-8"))
         return path
 
     def state(self):
@@ -195,12 +195,12 @@ class LibraryTests(unittest.TestCase):
 
     def test_instruction_crud_sets_extras_apply_and_revert(self):
         self.seed_instructions("claude,codex")
-        original = self.write(".claude/CLAUDE.md", "User before\n")
+        original = self.write(".claude/CLAUDE.md", "User before\r\n")
         extra = self.write("extra.md", "Claude-only additions")
         self.cli("instructions", "extra", "--agent", "claude", "--file", extra)
         preview = self.cli("apply", "--agent", "claude", "--dry-run")
         self.assertTrue(preview["dry_run"])
-        self.assertEqual(original.read_text(), "User before\n")
+        self.assertEqual(original.read_bytes(), b"User before\r\n")
         self.assertFalse((self.directory / "library-managed.json").exists())
         self.cli("apply", "--agent", "claude")
         self.assertIn("shared text\n\nClaude-only additions", original.read_text())
@@ -213,11 +213,12 @@ class LibraryTests(unittest.TestCase):
         self.cli("instructions", "apply", "--agent", "claude")
         self.assertIn("second set", original.read_text())
         self.assertNotIn("shared text", original.read_text())
-        original.write_text(original.read_text() + "User after\n")
+        with original.open("ab") as stream:
+            stream.write(b"User after\r\n")
         self.cli("instructions", "disable", "--agent", "claude")
         self.cli("instructions", "apply", "--agent", "claude")
-        self.assertIn("User before", original.read_text())
-        self.assertIn("User after", original.read_text())
+        self.assertTrue(original.read_bytes().startswith(b"User before\r\n"))
+        self.assertTrue(original.read_bytes().endswith(b"User after\r\n"))
         self.assertNotIn("zcalld:library", original.read_text())
         self.cli("instructions", "remove", "second")
         self.assertEqual(self.cli("instructions", "list")["active"], "default")
@@ -230,7 +231,7 @@ class LibraryTests(unittest.TestCase):
         self.assertFalse((self.home / ".codex/AGENTS.md").exists())
         self.cli("apply", "--agent", "claude")
         target = self.home / ".claude/CLAUDE.md"
-        target.write_text(target.read_text().replace("shared text", "manual edited block"))
+        target.write_bytes(target.read_bytes().replace(b"shared text", b"manual edited block"))
         self.cli("revert", "--agent", "claude", ok=False)
         self.assertIn("manual edited block", target.read_text())
         source = self.write("linked.md", "linked prompt")
@@ -265,14 +266,14 @@ class LibraryTests(unittest.TestCase):
     def test_skill_create_read_write_and_assignment(self):
         source = self.write("new.md", "# New skill\n")
         self.cli("skills", "create", "new", "--file", source)
-        self.assertEqual(self.cli("skills", "read", "new")["text"], "# New skill\n")
+        self.assertEqual(self.cli("skills", "read", "new")["text"].encode("utf-8"), source.read_bytes())
         self.cli("skills", "assign", "new", "--agents", "codex")
         self.cli("skills", "write", "new", "--file", "references/new.md", "--input", source)
         self.assertIn("references/new.md", self.cli("skills", "show", "new")["files"])
         self.cli("apply", "--agent", "claude")
         self.assertFalse((self.home / ".claude/skills/new").exists())
         self.cli("apply", "--agent", "codex")
-        self.assertTrue((self.home / ".codex/skills/new/references/new.md").exists())
+        self.assertEqual((self.home / ".codex/skills/new/references/new.md").read_bytes(), source.read_bytes())
         self.cli("skills", "write", "new", "--file", "../escape", "--input", source, ok=False)
         self.assertFalse((self.directory / "library/skills/escape").exists())
 
@@ -322,7 +323,7 @@ class LibraryTests(unittest.TestCase):
         assets = self.home / "export-assets"
         self.cli("export", "--file", metadata, "--assets", assets)
         self.assertTrue(json.loads(metadata.read_text())["future-setting"]["preserve"])
-        self.assertEqual((assets / "instructions.md").read_text(), "shared text\n")
+        self.assertEqual((assets / "instructions.md").read_bytes(), b"shared text\n")
         self.assertEqual((assets / "skills/fixture/data.bin").read_bytes(), bytes(range(256)))
         self.assertEqual(self.cli("list")["skills"], 1)
         if os.name != "nt":

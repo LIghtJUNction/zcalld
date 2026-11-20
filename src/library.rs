@@ -2358,7 +2358,10 @@ mod tests {
 
     #[test]
     fn plan_rejects_change_after_preview() {
-        let path = std::env::temp_dir().join(format!(
+        // macOS exposes its temporary directory through /var -> /private/var.
+        // Resolve the fixture root without weakening managed-path validation.
+        let root = fs::canonicalize(std::env::temp_dir()).unwrap();
+        let path = root.join(format!(
             "zcalld-library-plan-{}-{}",
             std::process::id(),
             control::now()
