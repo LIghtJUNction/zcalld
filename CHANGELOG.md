@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.5 — 2026-11-20
+
+- fix: pin the released GUI after the zgpui rename
+- fix: restore Codex HTTP fallback and compressed requests
+- docs: record verified 0.2.4 migration and compatibility resource use
+
 ## 0.2.4 — 2026-11-20
 
 - fix: release socket locks explicitly and check Windows helper paths
