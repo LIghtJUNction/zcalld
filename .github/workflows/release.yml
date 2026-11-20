@@ -133,7 +133,9 @@ jobs:
           fi
       - name: Build and validate optional native notification identities
         shell: bash
-        run: python3 plugins/desktop/native/build.py --out-dir target/release/desktop-native --self-test
+        run: |
+          python3 plugins/desktop/native/test-build.py
+          python3 plugins/desktop/native/build.py --out-dir target/release/desktop-native --self-test
       - name: Run Linux release checks
         if: runner.os == 'Linux'
         run: ./scripts/check.sh
