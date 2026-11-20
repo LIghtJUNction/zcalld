@@ -32,11 +32,19 @@ fn safe_ancestors(path: &Path) -> Result<(), String> {
         return Err("private path must be absolute".into());
     }
     let mut part = std::path::PathBuf::new();
-    for c in path.components() {
+    let mut components = path.components().peekable();
+    while let Some(c) = components.next() {
         if matches!(c, Component::ParentDir) {
             return Err("parent components are not allowed".into());
         }
         part.push(c.as_os_str());
+        // Inspect a Windows drive prefix only after its root separator is
+        // appended. In particular, canonicalize returns verbatim drive paths.
+        if matches!(c, Component::Prefix(_))
+            && matches!(components.peek(), Some(Component::RootDir))
+        {
+            continue;
+        }
         match fs::symlink_metadata(&part) {
             Ok(m) if is_link(&m) => return Err("private path contains a symlink".into()),
             Ok(_) => {}

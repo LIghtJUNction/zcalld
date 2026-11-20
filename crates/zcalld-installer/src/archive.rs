@@ -10,6 +10,7 @@ use std::{
     fs::{self, File},
     io::{Read, Write},
     path::{Path, PathBuf},
+    process::Command,
     time::Duration,
 };
 
@@ -238,23 +239,77 @@ struct Member {
     name: String,
     directory: bool,
 }
-fn tar() -> Result<PathBuf, String> {
+#[cfg(windows)]
+fn windows_tar() -> Result<PathBuf, String> {
+    use std::{ffi::OsString, os::windows::ffi::OsStringExt};
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetSystemDirectoryW(buffer: *mut u16, size: u32) -> u32;
+    }
+
+    // Windows releases are ZIP archives. A PATH-selected Git Bash GNU tar
+    // neither implements that format nor accepts Windows drive paths as local.
+    let mut buffer = vec![0u16; 32_768];
+    let length = unsafe { GetSystemDirectoryW(buffer.as_mut_ptr(), buffer.len() as u32) } as usize;
+    if length == 0 || length >= buffer.len() {
+        return Err("cannot locate the Windows system directory".into());
+    }
+    let directory = PathBuf::from(OsString::from_wide(&buffer[..length]));
+    if !directory.is_absolute() {
+        return Err("Windows system directory is not absolute".into());
+    }
+    let program = directory.join("tar.exe");
+    if !program.is_file() {
+        return Err("Windows system bsdtar is unavailable".into());
+    }
+    program
+        .canonicalize()
+        .map_err(|_| "cannot resolve Windows system bsdtar".into())
+}
+
+pub(crate) fn tar() -> Result<PathBuf, String> {
+    #[cfg(windows)]
+    let program = windows_tar()?;
+    #[cfg(not(windows))]
     let program = process::executable("tar")?;
     let mut command = process::command(&program);
     command.arg("--version");
     let bytes = process::capture(command, 8192, Duration::from_secs(5))?;
     let version = String::from_utf8(bytes).map_err(|_| "unrecognized system tar")?;
-    if !version.starts_with("tar (GNU tar)") && !version.starts_with("bsdtar ") {
-        return Err("installer requires GNU tar or bsdtar".into());
+    let supported =
+        version.starts_with("bsdtar ") || (!cfg!(windows) && version.starts_with("tar (GNU tar)"));
+    if !supported {
+        return Err(if cfg!(windows) {
+            "installer requires Windows system bsdtar"
+        } else {
+            "installer requires GNU tar or bsdtar"
+        }
+        .into());
     }
     Ok(program)
 }
+
+fn archive_command(program: &Path, archive: &Path, args: &[&str]) -> Result<Command, String> {
+    let directory = archive
+        .parent()
+        .filter(|path| path.is_absolute())
+        .ok_or("archive has no absolute parent directory")?;
+    let name = archive.file_name().ok_or("archive has no file name")?;
+    // Keep drive prefixes out of -f and scope the directory to this child.
+    // The explicit ./ also keeps colon-bearing Unix names local to GNU tar.
+    let mut command = process::command(program);
+    command
+        .current_dir(directory)
+        .args(args)
+        .arg(Path::new(".").join(name));
+    Ok(command)
+}
+
 fn enumerate(program: &Path, archive: &Path, root: &str) -> Result<Vec<Member>, String> {
-    let mut names = process::command(program);
-    names.arg("-tf").arg(archive);
+    let names = archive_command(program, archive, &["-tf"])?;
     let names = process::capture(names, MAX_METADATA, Duration::from_secs(20))?;
-    let mut details = process::command(program);
-    details.arg("--numeric-owner").arg("-tvf").arg(archive);
+    let details = archive_command(program, archive, &["--numeric-owner", "-tvf"])?;
     let details = process::capture(details, 2 * MAX_METADATA, Duration::from_secs(20))?;
     let names = String::from_utf8(names).map_err(|_| "archive names are not UTF-8")?;
     let details = String::from_utf8(details).map_err(|_| "archive listing is not UTF-8")?;
@@ -307,12 +362,8 @@ pub fn unpack(archive: &Path, stage: &Path, plan: &Plan) -> Result<Manifest, Str
     {
         return Err("native archive has no INSTALL.json".into());
     }
-    let mut command = process::command(&program);
-    command
-        .arg("-xOf")
-        .arg(archive)
-        .arg("--")
-        .arg(&manifest_name);
+    let mut command = archive_command(&program, archive, &["-xOf"])?;
+    command.arg("--").arg(&manifest_name);
     let raw = process::capture(command, MAX_METADATA, Duration::from_secs(20))?;
     let manifest = Manifest::parse(raw, plan)?;
     let mut directories = BTreeSet::new();
@@ -375,8 +426,7 @@ pub fn unpack(archive: &Path, stage: &Path, plan: &Plan) -> Result<Manifest, Str
     let mut written = 0u64;
     let mut current: Option<File> = None;
     let mut hash = Sha256::new();
-    let mut command = process::command(program);
-    command.arg("-xOf").arg(archive);
+    let command = archive_command(&program, archive, &["-xOf"])?;
     process::stream(command, total, Duration::from_secs(90), |mut chunk| {
         while !chunk.is_empty() || index < order.len() && order[index].size == 0 {
             let entry = order

@@ -20,11 +20,20 @@ pub fn random_id() -> Result<String, String> {
 }
 pub fn no_links(path: &Path) -> Result<(), String> {
     let mut prefix = PathBuf::new();
-    for component in path.components() {
+    let mut components = path.components().peekable();
+    while let Some(component) = components.next() {
         if matches!(component, Component::ParentDir | Component::CurDir) {
             return Err("noncanonical installer path".into());
         }
         prefix.push(component.as_os_str());
+        // A Windows drive prefix alone is not its root, especially for the
+        // extended paths returned by canonicalize. Inspect the complete root
+        // on the next iteration; drive-relative inputs keep their old checks.
+        if matches!(component, Component::Prefix(_))
+            && matches!(components.peek(), Some(Component::RootDir))
+        {
+            continue;
+        }
         match fs::symlink_metadata(&prefix) {
             Ok(meta) => {
                 #[cfg(windows)]
@@ -303,4 +312,38 @@ pub fn mode(file: &File, mode: u32) -> Result<(), String> {
         privacy_windows::protect(file)?;
     }
     Ok(())
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+
+    struct TempDirectory(PathBuf);
+    impl Drop for TempDirectory {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn canonical_windows_root_and_private_child_are_inspected_as_complete_paths() {
+        let parent = std::env::temp_dir().canonicalize().unwrap();
+        assert!(matches!(
+            parent.components().next(),
+            Some(Component::Prefix(prefix)) if prefix.kind().is_verbatim()
+        ));
+        no_links(&parent).expect("canonical Windows temp ancestors must remain inspectable");
+        let root =
+            TempDirectory(parent.join(format!("zcalld-private-test-{}", random_id().unwrap())));
+        mkdir(&root.0).unwrap();
+        check_dir(&root.0).unwrap();
+        let path = root.0.join("private-state");
+        let mut file = create(&path).unwrap();
+        file.write_all(b"fixture").unwrap();
+        drop(file);
+        assert_eq!(read(&path, 32).unwrap(), b"fixture");
+        let mut noncanonical = root.0.as_os_str().to_os_string();
+        noncanonical.push(r"\..\outside");
+        assert!(no_links(Path::new(&noncanonical)).is_err());
+    }
 }

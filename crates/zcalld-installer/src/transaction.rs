@@ -14,6 +14,24 @@ use std::{
     time::{Duration, Instant},
 };
 
+// Closing one descriptor does not release a lock while a duplicate or an
+// inherited descriptor still refers to it. End each exclusive operation at the
+// owner's scope boundary, including error paths after lock acquisition.
+struct ExclusiveLock {
+    file: File,
+}
+impl Drop for ExclusiveLock {
+    fn drop(&mut self) {
+        let _ = self.file.unlock();
+    }
+}
+#[cfg(test)]
+impl ExclusiveLock {
+    fn try_clone(&self) -> std::io::Result<File> {
+        self.file.try_clone()
+    }
+}
+
 struct Control {
     directory: PathBuf,
     transactions: PathBuf,
@@ -40,12 +58,13 @@ impl Control {
             transactions,
         })
     }
-    fn lock(&self) -> Result<File, String> {
+    fn lock(&self) -> Result<ExclusiveLock, String> {
         let file = private::lock_file(&self.directory.join("install.lock"))?;
         file.try_lock()
             .map_err(|_| "another installer operation is active")?;
-        private::same_file(&file, &self.directory.join("install.lock"))?;
-        Ok(file)
+        let guard = ExclusiveLock { file };
+        private::same_file(&guard.file, &self.directory.join("install.lock"))?;
+        Ok(guard)
     }
     fn runtime(&self) -> Result<File, String> {
         private::lock_file(&self.directory.join("runtime.lock"))
@@ -482,14 +501,15 @@ fn copy_helper(stage: &Path, store: &Store) -> Result<(), String> {
         .map_err(|_| "cannot sync independent installer helper")?;
     Ok(())
 }
-fn wait_runtime(control: &Control, wait: Duration) -> Result<Option<File>, String> {
+fn wait_runtime(control: &Control, wait: Duration) -> Result<Option<ExclusiveLock>, String> {
     let file = control.runtime()?;
     let deadline = Instant::now() + wait;
     loop {
         match file.try_lock() {
             Ok(()) => {
-                private::same_file(&file, &control.directory.join("runtime.lock"))?;
-                return Ok(Some(file));
+                let guard = ExclusiveLock { file };
+                private::same_file(&guard.file, &control.directory.join("runtime.lock"))?;
+                return Ok(Some(guard));
             }
             Err(std::fs::TryLockError::WouldBlock) => {}
             Err(_) => return Err("cannot acquire installation runtime lease".into()),
@@ -813,16 +833,18 @@ mod tests {
             file.write_all(manifest.stringify().as_bytes()).unwrap();
             private::mode(&file, 0o644).unwrap();
             drop(file);
-            let output = self.0.join(format!("bundle-{version}.tar"));
-            let status = std::process::Command::new(process::executable("tar").unwrap())
-                .arg("-cf")
-                .arg(&output)
+            let extension = if cfg!(windows) { "zip" } else { "tar" };
+            let output = self.0.join(format!("bundle-{version}.{extension}"));
+            let status = std::process::Command::new(archive::tar().unwrap())
+                .current_dir(&self.0)
+                .arg(if cfg!(windows) { "-caf" } else { "-cf" })
+                .arg(output.file_name().unwrap())
                 .arg("-C")
-                .arg(&input)
+                .arg(input.file_name().unwrap())
                 .arg(&stem)
                 .status()
                 .unwrap();
-            assert!(status.success());
+            assert!(status.success(), "native archive creation failed: {status}");
             Plan::local(
                 &output,
                 &hash::sha256_file(&output, crate::MAX_ARCHIVE).unwrap(),
@@ -858,6 +880,45 @@ mod tests {
     fn fake_probe(_: &Path, _: &str) -> Result<(), String> {
         Ok(())
     }
+    fn assert_exclusive_guard_releases<G>(guard: G, duplicate: File, path: &Path) {
+        let contender = private::lock_file(path).unwrap();
+        assert!(matches!(
+            contender.try_lock(),
+            Err(std::fs::TryLockError::WouldBlock)
+        ));
+        drop(guard);
+        contender
+            .try_lock()
+            .expect("exclusive guard must unlock while an old duplicate remains open");
+        drop(duplicate);
+        let observer = private::lock_file(path).unwrap();
+        assert!(matches!(
+            observer.try_lock(),
+            Err(std::fs::TryLockError::WouldBlock)
+        ));
+        contender.unlock().unwrap();
+        observer.try_lock().unwrap();
+        observer.unlock().unwrap();
+    }
+
+    #[test]
+    fn installer_operation_unlocks_while_an_old_duplicate_is_open() {
+        let f = Fixture::new();
+        let control = Control::for_prefix(&f.prefix(), true).unwrap();
+        let guard = control.lock().unwrap();
+        let duplicate = guard.try_clone().unwrap();
+        assert_exclusive_guard_releases(guard, duplicate, &control.directory.join("install.lock"));
+    }
+
+    #[test]
+    fn installer_activation_unlocks_while_an_old_duplicate_is_open() {
+        let f = Fixture::new();
+        let control = Control::for_prefix(&f.prefix(), true).unwrap();
+        let guard = wait_runtime(&control, Duration::ZERO).unwrap().unwrap();
+        let duplicate = guard.try_clone().unwrap();
+        assert_exclusive_guard_releases(guard, duplicate, &control.directory.join("runtime.lock"));
+    }
+
     #[test]
     fn service_setup_verifies_cohort_and_holds_runtime_lease() {
         let f = Fixture::new();
