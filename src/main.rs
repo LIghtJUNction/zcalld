@@ -9,6 +9,7 @@ mod digest;
 mod extensions;
 mod http;
 mod keys;
+mod listener;
 mod maintenance;
 mod migration;
 mod plugin_http;
@@ -36,6 +37,8 @@ Gateway:
   serve                    Foreground daemon; systemd/launchd friendly
   check | health | status  Validate configuration or inspect the live gateway
   models                   Show public models and retained capability metadata
+  listen --ssmcp-socket PATH --model ROUTE [--once] [--timeout-ms N]
+                           Local Linux listener; --config PATH and --token-env NAME are optional
   env [openai|anthropic|gemini]
   service start|stop|restart|enable|disable|status [--system]
 
@@ -104,6 +107,9 @@ fn run() -> Result<(), String> {
     {
         let path = management_args.get(1).ok_or("missing update state")?;
         return windows_update::finish(std::path::Path::new(path));
+    }
+    if let Some(result) = listener::run(&management_args) {
+        return result;
     }
     if let Some(result) = control::run(&management_args) {
         return result;

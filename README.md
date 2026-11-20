@@ -153,3 +153,7 @@ MIT licensed. Magpie compatibility code retains upstream notices in the optional
 ## Codex transport compatibility
 
 Responses clients that negotiate WebSocket transport can fall back to HTTP/SSE through the gateway. See [the negotiation contract and local validation](docs/CODEX_TRANSPORT.md) for the supported boundary.
+
+### Native SSMCP listener
+
+On Linux, the opt-in `zcalld listen --ssmcp-socket PATH --model ROUTE` command receives explicit `/send` input and returns one scoped execution result through the original live SSMCP conversation. Ordinary chat input is not intercepted. See [the local listener guide](docs/ssmcp-listener.md) for authentication, receipt semantics, limits, and verification scope.
