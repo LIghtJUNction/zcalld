@@ -77,6 +77,7 @@ Protocol names are `chat`, `responses`, `anthropic`, `gemini`, `completions` and
 | `/v1beta/models/{model}:streamGenerateContent` | Gemini streaming |
 | `/v1/completions`, `/v1beta/interactions` | Additional protocol ingress |
 | `GET /v1/models` | Public routes with preserved catalog metadata |
+| `GET /backend-api/codex/models` and bound account metadata paths | Optional [native Codex metadata](docs/CODEX.md); disabled until explicitly configured |
 | `GET /healthz` | Readiness |
 | `POST /mcp/zcalld/tools`, `POST /mcp/magpie/tools` | Optional community-tool MCP; the legacy address remains valid |
 

@@ -47,6 +47,18 @@ fn metadata(
     if route_context {
         // The peer and route relationships come from the authenticated connection
         // and the loaded configuration. Never copy a client-supplied identity.
+        let account_hints = request
+            .headers
+            .iter()
+            .filter(|(name, _)| name.eq_ignore_ascii_case("chatgpt-account-id"))
+            .map(|(_, value)| Value::from(value.clone()))
+            .collect();
+        // This is a consistency hint only, never authenticated identity. Preserve
+        // multiplicity so the owning plugin can reject ambiguous/empty hints.
+        result.set(
+            "untrusted_headers",
+            object([("chatgpt-account-id", Value::Array(account_hints))]),
+        );
         result.set(
             "query",
             request
@@ -317,6 +329,14 @@ mod tests {
         assert_eq!(value.get("loopback").as_bool(), Some(false));
         assert_eq!(value.get("caller_key_id").as_str(), Some("verified"));
         assert_eq!(value.get("query").as_str(), Some("client_version=0.170.0"));
+        assert_eq!(
+            value
+                .get("untrusted_headers")
+                .get("chatgpt-account-id")
+                .as_array()[0]
+                .as_str(),
+            Some("forged-account")
+        );
         let providers = value.get("routing").get("providers").as_array();
         assert_eq!(
             providers[0].get("account").as_str(),
@@ -332,7 +352,7 @@ mod tests {
             "private-host",
             "upstream-secret",
             "header-secret",
-            "forged-",
+            "forged-caller",
             "guessed-member",
         ] {
             assert!(!text.contains(forbidden));
