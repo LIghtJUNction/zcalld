@@ -163,6 +163,8 @@ Use the platform's `.dylib` or `.dll` and executable names on macOS or Windows.
 The suite covers initialization without a host, real tool results, tool errors,
 notifications, batches, aliases, permission filtering, disabled plugins,
 multiframe output, response bounds without replay, a single shared host across
-workers, and cancellation/drain at gateway shutdown. The final PID-existence
-probe is POSIX-only; Windows still runs the shutdown and tool-abort assertions.
+workers, and cancellation/drain at gateway shutdown. Owned Bun exit is checked
+with process identities on POSIX and an opened process handle plus
+`WaitForSingleObject` on Windows; an unrelated reused PID is not a shutdown
+signal.
 No real provider, credential, model call, or paid service is used.

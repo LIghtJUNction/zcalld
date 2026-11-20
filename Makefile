@@ -7,12 +7,20 @@ BUMP ?= patch
 VERSION ?=
 PLUGINS := zcalld_aliases zcalld_policy zcalld_redact zcalld_community zcalld_plugin_routing
 
-.PHONY: build check install package bump release
+.PHONY: build check check-native install package bump release
 build:
 	cargo build --release --workspace --locked
 
 check:
 	./scripts/check.sh
+
+# Optional provider/privacy acceptance needs Go and Bun; core-only checks do not.
+ZCALLD_NATIVE_EXE = $(shell go env GOEXE)
+check-native: build
+	mkdir -p _release/native-compat
+	go -C extensions/compat build -mod=readonly -trimpath -o "../../_release/native-compat/zcalld-pluginctl$(ZCALLD_NATIVE_EXE)" ./cmd/zcalld-pluginctl
+	go -C extensions/compat build -mod=readonly -trimpath -o "../../_release/native-compat/zcalld-privacy$(ZCALLD_NATIVE_EXE)" ./cmd/zcalld-privacy
+	python3 scripts/test-native-compat.py
 
 install:
 	install -Dm755 target/release/zcalld "$(DESTDIR)$(BINDIR)/zcalld"
