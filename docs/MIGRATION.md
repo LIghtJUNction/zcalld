@@ -2,7 +2,7 @@
 
 The migration keeps the original Magpie installation available while zcalld takes over its local gateway address. It preserves public model IDs, full catalog metadata, configured routes, community packages, caller keys, privacy state and history. The service transaction is separate from copying the configuration: a prepared copy does not own the live port or refresh the original accounts.
 
-The Linux handover uses [scripts/cutover.py](../scripts/cutover.py). It requires a user systemd session, Python 3.9 or newer with Linux pidfd support, the packaged zcalld user unit, and the compatibility helper. The configuration importer and gateway support other platforms; this transaction script is specifically for Linux and systemd.
+The Linux handover uses [scripts/cutover.py](../scripts/cutover.py). It requires a user systemd session, Python 3.9 or newer with Linux pidfd support, a libc/filesystem providing renameat2, the packaged zcalld user unit, and the compatibility helper. The configuration importer and gateway support other platforms; this transaction script is specifically for Linux and systemd.
 
 Advanced time, text, agent and folder conditions are preserved and validated during planning. See [Routing rules and trusted workspaces](ROUTING.md) for the condition syntax, compatibility helper requirement and verified workspace bindings. A rejected condition remains a compatibility gap until corrected; migration does not silently drop it.
 
@@ -91,6 +91,7 @@ Preparation checks all of the following:
 - Source topology, including the MCP library, and relevant privacy settings still match the copied snapshot.
 - An assigned Magpie MCP entry completes initialization, ping and tool listing against the still-running original service. Other URLs, ports and paths are not probed or rebound.
 - Candidate community credentials have not been used or changed since import.
+- The candidate privacy history still matches its snapshot, its effective history path is private and expected, and active privacy key identities match.
 - Runtime files and installed binaries exist, and the configuration check succeeds.
 
 Preparation writes the private journal and performs local checks. It leaves Magpie running and does not start a candidate daemon or compatibility worker. If preparation fails, correct the reported condition and use a new state directory; a failed preparation has not switched the service.
@@ -117,7 +118,7 @@ It records each transition before making the corresponding change:
 | --- | --- |
 | pausing_old | Back up the original autostart entry, install a reversible Hidden=true override, and disable an explicitly supplied old unit. Send SIGTERM only to the verified Magpie main process. |
 | old_stopped | Wait for the recorded gateway subtree, including its credential worker, to exit. Confirm that TCP 3425 is free. |
-| synchronized | Copy the final community authentication state and usage tail; run a fresh, local import-builtin using the installed helper. |
+| synchronized | Copy the final privacy audit history, community authentication state and usage tail; run a fresh, local import-builtin using the installed helper. |
 | starting_new | Add a reversible user-service drop-in for the chosen binary and configuration, then start zcalld. |
 | active | Verify TCP and Unix health, socket ownership and mode 0600, every model object's full metadata and, when retained, the MCP protocol and complete tool definitions over both transports; then enable the user service and mark the migration complete. |
 
@@ -126,6 +127,33 @@ The wait is bounded, with a default of 90 seconds and an optional preparation --
 There is a short interruption between releasing and rebinding port 3425. Requests already in progress depend on the old application's shutdown behavior. The transaction does not replay them or send a test generation request. Its verification requests are limited to local health, model metadata and the retained MCP endpoint's initialization, initialized notification, ping and tools/list. They never execute tools/call. The MCP check follows session headers and catalog pagination, accepts empty catalogs and compares every tool definition independently of list order. It currently requires finite JSON metadata responses; an incompatible response, rejection, protocol change or tool metadata mismatch fails activation and enters rollback.
 
 A failed apply attempts rollback automatically. An interrupted apply is recovered with the explicit rollback command below; do not start a second transaction against the same partially switched state.
+
+## Privacy history during handover
+
+Privacy history is an audit record, not the dictionary that restores placeholders. Magpie stores placeholder metadata in daily files; original values and surrounding request text remain in process memory. The active `redact.key` makes placeholder labels stable. Copying history cannot reconstruct values that an exited process held only in memory. These distinctions follow the upstream [record format and writer](https://github.com/yetone/magpie/blob/1e174f8f9f613a920203a4658d259456fcab5d0d/internal/maskrec/maskrec.go).
+
+The compatibility worker's optional `history_dir` must resolve to the candidate's `privacy/history`. When the setting is absent or empty, it is derived from the directory containing its settings file. Preparation checks that effective path and records the worker binding's fingerprint. Continuing audit collection requires a compatibility worker with audit support; the older 0.1.2 worker preserved the imported archive but did not produce new records.
+
+| Entry | Transaction handling |
+| --- | --- |
+| `YYYY-MM-DD.jsonl` | Preserve complete JSON-object lines and their original byte order. Record keys can be out of order when concurrent requests finish in a different order. |
+| `checked-YYYY-MM-DD.json` | Preserve the whole counter object. These files are replaced atomically, rather than appended. |
+| A historical `redact.key` inside the history directory | Preserve and fingerprint it as an immutable, opaque file. It is separate from the candidate's active `privacy/redact.key`. |
+| A stable sibling lock, such as `privacy/.history.zcalld-audit.lock` | Validate it and acquire it without blocking. It stays outside the exchanged directory and is never part of the copied history. |
+
+The original application can append a completed request, create a new day, prune an old day or clear and recreate a day. Its [checked counters](https://github.com/yetone/magpie/blob/1e174f8f9f613a920203a4658d259456fcab5d0d/internal/maskrec/checked.go) use a timer and whole-file replacement. The transaction therefore compares complete file manifests; it does not concatenate every file or rewrite records into a guessed common schema.
+
+Preparation requires the candidate history to match the migration snapshot, and the source, snapshot and active candidate key to match. The original application may continue updating its own history while it runs. After its recorded processes have drained, apply captures the final complete history and publishes it to the candidate. It rejects a candidate that changed under another writer.
+
+Rollback uses that final handover history as its base. After the new worker drains, it captures the candidate's complete final history. The original directory must still equal the recorded base, or already equal the result of this same interrupted rollback. If both applications' copies changed independently, the script stops for review instead of overwriting one side or guessing a merge. Accepted single-owner changes include appended records, new days, whole-day pruning or clearing, and checked-counter replacement.
+
+After drain, synchronization creates a private sibling lock when needed and holds both source and destination locks through staging, exchange, post-checks and the durable journal update. A writer that opened the lock before an exchange and a writer opening it afterwards therefore contend on the same inode. Preparation only checks existing locks and creates no source state.
+
+Publication uses Linux `renameat2`: a complete private staging directory is exchanged atomically with an existing history directory, or published without replacement when no directory existed. The journal is saved before the exchange. The displaced directory remains a private recovery copy, so an interruption does not leave a half-copied live history. A retry recognizes the before/after fingerprints and does not append the same records again. Recovery copies normally stay inside the transaction directory; if that directory is on a different filesystem, an adjacent private directory is recorded in the journal to keep the exchange atomic. Retain those recorded recovery directories together with the journal.
+
+Unknown entries, symlinks, hard links, non-private files, incomplete JSONL, an active writer lock or a changed key stop the operation. The parser is bounded to 4,096 files, 512 MiB in total, 16 MiB per JSONL record and 8 MiB per checked-counter file. No history contents or key bytes are printed.
+
+The transaction can preserve only state that the original application wrote to disk. Magpie's in-flight records and timer-held counters may not be persisted when it exits; waiting for process termination does not reconstruct those in-memory values.
 
 ## Credential refresh ownership
 
@@ -166,6 +194,8 @@ The rollback data handling is deliberate:
 | Gateway-owned builtin authentication | The helper validates source fingerprints and writes back the current compatible tokens. |
 | Externally managed native Codex authentication | Skipped; the native auth file and owner remain unchanged. |
 | Community authentication | Copy current account values back only if the source fingerprint is still the one recorded at handover, or already equals the desired value from an interrupted rollback. |
+| Privacy keys | Keep their recorded identities; a changed active or archived fallback key requires review. No key is regenerated or overwritten. |
+| Privacy audit history | Publish the new worker's final complete history only while the original still matches the handover base or this rollback's already-applied result. Preserve the displaced tree as a private recovery copy. |
 | Existing usage | Preserve the original imported JSONL prefix byte for byte. |
 | Usage recorded by zcalld | Append converted Magpie rows using t, in, out and ms, retaining the complete original row under zcalld_record and a transaction/offset marker. Unknown cache accounting stays explicit. |
 | Autostart and unit overrides | Restore the saved files only if their current content still matches the transaction's own replacement. |
@@ -175,7 +205,7 @@ Restoring an old directory snapshot alone is insufficient after token rotation: 
 
 For an original desktop launch, the script restores the recorded executable, arguments, working directory and environment through a temporary user systemd unit. It also restores the autostart file for future logins. For an explicitly supplied old unit, it restores that unit's enablement and starts it again.
 
-Rollback is resumable. If a credential source changed under another owner, a process did not drain, a usage ledger no longer has the expected prefix, or a launch file was edited independently, the script records recovery_required and stops before the conflicting overwrite or restart. Inspect the private journal and commands.log, resolve that specific conflict, and rerun rollback with the same state directory. Do not replace current account files with their stale snapshots.
+Rollback is resumable. If a credential or privacy-history source changed under another owner, a key changed, a process did not drain, a usage ledger no longer has the expected prefix, or a launch file was edited independently, the script records recovery_required and stops before the conflicting overwrite or restart. Inspect the private journal and commands.log, resolve that specific conflict, and rerun rollback with the same state directory. Do not replace current account files with their stale snapshots.
 
 A completed rollback reports rolled_back. Repeating it is a no-op.
 
@@ -187,6 +217,6 @@ Run the isolated transaction tests with:
 python3 scripts/test-cutover.py
 ~~~
 
-These tests use temporary files, a fake service controller and temporary loopback/Unix HTTP servers. They cover final source-state synchronization, a failed activation with automatic rollback, credential changes completed during drain, external Codex preservation, concurrent source changes, interrupted rollback recovery, credential changes while acquiring the handover lock, a private recovery copy, launch-file conflict detection and complete catalog comparisons. MCP fixtures cover preparation without starting the candidate, TCP/Unix parity with an empty catalog, full tool metadata and protocol mismatches, HTTP/JSON-RPC rejection with rollback, private baseline drift, session propagation, pagination, reply IDs and duplicate tool names. They do not stop a real service, access a real account or execute a tool.
+These tests use temporary files, a fake service controller and temporary loopback/Unix HTTP servers. They cover final source-state synchronization, a failed activation with automatic rollback, credential changes completed during drain, external Codex preservation, concurrent source changes, interrupted rollback recovery, credential changes while acquiring the handover lock, a private recovery copy, launch-file conflict detection and complete catalog comparisons. MCP fixtures cover preparation without starting the candidate, TCP/Unix parity with an empty catalog, full tool metadata and protocol mismatches, HTTP/JSON-RPC rejection with rollback, private baseline drift, session propagation, pagination, reply IDs and duplicate tool names. Privacy fixtures additionally cover the observed 947-byte JSONL tail, final writes during drain, checked counters, whole-day clearing and pruning, active and fallback keys, unsafe nodes, held writer locks, a writer racing an atomic exchange, failed activation with new audit rows, and process interruption both during private copying and immediately after exchange. Repeated rollback must preserve each row exactly once. These tests do not stop a real service, access a real account or execute a tool.
 
 The migration implementation is in [src/migration.rs](../src/migration.rs); the packaged service definition is in [packaging/systemd/user/zcalld.service](../packaging/systemd/user/zcalld.service). The service transaction can validate local startup, permissions and catalog equivalence without exercising a remote provider. Record real provider availability separately when it has actually been checked.
