@@ -291,18 +291,39 @@ class MCPTests(unittest.TestCase):
         name = self.tool("wait")
         pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
         pending = pool.submit(self.rpc, "tools/call", {"name": name})
+        owned_handle = None
+        kernel32 = None
         try:
             end = time.monotonic() + 3
             while not self.counts("started.log") and time.monotonic() < end:
                 time.sleep(0.01)
             self.assertTrue(self.counts("started.log"))
+            if os.name == "nt":
+                import ctypes
+                from ctypes import wintypes
+
+                kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+                kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+                kernel32.OpenProcess.restype = wintypes.HANDLE
+                kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+                kernel32.WaitForSingleObject.restype = wintypes.DWORD
+                kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+                kernel32.CloseHandle.restype = wintypes.BOOL
+                loads = self.counts("loads.log")
+                self.assertEqual(len(loads), 1, "fixture must own exactly one community host")
+                # Keep this fixture's process identity before stopping its parent.
+                owned_handle = kernel32.OpenProcess(0x00100000 | 0x1000, False, int(loads[0]))
+                self.assertTrue(owned_handle, f"cannot observe owned community host: Windows error {ctypes.get_last_error()}")
             start = time.monotonic()
             self.stop(process)
             self.assertLess(time.monotonic() - start, 4)
             self.assertEqual(self.counts("aborted.log"), ["wait"])
             with contextlib.suppress(OSError, http.client.HTTPException):
                 pending.result(timeout=2)
-            if os.name == "posix":
+            if os.name == "nt":
+                result = kernel32.WaitForSingleObject(owned_handle, 2000)
+                self.assertEqual(result, 0, f"owned community host survived gateway drain (wait={result}, Windows error {ctypes.get_last_error()})")
+            elif os.name == "posix":
                 pid = int(self.counts("loads.log")[0])
                 end = time.monotonic() + 2
                 while time.monotonic() < end:
@@ -314,6 +335,8 @@ class MCPTests(unittest.TestCase):
                 else:
                     self.fail("owned community host survived gateway drain")
         finally:
+            if owned_handle is not None:
+                kernel32.CloseHandle(owned_handle)
             pool.shutdown(wait=True, cancel_futures=True)
 
 

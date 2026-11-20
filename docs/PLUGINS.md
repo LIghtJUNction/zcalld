@@ -280,3 +280,45 @@ The core permits only complete 429/503 refusals before downstream headers. It li
 - [zcall semantic and transport boundary](https://github.com/LIghtJUNction/zcall/blob/main/README.md)
 
 Community tool exports can be served over the optional [MCP endpoint](MCP.md).
+
+
+### Privacy audit history (compatibility 0.1.3+)
+
+The optional privacy binding accepts an absolute history_dir. Newly managed
+bindings set it to privacy/history; older bindings derive it from the settings
+file's parent directory. The active redact.key preserves HMAC identity. History
+is an audit archive, not a source of original values for restoration.
+
+The native privacy plugin uses the existing context interface to send only three
+bounded labels: agent (512 bytes), session (1024 bytes), and the request path as
+what (2048 bytes). Labels describe the caller's request and are not authenticated
+identities. Raw headers, credentials, prompts, peer information and workspace
+paths are excluded. Detection events precede provider execution, so the audit
+does not invent a final provider, upstream model, generation outcome or duration.
+
+Each request with detections appends one private daily JSONL record. Values
+contain placeholders, categories, detection methods, optional shape hints,
+lengths and counts, without complete original values or request/response bodies. A record
+keeps at most 4096 distinct values and encodes at most 1 MiB. omitted_hits makes
+truncation explicit while the total count remains available. Existing record
+bytes and ordering are preserved. No-hit requests update counters only; disabled
+privacy and empty configuration probes write neither events nor counters.
+
+Daily checked counters retain looked, masked and whole fields. At most 1024
+distinct agent labels plus other are kept, with excess identities merged into
+other. Counters flush periodically, explicitly when native plugin instances drop
+their worker references, and again on worker stdin EOF. The flush RPC returns
+true only after successful persistence. The 30-day and 100 MiB JSONL retention
+policy removes complete days during periodic cleanup.
+
+Audit persistence is best effort and separate from mandatory redaction. A mask
+result can carry a fixed audit_error message with a valid redacted body. The
+native adapter emits a static journal diagnostic on a failure transition;
+shutdown obtains a flush acknowledgement because worker stderr is isolated.
+Required masking or restoration failures still reject the request.
+
+Writers and Linux cutover coordinate on a private lock outside the history
+directory: history_dir.parent / ("." + history_dir.name + ".zcalld-audit.lock").
+This lock stays in place when the history directory is atomically exchanged.
+The transaction treats JSONL and checked snapshots separately and rejects
+conflicting independent changes instead of concatenating every file.

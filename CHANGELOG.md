@@ -7,6 +7,7 @@
 - Add a recoverable Linux cutover transaction that verifies both TCP and Unix health, model catalogs and retained MCP metadata before activation. Rollback drains managed workers and preserves later credential and usage changes.
 - Keep reversible privacy, advanced routing and JavaScript community support in optional plugins. The compatibility package supplies separate lazy Go workers and a shared lazy Bun host, without an embedded browser.
 - Apply privacy before routing classification and restore masked values in JSON and fragmented SSE. Missing required privacy workers fail closed before upstream generation.
+- Continue bounded private privacy audit events and counters through compatibility 0.1.3. Synchronize the final old history after drain and preserve new history during recoverable rollback under stable external locks.
 - Expose community tools through the optional HTTP plugin API, including the legacy Magpie MCP address. Bound request framing, response chunks, cancellation and owned-worker shutdown.
 - Add transactional provider, account, agent, profile and usage controls, plus separate MCP, instruction and skill libraries with conflict-aware preview, apply and revert.
 - Add bounded model groups, IANA time-zone and RE2 conditions, trusted workspace matching, and limited retries of explicit upstream refusals before a response starts. Started streams and ambiguous failures are never replayed.
