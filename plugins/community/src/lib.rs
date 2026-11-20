@@ -130,6 +130,7 @@ impl Community {
                 .unwrap_or_else(|| directory.join("plugin-auth.json").to_string_lossy().into());
             let params = object([
                 ("authPath", auth.into()),
+                ("registryPath", registry_path.into()),
                 ("piPath", self.config.get("pi").clone()),
                 ("directory", directory.to_string_lossy().to_string().into()),
                 ("plugins", Value::Array(plugins)),
