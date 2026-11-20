@@ -2,6 +2,9 @@
 
 ## 0.4.4 — 2026-11-20
 
+- Pair Windows installer recovery with zcall-gui 0.1.5 and keep its strict private-file checks.
+- Refresh the zcall submodule and locked commit for cold-runner version preparation; library runtime code is unchanged.
+
 - Detect Windows TCP resets during optional recovery without consuming request bytes or mistaking a write half-close for cancellation.
 - Add native loopback regressions for resets and half-close/data preservation; retain the existing recovery scenarios and time budgets.
 - Allow the complete Windows release checks to run as a commit-pinned candidate before tagging. Formal releases still require all five native targets.
