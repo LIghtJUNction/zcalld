@@ -9,6 +9,9 @@ import json
 import os
 from pathlib import Path
 import shutil
+import select
+import subprocess
+import sys
 import socket
 import socketserver
 import tempfile
@@ -19,6 +22,22 @@ from unittest import mock
 spec = importlib.util.spec_from_file_location("cutover", Path(__file__).with_name("cutover.py"))
 cutover = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(cutover)
+
+
+def audit_row(key, length=None):
+    value = {"key": key, "t": "2026-01-01T00:00:00Z", "what": "chat", "n": 1,
+             "values": [{"p": "fixture-placeholder", "k": "email", "b": "rule",
+                         "h": "j", "l": 16, "n": 1}]}
+    if length is not None:
+        value["extension"] = ""
+        size = len(cutover.encoded(value)) + 1
+        assert size <= length
+        value["extension"] = "x" * (length - size)
+    return cutover.encoded(value) + b"\n"
+
+
+class PowerLoss(BaseException):
+    """Simulate process termination outside normal exception rollback."""
 
 
 class FakeSystem:
@@ -206,6 +225,24 @@ class Cutover(unittest.TestCase):
         cutover.save_json(self.target / "model-catalog.json", self.expected)
         cutover.save_json(self.state / "expected-models.json", self.expected)
         cutover.save_json(self.target / "migration.json", {"cutover_complete": False})
+        self.old_history = self.source / "masking"
+        self.new_history = self.target / "privacy/history"
+        self.history_day = "2026-01-01.jsonl"
+        self.privacy_snapshot = self.root / "privacy-snapshot"
+        self.privacy_snapshot.mkdir(mode=0o700)
+        cutover.atomic(self.source / "redact.key", b"x" * 32)
+        cutover.atomic(self.target / "privacy/redact.key", b"x" * 32)
+        cutover.atomic(self.old_history / self.history_day, audit_row(10))
+        cutover.save_json(self.old_history / "checked-2026-01-01.json",
+                          {"fixture": {"looked": 2, "masked": 1}})
+        shutil.copytree(self.old_history, self.new_history)
+        shutil.copytree(self.old_history, self.privacy_snapshot / "masking")
+        shutil.copy2(self.source / "redact.key", self.privacy_snapshot / "redact.key")
+        cutover.save_json(self.target / "privacy/settings.json", {"redact": True})
+        cutover.save_json(self.target / "privacy/plugin.json", {
+            "worker": str(self.root / "pluginctl"),
+            "settings": str(self.target / "privacy/settings.json"),
+            "key": str(self.target / "privacy/redact.key")})
         usage = b'{"t":"2026-01-01T00:00:00Z","in":2,"out":1,"extra":"kept"}\n'
         cutover.atomic(self.source / "usage.jsonl", usage)
         cutover.atomic(self.target / "usage.jsonl", usage)
@@ -239,6 +276,7 @@ class Cutover(unittest.TestCase):
                         "settings_hash": cutover.settings_fingerprint(self.source), "changes": {},
                         "community_keys": ["fixture"], "community_staged": {
                             "fixture": cutover.digest({"type": "oauth", "refresh": "old-staged"})}}
+        self.tx.data["privacy"] = self.tx.prepare_privacy(self.source, self.target, self.privacy_snapshot)
         self.tx.save()
         patches = [mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": str(self.xdg)}),
                    mock.patch.object(cutover, "same_process", side_effect=lambda v: v["pid"] == 101 and self.ops.old and not self.ops.restarted),
@@ -277,13 +315,13 @@ class Cutover(unittest.TestCase):
         self.enable_mcp()
         snapshot = self.root / "snapshot"
         snapshot.mkdir(mode=0o700)
-        for name in ("providers.json", "settings.json", "plugin-auth.json", "library.json"):
+        for name in ("providers.json", "settings.json", "plugin-auth.json", "library.json", "redact.key"):
             shutil.copy2(self.source / name, snapshot / name)
+        shutil.copytree(self.old_history, snapshot / "masking")
         cutover.save_json(self.target / "migration.json", {
             "source": str(self.source), "snapshot": str(snapshot), "cutover_complete": False})
         cutover.save_json(self.target / "extensions/host.json", {
             key: str(self.root / "pluginctl") for key in ("bun", "host", "pi")})
-        cutover.save_json(self.target / "privacy/plugin.json", {"worker": str(self.root / "pluginctl")})
         fresh = self.root / "fresh-state"
         fresh.mkdir(mode=0o700)
         tx = cutover.Transaction(fresh, self.ops)
@@ -504,6 +542,355 @@ class Cutover(unittest.TestCase):
                 self.tx.sync_in()
         self.assertEqual(cutover.read_json(auth)["fixture"]["refresh"], "candidate-concurrent-value")
         self.assertNotIn("credential import-builtin", self.ops.calls)
+
+    def test_privacy_prepare_accepts_only_untouched_candidate_and_bound_paths(self):
+        with (self.old_history / self.history_day).open("ab") as stream:
+            stream.write(audit_row(2, 947))
+        state = self.tx.prepare_privacy(self.source, self.target, self.privacy_snapshot)
+        self.assertEqual(state["staged"], cutover.history_manifest(self.new_history))
+        self.assertNotEqual(state["staged"], cutover.history_manifest(self.old_history))
+        with (self.new_history / self.history_day).open("ab") as stream:
+            stream.write(audit_row(3))
+        with self.assertRaisesRegex(cutover.CutoverError, "candidate privacy history"):
+            self.tx.prepare_privacy(self.source, self.target, self.privacy_snapshot)
+        self.assertTrue(self.ops.old)
+        shutil.copy2(self.privacy_snapshot / "masking" / self.history_day, self.new_history / self.history_day)
+        binding = cutover.read_json(self.target / "privacy/plugin.json")
+        binding["history_dir"] = str(self.root / "unrelated-history")
+        cutover.save_json(self.target / "privacy/plugin.json", binding)
+        with self.assertRaisesRegex(cutover.CutoverError, "binding"):
+            self.tx.prepare_privacy(self.source, self.target, self.privacy_snapshot)
+
+    def test_privacy_keys_and_candidate_edits_fail_before_stopping_old(self):
+        for key in (self.source / "redact.key", self.target / "privacy/redact.key"):
+            with self.subTest(key=key.name):
+                cutover.atomic(key, b"y" * 32)
+                with self.assertRaisesRegex(cutover.CutoverError, "privacy key"):
+                    self.tx.apply()
+                self.assertTrue(self.ops.old)
+                self.assertNotIn("TERM old main", self.ops.calls)
+                cutover.atomic(key, b"x" * 32)
+        with (self.new_history / self.history_day).open("ab") as stream:
+            stream.write(audit_row(4))
+        before = (self.new_history / self.history_day).read_bytes()
+        with self.assertRaisesRegex(cutover.CutoverError, "another writer"):
+            self.tx.apply()
+        self.assertEqual((self.new_history / self.history_day).read_bytes(), before)
+        self.assertNotIn("TERM old main", self.ops.calls)
+
+    def test_privacy_unsafe_nodes_are_rejected_without_following_them(self):
+        outside = self.root / "outside.jsonl"
+        cutover.atomic(outside, audit_row(20))
+        node = self.new_history / "2026-01-02.jsonl"
+        for kind in ("symlink", "directory", "fifo", "hardlink", "public"):
+            with self.subTest(kind=kind):
+                if kind == "symlink":
+                    node.symlink_to(outside)
+                elif kind == "directory":
+                    node.mkdir(mode=0o700)
+                elif kind == "fifo":
+                    os.mkfifo(node, 0o600)
+                elif kind == "hardlink":
+                    os.link(outside, node)
+                else:
+                    cutover.atomic(node, audit_row(20), 0o644)
+                with self.assertRaises(cutover.CutoverError):
+                    cutover.history_manifest(self.new_history)
+                if node.is_dir() and not node.is_symlink():
+                    node.rmdir()
+                else:
+                    node.unlink()
+        self.assertEqual(outside.read_bytes(), audit_row(20))
+
+    def test_privacy_active_writer_lock_is_refused_and_never_migrated(self):
+        lock = cutover.history_lock_path(self.new_history)
+        cutover.atomic(lock, (99).to_bytes(8, "little"))
+        with lock.open("r+b") as held:
+            cutover.fcntl.flock(held, cutover.fcntl.LOCK_EX | cutover.fcntl.LOCK_NB)
+            with self.assertRaisesRegex(cutover.CutoverError, "active writer"):
+                self.tx.apply()
+            self.assertTrue(self.ops.old)
+            self.assertNotIn("TERM old main", self.ops.calls)
+        self.assertNotIn(lock.name, cutover.history_manifest(self.new_history))
+        with (self.old_history / self.history_day).open("ab") as stream:
+            stream.write(audit_row(4))
+        self.tx.apply()
+        self.assertEqual(lock.read_bytes(), (99).to_bytes(8, "little"))
+        cutover.atomic(lock, (100).to_bytes(8, "little"))
+        with (self.new_history / self.history_day).open("ab") as stream:
+            stream.write(audit_row(5))
+        self.tx.rollback()
+        self.assertFalse((self.old_history / lock.name).exists())
+        self.assertEqual(cutover.history_lock_path(self.old_history).read_bytes(), b"")
+        self.assertTrue(lock.exists())
+
+    def test_privacy_final_tail_and_checked_counters_are_copied_after_drain(self):
+        initial = (self.old_history / self.history_day).read_bytes()
+        tail = audit_row(2, 947)  # exact size of the observed live migration drift
+        with (self.old_history / self.history_day).open("ab") as stream:
+            stream.write(tail)
+        real_drain = self.ops.drain
+        final = audit_row(1)  # completion order need not be monotonic by record key
+        def drain(identities, timeout):
+            real_drain(identities, timeout)
+            if any(item["pid"] == 101 for item in identities):
+                with (self.old_history / self.history_day).open("ab") as stream:
+                    stream.write(final)
+                cutover.save_json(self.old_history / "checked-2026-01-01.json",
+                                  {"fixture": {"looked": 4, "masked": 3, "whole": 1}})
+                cutover.atomic(self.old_history / "2026-01-02.jsonl", audit_row(0))
+        with mock.patch.object(self.ops, "drain", side_effect=drain):
+            self.tx.apply()
+        self.assertEqual((self.new_history / self.history_day).read_bytes(), initial + tail + final)
+        self.assertEqual(cutover.history_manifest(self.new_history), cutover.history_manifest(self.old_history))
+        self.assertEqual(self.tx.data["privacy"]["base"], cutover.history_manifest(self.old_history))
+        self.assertTrue(self.tx.data["privacy"]["forward"]["committed"])
+        stage = Path(self.tx.data["privacy"]["forward"]["stage"])
+        self.assertTrue(stage.is_relative_to(self.state))
+        self.assertEqual((stage / self.history_day).read_bytes(), initial)
+        self.assertEqual(stage.stat().st_mode & 0o777, 0o700)
+
+    def test_privacy_atomic_exchange_retains_a_racing_candidate_writer(self):
+        with (self.old_history / self.history_day).open("ab") as stream:
+            stream.write(audit_row(2))
+        real_move = cutover.history_move
+        touched = False
+        expected = (self.new_history / self.history_day).read_bytes() + audit_row(77)
+        def race(source, destination, exchange):
+            nonlocal touched
+            if Path(destination) == self.new_history and not touched:
+                touched = True
+                with (self.new_history / self.history_day).open("ab") as stream:
+                    stream.write(audit_row(77))
+            return real_move(source, destination, exchange)
+        with mock.patch.object(cutover, "history_move", side_effect=race):
+            with self.assertRaisesRegex(cutover.CutoverError, "atomic exchange"):
+                self.tx.apply()
+        self.assertEqual((self.new_history / self.history_day).read_bytes(), expected)
+        self.assertTrue(self.ops.old)
+        self.assertFalse(self.ops.new)
+
+    def test_privacy_fallback_key_is_immutable_and_distinct_from_active_key(self):
+        for directory in (self.old_history, self.new_history, self.privacy_snapshot / "masking"):
+            cutover.atomic(directory / "redact.key", b"historical-fallback-key".ljust(32, b"."))
+        self.tx.data["privacy"] = self.tx.prepare_privacy(self.source, self.target, self.privacy_snapshot)
+        self.tx.save()
+        self.tx.apply()
+        self.assertEqual((self.target / "privacy/redact.key").read_bytes(), b"x" * 32)
+        fallback = (self.old_history / "redact.key").read_bytes()
+        cutover.atomic(self.new_history / "redact.key", b"z" * 32)
+        with self.assertRaisesRegex(cutover.CutoverError, "fallback privacy key"):
+            self.tx.rollback()
+        self.assertEqual((self.old_history / "redact.key").read_bytes(), fallback)
+        self.assertFalse(self.ops.old)
+
+    def test_privacy_source_key_fallback_survives_history_exchange(self):
+        (self.source / "redact.key").rename(self.old_history / "redact.key")
+        (self.privacy_snapshot / "redact.key").rename(self.privacy_snapshot / "masking/redact.key")
+        cutover.atomic(self.new_history / "redact.key", b"x" * 32)
+        self.tx.data["privacy"] = self.tx.prepare_privacy(self.source, self.target, self.privacy_snapshot)
+        self.tx.save()
+        self.tx.apply()
+        with (self.new_history / self.history_day).open("ab") as stream:
+            stream.write(audit_row(3))
+        self.tx.rollback()
+        self.assertFalse((self.source / "redact.key").exists())
+        self.assertEqual((self.old_history / "redact.key").read_bytes(), b"x" * 32)
+        self.assertEqual((self.old_history / self.history_day).read_bytes(),
+                         (self.new_history / self.history_day).read_bytes())
+
+    def test_privacy_day_clear_prune_and_checked_replacement_keep_recovery_copies(self):
+        (self.old_history / "checked-2026-01-01.json").unlink()
+        cutover.atomic(self.old_history / self.history_day, audit_row(1))
+        cutover.atomic(self.old_history / "2026-01-02.jsonl", audit_row(2))
+        self.tx.apply()
+        self.assertFalse((self.new_history / "checked-2026-01-01.json").exists())
+        (self.new_history / self.history_day).unlink()
+        cutover.save_json(self.new_history / "checked-2026-01-02.json",
+                          {"fixture": {"looked": 8, "masked": 5}})
+        self.tx.rollback()
+        self.assertEqual(cutover.history_manifest(self.old_history), cutover.history_manifest(self.new_history))
+        self.assertFalse((self.old_history / self.history_day).exists())
+        backup = Path(self.tx.data["privacy"]["rollback"]["stage"])
+        self.assertEqual((backup / self.history_day).read_bytes(), audit_row(1))
+
+    def test_privacy_rollback_waits_for_final_audit_write_and_is_repeatable(self):
+        self.tx.apply()
+        with (self.new_history / self.history_day).open("ab") as stream:
+            stream.write(audit_row(2))
+        real_drain = self.ops.drain
+        def drain(identities, timeout):
+            real_drain(identities, timeout)
+            if any(item["pid"] == 202 for item in identities):
+                with (self.new_history / self.history_day).open("ab") as stream:
+                    stream.write(audit_row(3))
+                cutover.save_json(self.new_history / "checked-2026-01-01.json",
+                                  {"fixture": {"looked": 4, "masked": 3}})
+        with mock.patch.object(self.ops, "drain", side_effect=drain):
+            self.tx.rollback()
+        expected = audit_row(10) + audit_row(2) + audit_row(3)
+        self.assertEqual((self.old_history / self.history_day).read_bytes(), expected)
+        self.assertEqual(cutover.history_manifest(self.old_history), cutover.history_manifest(self.new_history))
+        self.tx.rollback()
+        self.assertEqual((self.old_history / self.history_day).read_bytes(), expected)
+
+    def test_privacy_rollback_refuses_a_different_original_writer(self):
+        self.tx.apply()
+        with (self.new_history / self.history_day).open("ab") as stream:
+            stream.write(audit_row(2))
+        with (self.old_history / self.history_day).open("ab") as stream:
+            stream.write(audit_row(99))
+        expected = (self.old_history / self.history_day).read_bytes()
+        with self.assertRaisesRegex(cutover.CutoverError, "original privacy history.*another writer"):
+            self.tx.rollback()
+        self.assertEqual((self.old_history / self.history_day).read_bytes(), expected)
+        self.assertEqual(self.tx.data["phase"], "recovery_required")
+        self.assertNotIn("restart old", self.ops.calls)
+        self.assertNotIn("credential sync-auth", self.ops.calls)
+
+    def test_privacy_rollback_rejects_unfinished_records_without_printing_them(self):
+        self.tx.apply()
+        marker = b'{"private_fixture_value":"must-not-appear"'
+        with (self.new_history / self.history_day).open("ab") as stream:
+            stream.write(marker)
+        before = (self.old_history / self.history_day).read_bytes()
+        with self.assertRaises(cutover.CutoverError) as raised:
+            self.tx.rollback()
+        self.assertNotIn("must-not-appear", str(raised.exception))
+        self.assertEqual((self.old_history / self.history_day).read_bytes(), before)
+        self.assertEqual(self.tx.data["phase"], "recovery_required")
+
+    def test_privacy_failed_start_preserves_new_audit_rows_in_automatic_rollback(self):
+        def fail():
+            with (self.new_history / self.history_day).open("ab") as stream:
+                stream.write(audit_row(4))
+            raise cutover.CutoverError("fixture start verification failed")
+        with mock.patch.object(self.tx, "verify_new", side_effect=fail):
+            with self.assertRaisesRegex(cutover.CutoverError, "fixture start"):
+                self.tx.apply()
+        expected = audit_row(10) + audit_row(4)
+        self.assertEqual(self.tx.data["phase"], "rolled_back")
+        self.assertEqual((self.old_history / self.history_day).read_bytes(), expected)
+        self.tx.rollback()
+        self.assertEqual((self.old_history / self.history_day).read_bytes(), expected)
+
+    def test_privacy_crash_after_atomic_exchange_resumes_without_duplicate_rows(self):
+        self.tx.apply()
+        with (self.new_history / self.history_day).open("ab") as stream:
+            stream.write(audit_row(5))
+        real_move = cutover.history_move
+        def crash(source, destination, exchange):
+            real_move(source, destination, exchange)
+            if Path(destination) == self.old_history:
+                raise PowerLoss()
+        with mock.patch.object(cutover, "history_move", side_effect=crash):
+            with self.assertRaises(PowerLoss):
+                self.tx.rollback()
+        expected = audit_row(10) + audit_row(5)
+        self.assertEqual((self.old_history / self.history_day).read_bytes(), expected)
+        resumed = cutover.Transaction(self.state, self.ops)
+        self.assertFalse(resumed.data["privacy"]["rollback"]["committed"])
+        resumed.rollback()
+        self.assertEqual(resumed.data["phase"], "rolled_back")
+        self.assertEqual((self.old_history / self.history_day).read_bytes(), expected)
+        resumed.rollback()
+        self.assertEqual((self.old_history / self.history_day).read_bytes(), expected)
+
+    def test_privacy_external_lock_serializes_old_waiter_and_post_exchange_writer(self):
+        self.tx.apply()
+        with (self.new_history / self.history_day).open("ab") as stream:
+            stream.write(audit_row(5))
+        expected = (self.new_history / self.history_day).read_bytes()
+        lock = cutover.history_lock_path(self.old_history)
+        identity = (lock.stat().st_dev, lock.stat().st_ino)
+        writers = []
+        child = r"""
+import fcntl, json, os, sys
+lock, path, row = sys.argv[1:]
+fd = os.open(lock, os.O_RDWR | os.O_NOFOLLOW)
+identity = os.fstat(fd)
+print(json.dumps([identity.st_dev, identity.st_ino]), flush=True)
+fcntl.flock(fd, fcntl.LOCK_EX)
+current = os.stat(lock, follow_symlinks=False)
+assert (current.st_dev, current.st_ino) == (identity.st_dev, identity.st_ino)
+with open(path, "ab", buffering=0) as output:
+    output.write(row.encode() + b"\n")
+    os.fsync(output.fileno())
+fcntl.flock(fd, fcntl.LOCK_UN)
+os.close(fd)
+print("committed", flush=True)
+"""
+        def spawn(key):
+            process = subprocess.Popen(
+                [sys.executable, "-c", child, str(lock), str(self.old_history / self.history_day),
+                 audit_row(key).decode().rstrip("\n")],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0)
+            writers.append(process)
+            def cleanup():
+                if process.poll() is None:
+                    process.terminate()
+                process.communicate(timeout=3)
+            self.addCleanup(cleanup)
+            self.assertTrue(select.select([process.stdout], [], [], 3)[0], "fixture writer did not open its lock")
+            self.assertEqual(tuple(json.loads(process.stdout.readline())), identity)
+            return process
+        real_move = cutover.history_move
+        def exchange(source, destination, exchange):
+            if Path(destination) != self.old_history:
+                return real_move(source, destination, exchange)
+            first = spawn(200)  # descriptor opened before the directory moves
+            real_move(source, destination, exchange)
+            second = spawn(201)  # descriptor opened through the new live path
+            self.assertEqual((lock.stat().st_dev, lock.stat().st_ino), identity)
+            self.assertEqual(select.select([first.stdout, second.stdout], [], [], 0.03)[0], [],
+                             "a writer bypassed the transaction's stable lock")
+            self.assertEqual((self.old_history / self.history_day).read_bytes(), expected)
+            self.assertFalse(self.tx.data["privacy"]["rollback"]["committed"])
+        with mock.patch.object(cutover, "history_move", side_effect=exchange):
+            self.tx.rollback()
+        for process in writers:
+            stdout, stderr = process.communicate(timeout=3)
+            self.assertEqual(process.returncode, 0, stderr.decode())
+            self.assertEqual(stdout.strip(), b"committed")
+        restored = (self.old_history / self.history_day).read_bytes()
+        self.assertTrue(restored.startswith(expected))
+        tail = [json.loads(line) for line in restored[len(expected):].splitlines()]
+        self.assertEqual({row["key"] for row in tail}, {200, 201})
+        self.assertEqual(len(tail), 2)
+        self.assertTrue(self.tx.data["privacy"]["rollback"]["committed"])
+        self.tx.rollback()
+        self.assertEqual((self.old_history / self.history_day).read_bytes(), restored)
+
+    def test_privacy_rollback_publishes_new_history_without_replacing_another_directory(self):
+        for directory in (self.old_history, self.new_history, self.privacy_snapshot / "masking"):
+            shutil.rmtree(directory)
+        self.tx.data["privacy"] = self.tx.prepare_privacy(self.source, self.target, self.privacy_snapshot)
+        self.tx.save()
+        self.tx.apply()
+        cutover.atomic(self.new_history / self.history_day, audit_row(8))
+        self.assertFalse(self.old_history.exists())
+        self.tx.rollback()
+        self.assertEqual((self.old_history / self.history_day).read_bytes(), audit_row(8))
+        self.tx.rollback()
+        self.assertEqual((self.old_history / self.history_day).read_bytes(), audit_row(8))
+
+    def test_privacy_crash_during_private_copy_can_retry_without_touching_original(self):
+        self.tx.apply()
+        with (self.new_history / self.history_day).open("ab") as stream:
+            stream.write(audit_row(5))
+        before = (self.old_history / self.history_day).read_bytes()
+        def crash(source, destination, expected):
+            cutover.atomic(Path(destination) / self.history_day, b'{"unfinished')
+            raise PowerLoss()
+        with mock.patch.object(cutover, "history_copy", side_effect=crash):
+            with self.assertRaises(PowerLoss):
+                self.tx.rollback()
+        self.assertEqual((self.old_history / self.history_day).read_bytes(), before)
+        resumed = cutover.Transaction(self.state, self.ops)
+        self.assertFalse(resumed.data["privacy"]["rollback"]["ready"])
+        resumed.rollback()
+        self.assertEqual((self.old_history / self.history_day).read_bytes(), audit_row(10) + audit_row(5))
+        self.assertEqual(resumed.data["phase"], "rolled_back")
 
     def test_metadata_comparison_covers_more_than_ids(self):
         changed = json.loads(json.dumps(self.expected))

@@ -7,6 +7,7 @@ drains zcalld and restores the old launch. No command sends a generation request
 import argparse
 import configparser
 import contextlib
+import ctypes
 import datetime
 import fcntl
 import hashlib
@@ -149,6 +150,236 @@ def complete_jsonl(path):
         with Path(path).open("rb") as stream:
             stream.seek(-1, os.SEEK_END)
             require(stream.read(1) == b"\n", "usage ledger has an unfinished final record")
+
+
+# Magpie maskrec uses daily JSONL records and atomically replaced daily counters.
+# Keep bytes and deletion semantics; never treat the counters or a fallback key
+# as append-only logs. These bounds exceed its 30 day / 100 MiB retention window.
+HISTORY_LIMIT = 512 << 20
+HISTORY_FILES = 4096
+HISTORY_RECORD = 16 << 20
+
+
+def history_kind(name):
+    if name == "redact.key":
+        return "key"
+    match = re.fullmatch(r"(\d{4}-\d{2}-\d{2})\.jsonl", name)
+    kind = "records"
+    if not match:
+        match = re.fullmatch(r"checked-(\d{4}-\d{2}-\d{2})\.json", name)
+        kind = "checked"
+    require(match is not None, "privacy history contains an unsupported entry")
+    try:
+        datetime.date.fromisoformat(match.group(1))
+    except ValueError:
+        raise CutoverError("privacy history has an invalid day") from None
+    return kind
+
+
+def history_directory(path):
+    path = Path(path)
+    require(path.is_absolute() and path.parent.resolve(strict=True) == path.parent,
+            "privacy history parent must not traverse a symlink")
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return False
+    require(stat.S_ISDIR(info.st_mode) and info.st_uid == os.getuid()
+            and not stat.S_IMODE(info.st_mode) & 0o077,
+            "privacy history must be a private owned directory")
+    return True
+
+
+@contextlib.contextmanager
+def history_reader(path, dir_fd=None):
+    # O_NONBLOCK makes a raced FIFO fail the regular-file check without hanging.
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dir_fd)
+    except OSError:
+        raise CutoverError("privacy history path is unsafe or unavailable") from None
+    try:
+        info = os.fstat(fd)
+        require(stat.S_ISREG(info.st_mode) and info.st_uid == os.getuid()
+                and info.st_nlink == 1 and not stat.S_IMODE(info.st_mode) & 0o077,
+                "privacy history and keys must be private regular files without links")
+        with os.fdopen(fd, "rb", closefd=False) as stream:
+            yield stream, info
+            after = os.fstat(fd)
+            require((info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+                    == (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns),
+                    "privacy history changed while it was being read")
+    finally:
+        os.close(fd)
+
+
+def history_json(body):
+    def reject_constant(_):
+        raise ValueError
+    try:
+        value = json.loads(body, parse_constant=reject_constant)
+    except (ValueError, UnicodeError):
+        raise CutoverError("privacy history contains invalid JSON") from None
+    require(isinstance(value, dict), "privacy history records must be JSON objects")
+    return value
+
+
+def history_file(path, kind, dir_fd=None):
+    h = hashlib.sha256()
+    with history_reader(path, dir_fd) as (stream, info):
+        require(info.st_size <= HISTORY_LIMIT, "privacy history file exceeds its limit")
+        if kind == "records":
+            size = 0
+            while line := stream.readline(HISTORY_RECORD + 1):
+                require(len(line) <= HISTORY_RECORD and line.endswith(b"\n"),
+                        "privacy history has an incomplete or oversized JSONL record")
+                if line.strip():
+                    history_json(line)
+                size += len(line)
+                require(size <= HISTORY_LIMIT, "privacy history grew beyond its limit")
+                h.update(line)
+        else:
+            limit = 4096 if kind == "key" else JSON_LIMIT
+            require(info.st_size <= limit, "privacy history metadata exceeds its limit")
+            body = stream.read(limit + 1)
+            require(len(body) <= limit, "privacy history metadata grew beyond its limit")
+            if kind == "key":
+                require(len(body) >= 32, "privacy key is missing or invalid")
+            else:
+                counters = history_json(body)
+                require(all(isinstance(value, dict)
+                            and all(type(count) is int and count >= 0 for count in value.values())
+                            for value in counters.values()),
+                        "privacy history checked counters are invalid")
+            size = len(body)
+            h.update(body)
+    return {"bytes": size, "sha256": h.hexdigest()}
+
+
+def history_manifest(path):
+    path = Path(path)
+    if not history_directory(path):
+        return {}
+    fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        before = os.fstat(fd)
+        require(before.st_uid == os.getuid() and not stat.S_IMODE(before.st_mode) & 0o077,
+                "privacy history directory ownership changed")
+        names = sorted(os.listdir(fd))
+        require(len(names) <= HISTORY_FILES, "privacy history has too many files")
+        result, total = {}, 0
+        for name in names:
+            value = history_file(name, history_kind(name), fd)
+            total += value["bytes"]
+            require(total <= HISTORY_LIMIT, "privacy history exceeds its total limit")
+            result[name] = value
+        after = os.fstat(fd)
+        current = path.lstat()
+        require((before.st_dev, before.st_ino, before.st_mtime_ns, before.st_ctime_ns)
+                == (after.st_dev, after.st_ino, after.st_mtime_ns, after.st_ctime_ns)
+                and (current.st_dev, current.st_ino) == (before.st_dev, before.st_ino),
+                "privacy history directory changed while it was being read")
+        return result
+    finally:
+        os.close(fd)
+
+
+def history_lock_path(directory):
+    directory = Path(directory)
+    require(directory.is_absolute() and directory.parent.resolve(strict=True) == directory.parent,
+            "privacy history lock parent must not traverse a symlink")
+    return directory.parent / ("." + directory.name + ".zcalld-audit.lock")
+
+
+@contextlib.contextmanager
+def history_locks(*directories, create=False):
+    """Lock a stable sibling inode; exchanging the history never moves it."""
+    held = []
+    try:
+        for directory in sorted({str(Path(p)) for p in directories if p is not None}):
+            history_directory(directory)  # reject an unsafe existing root
+            path = history_lock_path(directory)
+            if not create and not path.exists() and not path.is_symlink():
+                continue
+            try:
+                flags = os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK
+                fd = os.open(path, flags | (os.O_CREAT if create else 0), 0o600)
+            except OSError:
+                raise CutoverError("privacy history writer lock is unsafe or unavailable") from None
+            try:
+                info = os.fstat(fd)
+                require(stat.S_ISREG(info.st_mode) and info.st_uid == os.getuid()
+                        and info.st_nlink == 1 and info.st_size in (0, 8)
+                        and not stat.S_IMODE(info.st_mode) & 0o077,
+                        "privacy history writer lock is invalid")
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                current = path.lstat()
+                require((current.st_dev, current.st_ino) == (info.st_dev, info.st_ino),
+                        "privacy history writer lock changed during acquisition")
+            except (OSError, CutoverError):
+                os.close(fd)
+                raise CutoverError("privacy history has an active writer or unsafe lock") from None
+            held.append(fd)
+        yield
+    finally:
+        for fd in reversed(held):
+            os.close(fd)
+
+
+def privacy_key_path(directory):
+    primary = Path(directory) / "redact.key"
+    return primary if primary.exists() or primary.is_symlink() else Path(directory) / "masking/redact.key"
+
+
+def privacy_key(path):
+    path = Path(path)
+    require(path.is_absolute() and path.parent.resolve(strict=True) == path.parent,
+            "privacy key parent must not traverse a symlink")
+    return history_file(path, "key")
+
+
+def history_copy(source, destination, expected):
+    """Fill a journal-owned, unpublished directory; both live trees stay intact."""
+    source, destination = Path(source), Path(destination)
+    require(history_directory(destination), "private history staging directory is missing")
+    # A crash may leave an incomplete file here. Only registered, uncommitted
+    # staging names may be regenerated; never clean a live or exchanged tree.
+    for entry in destination.iterdir():
+        require(entry.name in expected, "unrecognized file in privacy history staging")
+        with history_reader(entry):
+            pass
+        entry.unlink()
+    for name, metadata in expected.items():
+        with history_reader(source / name) as (incoming, _):
+            fd = os.open(destination / name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            with os.fdopen(fd, "wb") as outgoing:
+                remaining = metadata["bytes"]
+                while remaining:
+                    block = incoming.read(min(BLOCK, remaining))
+                    require(block, "privacy history source became shorter during copying")
+                    outgoing.write(block)
+                    remaining -= len(block)
+                require(not incoming.read(1), "privacy history source grew during copying")
+                outgoing.flush()
+                os.fsync(outgoing.fileno())
+    sync_directory(destination)
+    require(history_manifest(destination) == expected and history_manifest(source) == expected,
+            "privacy history changed while its private snapshot was being prepared")
+
+
+def history_move(source, destination, exchange):
+    """Linux renameat2 keeps both full trees or publishes into an absent path."""
+    require(sys.platform == "linux", "atomic privacy history handover requires Linux")
+    libc = ctypes.CDLL(None, use_errno=True)
+    move = getattr(libc, "renameat2", None)
+    require(move is not None, "renameat2 is required for atomic privacy history handover")
+    move.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+    move.restype = ctypes.c_int
+    # RENAME_EXCHANGE=2; RENAME_NOREPLACE=1. Never replace an unverified tree.
+    if move(-100, os.fsencode(source), -100, os.fsencode(destination), 2 if exchange else 1):
+        raise CutoverError(f"atomic privacy history move failed (errno {ctypes.get_errno()})")
+    sync_directory(Path(destination).parent)
+    if Path(source).parent != Path(destination).parent:
+        sync_directory(Path(source).parent)
 
 
 def catalog(value):
@@ -540,6 +771,181 @@ class Transaction:
         self.data["recovery_file"] = str(recovery)
         self.data["recovery_sha256"] = file_hash(recovery)
 
+    def prepare_privacy(self, source, target, snapshot):
+        with history_locks(Path(source) / "masking", Path(target) / "privacy/history", Path(snapshot) / "masking"):
+            return self._prepare_privacy(source, target, snapshot)
+
+    def _prepare_privacy(self, source, target, snapshot):
+        source, target, snapshot = Path(source), Path(target), Path(snapshot)
+        binding_path = target / "privacy/plugin.json"
+        binding = read_json(binding_path)
+        settings = Path(binding.get("settings", ""))
+        key = Path(binding.get("key", ""))
+        configured = binding.get("history_dir")
+        require(configured is None or isinstance(configured, str),
+                "privacy history_dir must be an absolute path")
+        history = Path(configured) if configured else settings.parent / "history"
+        require(settings.is_absolute() and key == target / "privacy/redact.key"
+                and history == target / "privacy/history",
+                "privacy binding must use the candidate privacy key and history directory")
+        regular(settings)
+        source_key = privacy_key_path(source)
+        fingerprint = privacy_key(source_key)
+        require(privacy_key(key) == fingerprint
+                and privacy_key(privacy_key_path(snapshot)) == fingerprint,
+                "privacy key differs from the original migration snapshot")
+        expected = history_manifest(snapshot / "masking")
+        staged = history_manifest(history)
+        require(staged == expected, "candidate privacy history changed since migration")
+        original = history_manifest(source / "masking")
+        require(original.get("redact.key") == expected.get("redact.key"),
+                "archived fallback privacy key changed since migration")
+        return {"source_key": str(source_key), "key": str(key), "key_fingerprint": fingerprint,
+                "binding": str(binding_path), "binding_hash": file_hash(binding_path),
+                "source_history": str(source / "masking"), "history": str(history),
+                "staged": staged, "staged_exists": history_directory(history)}
+
+    def check_privacy(self, staged=False):
+        privacy = self.data.get("privacy")
+        require(isinstance(privacy, dict), "prepared journal has no privacy baseline; prepare a new transaction")
+        require(file_hash(privacy["binding"]) == privacy["binding_hash"],
+                "privacy worker binding changed after preparation")
+        require(privacy_key_path(self.data["source"]) == Path(privacy["source_key"])
+                and privacy_key(privacy["source_key"]) == privacy["key_fingerprint"]
+                and privacy_key(privacy["key"]) == privacy["key_fingerprint"],
+                "privacy key identity changed; refusing to overwrite history")
+        if staged:
+            with history_locks(privacy["history"]):
+                require(history_directory(privacy["history"]) == privacy["staged_exists"]
+                        and history_manifest(privacy["history"]) == privacy["staged"],
+                        "candidate privacy history changed under another writer")
+        return privacy
+
+    def history_operation(self, direction, incoming, destination, before, before_exists):
+        with history_locks(incoming, destination, create=True):
+            return self._history_operation(direction, incoming, destination, before, before_exists)
+
+    def _history_operation(self, direction, incoming, destination, before, before_exists):
+        """A persisted three-way comparison, with an atomic whole-tree exchange.
+
+        The source owner has stopped. A live destination must still equal its
+        recorded base, or the complete result of this same journaled operation.
+        This preserves append bytes, day deletion/recreation and checked JSON
+        replacements without guessing how to merge two independent writers.
+        """
+        privacy = self.check_privacy()
+        incoming, destination = Path(incoming), Path(destination)
+        require(incoming != destination, "privacy history source and destination must differ")
+        require(re.fullmatch(r"[A-Za-z0-9_-]{1,32}", self.data["id"]) is not None,
+                "invalid privacy history transaction identifier")
+        plan = privacy.get(direction)
+        if plan is None:
+            require(history_directory(destination) == before_exists
+                    and history_manifest(destination) == before,
+                    "original privacy history changed under another writer" if direction == "rollback"
+                    else "candidate privacy history changed under another writer")
+            after = history_manifest(incoming)
+            require(after.get("redact.key") == before.get("redact.key"),
+                    "archived fallback privacy key changed; refusing history replacement")
+            # The immutable key, not a placeholder dictionary, is the only key
+            # input. Historical rows and counters retain their original bytes.
+            stage = None
+            if after != before:
+                state = self.state.resolve(strict=True)
+                parent = state if state.stat().st_dev == destination.parent.stat().st_dev else destination.parent
+                stage = tempfile.mkdtemp(prefix=f".zcalld-history-{self.data['id']}-", dir=parent)
+            plan = {"incoming": str(incoming), "incoming_exists": history_directory(incoming),
+                    "destination": str(destination), "before": before, "before_exists": before_exists,
+                    "after": after, "stage": stage, "ready": stage is None, "committed": False}
+            privacy[direction] = plan
+            self.save()
+        require(plan["incoming"] == str(incoming) and plan["destination"] == str(destination)
+                and plan["before"] == before and plan["before_exists"] == before_exists,
+                "privacy history recovery plan does not match its recorded base")
+        require(history_directory(incoming) == plan["incoming_exists"]
+                and history_manifest(incoming) == plan["after"],
+                "privacy history source changed after its recovery snapshot")
+        stage = Path(plan["stage"]) if plan["stage"] else None
+        if stage is None:
+            require(history_directory(destination) == before_exists
+                    and history_manifest(destination) == before,
+                    "privacy history changed under another writer")
+            plan["committed"] = True
+            self.save()
+            return plan["after"]
+        require(stage.parent in (self.state.resolve(strict=True), destination.parent)
+                and stage.parent.stat().st_dev == destination.parent.stat().st_dev
+                and stage.name.startswith(f".zcalld-history-{self.data['id']}-"),
+                "invalid private privacy history staging path")
+        if not plan["ready"]:
+            require(history_directory(destination) == before_exists
+                    and history_manifest(destination) == before,
+                    "privacy history changed while staging its replacement")
+            history_copy(incoming, stage, plan["after"])
+            plan["ready"] = True
+            self.save()  # durable before any live tree is moved
+        current_exists = history_directory(destination)
+        current = history_manifest(destination)
+        if before_exists:
+            require(history_directory(stage), "privacy history recovery directory is missing")
+            previous = history_manifest(stage)
+            if current == plan["after"] and current_exists:
+                require(previous == before, "exchanged privacy history was changed by another writer")
+            else:
+                require(current_exists and current == before and previous == plan["after"],
+                        "privacy history changed under another writer")
+                history_move(stage, destination, exchange=True)
+                try:
+                    require(history_manifest(stage) == before
+                            and history_manifest(destination) == plan["after"]
+                            and history_manifest(incoming) == plan["after"],
+                            "privacy history changed during atomic exchange")
+                except (OSError, CutoverError):
+                    # EXCHANGE retained the displaced tree. Restore that tree
+                    # if our published snapshot is still untouched, including
+                    # changes made by a writer immediately before the move.
+                    if history_manifest(destination) == plan["after"]:
+                        history_move(stage, destination, exchange=True)
+                    raise CutoverError("privacy history changed during atomic exchange; recovery needs review") from None
+        else:
+            if current_exists:
+                require(current == plan["after"] and not stage.exists(),
+                        "privacy history appeared under another writer")
+            else:
+                require(history_manifest(stage) == plan["after"],
+                        "private privacy history snapshot was changed")
+                history_move(stage, destination, exchange=False)
+                try:
+                    require(history_manifest(destination) == plan["after"]
+                            and history_manifest(incoming) == plan["after"],
+                            "privacy history changed during atomic publication")
+                except (OSError, CutoverError):
+                    if history_manifest(destination) == plan["after"] and not stage.exists():
+                        history_move(destination, stage, exchange=False)
+                    raise CutoverError("privacy history changed during atomic publication; recovery needs review") from None
+        self.check_privacy()
+        plan["committed"] = True
+        self.save()
+        return plan["after"]
+
+    def sync_privacy_in(self):
+        privacy = self.check_privacy(staged="forward" not in self.data.get("privacy", {}))
+        before_exists = history_directory(privacy["source_history"])
+        privacy["base"] = self.history_operation("forward", privacy["source_history"], privacy["history"],
+                                                 privacy["staged"], privacy["staged_exists"])
+        privacy["base_exists"] = before_exists
+        self.save()
+
+    def sync_privacy_back(self):
+        # Older recovery scripts had no runtime audit writer. Their journals
+        # can still recover credentials/usage without inventing a history base.
+        if "privacy" not in self.data:
+            return
+        privacy = self.check_privacy()
+        require("base" in privacy, "privacy history has no completed handover baseline")
+        self.history_operation("rollback", privacy["history"], privacy["source_history"],
+                               privacy["base"], privacy["base_exists"])
+
     def prepare(self, args):
         require(not self.path.exists(), "transaction already exists; use status or rollback")
         require(sys.platform == "linux" and os.getuid() != 0, "run as the Linux desktop user, without sudo")
@@ -597,6 +1003,7 @@ class Transaction:
                 regular(Path(host[key]).resolve(strict=True))
         privacy = read_json(config.parent / "privacy/plugin.json")
         regular(Path(privacy["worker"]).resolve(strict=True))
+        privacy_state = self.prepare_privacy(source, config.parent, snapshot)
         for binary in (args.binary, args.pluginctl):
             require(Path(binary).is_absolute() and os.access(binary, os.X_OK), "installed executables must be absolute and executable")
         require(is_prefix(config.parent / "usage.jsonl", source / "usage.jsonl"), "candidate usage is not an untouched prefix of Magpie usage")
@@ -616,7 +1023,8 @@ class Transaction:
                      "catalog_hash": digest(expected), "catalog_count": len(expected),
                      "mcp_required": mcp_required, "mcp_hash": digest(mcp) if mcp else None,
                      "mcp_tool_count": len(mcp["tools"]) if mcp else None,
-                     "config_hash": file_hash(config), "changes": {}, "new_start_attempted": False}
+                     "config_hash": file_hash(config), "changes": {}, "new_start_attempted": False,
+                     "privacy": privacy_state}
         self.save_recovery()
         self.save()
         save_json(self.state / "expected-models.json", {"object": "list", "data": list(expected.values())})
@@ -637,6 +1045,7 @@ class Transaction:
         source = Path(self.data["source"])
         require(all(file_hash(source / name) == value for name, value in self.data["topology"].items()), "source topology changed after prepare")
         require(settings_fingerprint(source) == self.data["settings_hash"], "source privacy settings changed after prepare")
+        self.check_privacy(staged=True)
         require(required_mcp(source) == self.data.get("mcp_required", False),
                 "retained MCP endpoint changed after preparation; prepare a fresh transaction")
         if self.data.get("mcp_required"):
@@ -646,6 +1055,7 @@ class Transaction:
 
     def sync_in(self):
         source, target = Path(self.data["source"]), self.candidate()
+        self.sync_privacy_in()
         auth_path = target / "extensions/plugin-auth.json"
         with auth_lock(source / "plugin-auth.json"):
             incoming = read_json(source / "plugin-auth.json", {})
@@ -767,6 +1177,7 @@ class Transaction:
 
     def sync_back(self):
         source, target = Path(self.data["source"]), self.candidate()
+        self.sync_privacy_back()
         original = read_json(source / "plugin-auth.json", {})
         current = read_json(target / "extensions/plugin-auth.json")
         result = dict(original)
