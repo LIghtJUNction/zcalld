@@ -3,6 +3,7 @@
 import argparse
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 
@@ -48,4 +49,13 @@ for script in ("test-codex-metadata.py", "test-codex-compaction.py", "test-codex
     subprocess.run([sys.executable, str(root / "scripts" / script), *common,
                     "--pluginctl", str(pluginctl), "--community-plugin", str(community),
                     "--routing-plugin", str(routing)], cwd=root, check=True)
+bun = shutil.which("bun")
+if bun is None:
+    raise SystemExit("native generation cancellation acceptance requires Bun")
+subprocess.run([sys.executable, str(root / "scripts/test-generation-cancellation.py"),
+                "--binary", str(binary), "--community-plugin", str(community),
+                "--bun", bun,
+                "--community-host", str(root / "extensions/compat/community/vendor/host.js"),
+                "--community-pi", str(root / "extensions/compat/community/vendor/pi.js")],
+               cwd=root, check=True)
 print("Native compatibility accepted: privacy, routing, MCP, generated builtin fetch and Codex metadata/compaction/credit policy over real Rust/Go/Bun IPC")

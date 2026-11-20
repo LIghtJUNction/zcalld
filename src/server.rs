@@ -250,6 +250,9 @@ fn handle(socket: &mut Stream, config: &Config, plugins: &mut Plugins, client: &
     let mut attempted = Vec::with_capacity(MAX_GROUP_ATTEMPTS);
     let mut retry_body: Option<Vec<u8>> = None;
     for attempt in 0..MAX_GROUP_ATTEMPTS {
+        if socket.is_disconnected() {
+            return;
+        }
         let Some(route) = config.route(&selected) else {
             let _ = http::error(
                 socket,
@@ -769,6 +772,9 @@ fn plugin_perform(
         if STOPPING.load(Ordering::Relaxed) {
             return Err("gateway is stopping".into());
         }
+        if sink.is_cancelled() {
+            return Err("downstream client disconnected".into());
+        }
         if Instant::now() >= deadline {
             return Err("plugin provider request timed out".into());
         }
@@ -786,6 +792,9 @@ fn plugin_perform(
     loop {
         if STOPPING.load(Ordering::Relaxed) {
             return Err("gateway is stopping".into());
+        }
+        if sink.is_cancelled() {
+            return Err("downstream client disconnected".into());
         }
         if Instant::now() >= deadline {
             return Err("plugin provider request timed out".into());
@@ -841,6 +850,7 @@ struct ForwardOptions<'a> {
 }
 struct Forward<'s, 't, 'f, 'p> {
     writer: Chunked<'s>,
+    peer: &'s Stream,
     plugins: &'p mut Plugins,
     response_begun: bool,
     transform: Option<&'t mut protocol::StreamTransform<'f>>,
@@ -919,6 +929,10 @@ fn response_header_allowed(name: &str) -> bool {
 }
 
 impl Sink for Forward<'_, '_, '_, '_> {
+    fn is_cancelled(&self) -> bool {
+        self.peer.is_disconnected()
+    }
+
     fn header(&mut self, bytes: &[u8]) -> Result<(), String> {
         self.header_bytes += bytes.len();
         if self.header_bytes > http::HEADER_LIMIT {
@@ -1044,9 +1058,11 @@ fn execute(
     } else {
         None
     };
+    let peer = &*socket;
+    let mut connection = peer;
     let mut sink = Forward {
         writer: Chunked {
-            socket,
+            socket: &mut connection,
             started: false,
             status: 502,
             content_type: "application/json".into(),
@@ -1054,6 +1070,7 @@ fn execute(
             bytes: 0,
             maximum: forward.maximum,
         },
+        peer,
         plugins,
         response_begun: false,
         transform,
@@ -1204,7 +1221,8 @@ mod tests {
     }
 
     fn rejection_forward<'a>(
-        socket: &'a mut Stream,
+        socket: &'a mut dyn zcall::server::Connection,
+        peer: &'a Stream,
         plugins: &'a mut Plugins,
     ) -> Forward<'a, 'a, 'a, 'a> {
         Forward {
@@ -1217,6 +1235,7 @@ mod tests {
                 bytes: 0,
                 maximum: RETRY_BODY_LIMIT * 2,
             },
+            peer,
             plugins,
             response_begun: false,
             transform: None,
@@ -1232,11 +1251,13 @@ mod tests {
     #[test]
     fn only_explicit_refusals_hold_back_downstream_headers() {
         for status in [200, 401, 429, 500, 502, 503, 504] {
-            let (mut socket, output) = downstream();
+            let (socket, output) = downstream();
             let mut plugins = Plugins::load(&[]).unwrap();
             let deferred = matches!(status, 429 | 503);
             {
-                let mut sink = rejection_forward(&mut socket, &mut plugins);
+                let peer = &socket;
+                let mut connection = peer;
+                let mut sink = rejection_forward(&mut connection, peer, &mut plugins);
                 sink.header(format!("HTTP/1.1 {status} Fixture\r\n").as_bytes())
                     .unwrap();
                 sink.header(b"Content-Type: application/json\r\n").unwrap();
@@ -1257,10 +1278,12 @@ mod tests {
 
     #[test]
     fn oversized_refusal_streams_original_response_without_retry() {
-        let (mut socket, output) = downstream();
+        let (socket, output) = downstream();
         let mut plugins = Plugins::load(&[]).unwrap();
         {
-            let mut sink = rejection_forward(&mut socket, &mut plugins);
+            let peer = &socket;
+            let mut connection = peer;
+            let mut sink = rejection_forward(&mut connection, peer, &mut plugins);
             sink.header(b"HTTP/1.1 503 Service Unavailable\r\n")
                 .unwrap();
             sink.header(b"Retry-After: 9\r\n").unwrap();
