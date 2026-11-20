@@ -32,6 +32,8 @@ struct Context {
     content_type: String,
     protocol: String,
     success: bool,
+    // One confirmed recovery may invalidate quota for this request's exact account.
+    after_reset: Option<String>,
 }
 
 #[derive(Default)]
@@ -589,7 +591,9 @@ impl ContextPlugin for Community {
         if let Some(v) = value.get("stream").as_bool() {
             kept.set("stream", v.into());
         }
-        self.ctx.borrow_mut().metadata = kept;
+        let mut context = self.ctx.borrow_mut();
+        context.metadata = kept;
+        context.after_reset = None;
         Ok(())
     }
 }

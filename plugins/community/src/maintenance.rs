@@ -1,11 +1,13 @@
 //! Optional one-shot maintenance bridge. Paths and account selectors come from
 //! host configuration; the helper revalidates policy, identity and its ledger.
-use super::{Community, Stream};
+use super::{Community, Context, Stream};
 use std::{
+    cell::RefCell,
     collections::HashSet,
     fs::{self, File, Metadata},
     io::Read,
     path::{Path, PathBuf},
+    rc::Rc,
     time::{Duration, Instant},
 };
 use zcalld_compat_client::{
@@ -17,6 +19,7 @@ use zplugin::{Error, OwnedResource, ResourceHandler, Result};
 
 const MAX_STATE_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_REGISTRY_BYTES: u64 = 8 * 1024 * 1024;
+const FRESH_QUOTA: &str = "zcalld_fresh_quota_account";
 
 #[derive(Clone)]
 struct Binding {
@@ -300,10 +303,19 @@ pub(super) struct Fetch {
 impl Fetch {
     pub(super) fn new(
         community: &mut Community,
-        params: Value,
+        mut params: Value,
         explicit_account: Option<&str>,
         deadline: Instant,
     ) -> Result<Self> {
+        // Never accept an invalidation hint from the incoming provider envelope.
+        // Only this request's successful recovery resource can create one.
+        params.remove(FRESH_QUOTA);
+        if let Some(account) = community.ctx.borrow_mut().after_reset.take()
+            && params.get("provider").as_str() == Some("builtin:codex")
+            && explicit_account == Some(account.as_str())
+        {
+            params.set(FRESH_QUOTA, account.into());
+        }
         let plan = if params.get("provider").as_str() == Some("builtin:codex") {
             explicit_account.and_then(|account| {
                 let binding = Binding::from_config(&community.config)?;
@@ -364,7 +376,15 @@ impl Fetch {
                 Some(Outcome::Unknown) => {
                     return Err(Error::PluginStatus(status::PROVIDER_REQUEST_FAILED));
                 }
-                Some(Outcome::Reset | Outcome::NotSent) => self.plan = None,
+                Some(Outcome::Reset) => {
+                    let account = plan.account.clone();
+                    self.params
+                        .as_mut()
+                        .ok_or(Error::InvalidArgument)?
+                        .set(FRESH_QUOTA, account.into());
+                    self.plan = None;
+                }
+                Some(Outcome::NotSent) => self.plan = None,
             }
         }
         let budget = remaining(self.deadline)?;
@@ -462,6 +482,7 @@ fn candidates(metadata: &[u8]) -> Result<(u64, Vec<Candidate>)> {
 }
 struct Recovery {
     binding: Option<Binding>,
+    context: Option<Rc<RefCell<Context>>>,
     candidates: Vec<Candidate>,
     next: usize,
     pending: Option<(usize, Pending)>,
@@ -473,6 +494,7 @@ impl Recovery {
         let (timeout, candidates) = candidates(metadata)?;
         Ok(Self {
             binding: Binding::from_config(config),
+            context: None,
             candidates,
             next: 0,
             pending: None,
@@ -484,6 +506,11 @@ impl Recovery {
         let mut result = object([("recovered", candidate.is_some().into())]);
         if let Some(index) = candidate {
             result.set("candidate", index.into());
+            if let Some(context) = &self.context
+                && let Some(chosen) = self.candidates.iter().find(|c| c.index == index)
+            {
+                context.borrow_mut().after_reset = Some(chosen.account.clone());
+            }
         }
         self.result = Some(result.stringify().into_bytes());
     }
@@ -557,7 +584,9 @@ impl RecoveryPlugin for Community {
         Ok(1)
     }
     fn begin(&mut self, metadata: &[u8]) -> Result<OwnedResource> {
-        OwnedResource::new(Recovery::new(&self.config, metadata)?)
+        let mut planned = Recovery::new(&self.config, metadata)?;
+        planned.context = Some(Rc::clone(&self.ctx));
+        OwnedResource::new(planned)
     }
     fn resume(&mut self, _: u32, _: &str, _: &[u8], _: &mut [u8]) -> Result<u64> {
         Ok(0)
@@ -1164,5 +1193,109 @@ done
         drop(first);
         drop(second);
         drop(community);
+    }
+    #[test]
+    fn only_a_confirmed_recovery_attaches_one_account_scoped_fresh_intent() {
+        for outcome in ["completed", "not_sent", "unknown"] {
+            let fixture = Fixture::new(&response(
+                outcome,
+                if outcome == "completed" {
+                    "reset"
+                } else {
+                    "no_reset"
+                },
+            ));
+            let mut community = mock_host(&fixture);
+            let metadata = object([
+                ("phase", "routes_exhausted".into()),
+                ("timeout_ms", 2000u64.into()),
+                (
+                    "attempts",
+                    Value::Array(vec![object([
+                        ("provider", "builtin:codex".into()),
+                        ("account", A.into()),
+                        ("status", 429u64.into()),
+                    ])]),
+                ),
+            ])
+            .stringify();
+            let mut recovery = Recovery::new(&fixture.config, metadata.as_bytes()).unwrap();
+            recovery.context = Some(Rc::clone(&community.ctx));
+            let deadline = Instant::now() + Duration::from_secs(3);
+            loop {
+                match recovery.call(1, &[], &mut [0u8; 256]) {
+                    Ok(_) => break,
+                    Err(Error::PluginStatus(3)) => assert!(Instant::now() < deadline),
+                    other => panic!("unexpected recovery state {other:?}"),
+                }
+            }
+            fixture.write_state(false);
+            let mut forged = params();
+            forged.set(FRESH_QUOTA, B.into());
+            let mut fetch = Fetch::new(
+                &mut community,
+                forged,
+                Some(A),
+                Instant::now() + Duration::from_secs(4),
+            )
+            .unwrap();
+            loop {
+                match fetch.call(1, &[], &mut [0u8; 1024]) {
+                    Ok(_) => break,
+                    Err(Error::PluginStatus(3)) => assert!(Instant::now() < deadline),
+                    other => panic!("unexpected generation state {other:?}"),
+                }
+            }
+            let calls = native_calls(&fixture);
+            let sent = calls
+                .iter()
+                .find(|v| v.get("method").as_str() == Some("fetch"))
+                .unwrap();
+            assert_eq!(
+                sent.get("params").get(FRESH_QUOTA).as_str(),
+                (outcome == "completed").then_some(A)
+            );
+            let mut forged = params();
+            forged.set(FRESH_QUOTA, A.into());
+            let second = Fetch::new(
+                &mut community,
+                forged,
+                Some(A),
+                Instant::now() + Duration::from_secs(4),
+            )
+            .unwrap();
+            assert!(matches!(
+                second.params.as_ref().unwrap().get(FRESH_QUOTA),
+                Value::Null
+            ));
+            drop(second);
+            drop(fetch);
+            drop(community);
+        }
+    }
+    #[test]
+    fn a_reset_intent_cannot_follow_another_or_implicit_account() {
+        for explicit in [Some(B), None] {
+            let fixture = Fixture::new(&response("completed", "reset"));
+            fixture.write_state(false);
+            let mut community = mock_host(&fixture);
+            community.ctx.borrow_mut().after_reset = Some(A.into());
+            let mut request = params();
+            request.set(FRESH_QUOTA, A.into());
+            let fetch = Fetch::new(
+                &mut community,
+                request,
+                explicit,
+                Instant::now() + Duration::from_secs(4),
+            )
+            .unwrap();
+            assert!(matches!(
+                fetch.params.as_ref().unwrap().get(FRESH_QUOTA),
+                Value::Null
+            ));
+            assert!(community.ctx.borrow().after_reset.is_none());
+            drop(fetch);
+            drop(community);
+        }
     }
 }
