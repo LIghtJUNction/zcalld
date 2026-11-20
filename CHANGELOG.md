@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1 — 2026-11-20
+
+- test: exercise the real Codex ChatGPT path and quota parsing
+- fix: accept native Codex paths and preserve quota metadata
+- build: pin the verified native GUI and Ink panel updates
+
 ## 0.3.0 — 2026-11-20
 
 - feat: share gateway primitives and manage caller keys
