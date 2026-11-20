@@ -43,4 +43,8 @@ subprocess.run([sys.executable, str(root / "scripts/test-mcp.py"),
 subprocess.run([sys.executable, str(root / "scripts/test-builtin-fetch.py"), *common,
                 "--pluginctl", str(pluginctl), "--community-plugin", str(community)],
                cwd=root, check=True)
-print("Native compatibility accepted: privacy, routing, MCP and generated builtin provider fetch over real Rust/Go/Bun IPC")
+for script in ("test-codex-metadata.py", "test-codex-compaction.py"):
+    subprocess.run([sys.executable, str(root / "scripts" / script), *common,
+                    "--pluginctl", str(pluginctl), "--community-plugin", str(community),
+                    "--routing-plugin", str(routing)], cwd=root, check=True)
+print("Native compatibility accepted: privacy, routing, MCP, generated builtin fetch and Codex metadata/compaction over real Rust/Go/Bun IPC")

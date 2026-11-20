@@ -1,0 +1,111 @@
+# Native Codex metadata
+
+The optional community extension can serve the read-only metadata requests used by Codex 0.170 alongside the existing Responses gateway. Model instructions, account information and quota windows come from the explicitly bound Codex account. The extension does not manufacture a catalog, select the first available account or refresh native Codex credentials.
+
+This feature requires **zcalld 0.4.0 and zcalld-compat 0.2.0 or newer**. It is disabled by default. It reuses the community extension's lazy Bun host, with no additional listener, polling task or daemon.
+
+## Supported requests
+
+All entries accept GET with an empty body and retain the gateway's normal authentication and Origin checks.
+
+| Gateway path | Fixed upstream path on `https://chatgpt.com` | Query |
+| --- | --- | --- |
+| `/backend-api/codex/models` | `/backend-api/codex/models` | Exactly one `client_version` |
+| `/backend-api/wham/usage`, `/api/codex/usage` | `/backend-api/wham/usage` | None |
+| `/backend-api/wham/accounts/check`, `/api/codex/accounts/check` | `/backend-api/wham/accounts/check` | None |
+| `/backend-api/wham/config/bundle`, `/api/codex/config/bundle`, `/codex/config/bundle` | `/backend-api/wham/config/bundle` | None |
+
+`client_version` is limited to 64 ASCII letters, digits, dots, plus signs, hyphens or underscores. Missing, duplicate, escaped or extra query parameters are rejected. Requests cannot supply an upstream URL. Redirects are rejected.
+
+These contracts follow the official [Codex 0.170 model endpoint](https://github.com/openai/codex/blob/rust-v0.170.0/codex-rs/codex-api/src/endpoint/models.rs), [model schema](https://github.com/openai/codex/blob/rust-v0.170.0/codex-rs/protocol/src/openai_models.rs) and [backend client](https://github.com/openai/codex/tree/rust-v0.170.0/codex-rs/backend-client). Other account, task and mutation endpoints are not claimed by this extension. Changing where a client sends requests remains a separate, explicit client configuration decision.
+
+## Bind an existing provider and its routes
+
+The account must already be configured for an enabled `builtin:codex` provider. For example:
+
+```ini
+[provider codex-local]
+base_url = https://chatgpt.com/backend-api/codex
+protocol = responses
+plugin = builtin:codex
+plugin_account = builtin:codex#work
+plugin_npm = @ai-sdk/openai
+
+[route my-codex-model]
+provider = codex-local
+model = upstream-model-slug
+```
+
+These identifiers are examples. Use the actual local provider, account key and upstream model slug. A missing `plugin_account` is accepted only when the registry has an explicit `account_defaults["builtin:codex"]`. Another enabled account is never an implicit substitute.
+
+Create a binding file containing the routes that this account may describe:
+
+```json
+{
+  "enabled": true,
+  "loopback": {
+    "provider": "codex-local",
+    "routes": ["my-codex-model"]
+  },
+  "callers": {
+    "office-client-key-id": {
+      "provider": "codex-local",
+      "routes": ["my-codex-model"]
+    }
+  }
+}
+```
+
+Omit `callers` when remote access is unnecessary. Each entry names a caller-key **ID**, not its secret. A remote caller must authenticate with that key and have its own binding. The global gateway token alone does not choose an account for remote metadata. The `loopback` entry applies only to an actual loopback or Unix peer.
+
+Apply the binding and materialize the installed helper's embedded runtime:
+
+```sh
+zcalld plugins codex configure --file /absolute/codex-binding.json
+zcalld plugins runtime configure
+zcalld plugins codex show
+zcalld check
+```
+
+For a nondefault configuration, add `--config /absolute/config.conf` to each command. Configuration commands do not start a host, contact providers, refresh credentials or restart the gateway. Review the result, then restart through the normal service manager. For a Linux user service, use `systemctl --user restart zcalld.service`.
+
+Upgrading the helper alone does not replace script paths held by an existing private registry or running host. `runtime configure` materializes the new embedded runtime while preserving accounts, selections, options and enabled state. A normal restart loads it. Install compatible core and helper packages before enabling this feature.
+
+`zcalld plugins codex disable` disables these metadata routes while retaining their bindings. Ordinary Responses generation and community MCP remain independently configured.
+
+## Identity and model boundaries
+
+The core supplies actual peer classification, the verified caller-key ID and loaded provider/route relationships. Host, X-Loopback and X-Caller-Key-Id headers cannot create those relationships. The optional HTTP interface requests this context with flags 3; existing flags 1 handlers, including MCP, retain their previous context. Configured provider credentials, base URLs and headers are excluded.
+
+An incoming `ChatGPT-Account-Id` is an untrusted consistency hint. If present, it must match the account selected by the explicit binding. Duplicate, empty, malformed or mismatched values are rejected. The hint never selects an account or grants access. Incoming Authorization is never used as upstream authentication.
+
+A model is returned only when a configured static route maps to a slug in that account's official response. The exposed slug becomes the public route ID; the upstream entry's instructions and other JSON fields are retained. Missing instructions are rejected, and unbound upstream models are omitted. Dynamic groups and routes belonging to another provider cannot borrow a member's metadata. The filtered catalog gets its own content-derived ETag.
+
+Usage, account-bootstrap and config-bundle responses preserve validated upstream JSON bytes. No quota percentage, account or instruction text is synthesized. These are request-time upstream reads; the local quota-cache CLI is a separate interface.
+
+Externally owned native credentials are reread from their bound source without writing them. Expiry or an account change fails explicitly. The native owner remains responsible for refresh; metadata does not call loaders, refresh hooks or generation APIs.
+
+## Bounds and failures
+
+Each metadata request uses the smaller of the gateway's overall timeout and 30 seconds, including waiting for cold shared-host initialization. Response data is limited to the smaller of the configured response limit and 4 MiB. Streaming retains the existing byte-credit and cancellation protocol.
+
+Timeout or disconnection releases the request's own calls and cancels its pending stream. It does not kill a shared host or cancel another request's initialization wait. An enabled community plugin that fails initialization makes that native host fail closed for subsequent calls. The management CLI retains partial-load diagnostics.
+
+Redirects, invalid JSON, incompatible content types, missing model instructions and oversized bodies fail explicitly. Returned errors use static categories; arbitrary upstream error text, credentials and response headers are not reflected. Successful metadata responses expose only JSON content type, cache policy and an applicable ETag.
+
+## Compaction uses the Responses pipeline
+
+Codex 0.170 requests remote compaction through an ordinary Responses stream containing a `compaction_trigger` input item. Existing decompression, authentication, privacy, group routing and protocol handling apply. This feature does not alias an old `/responses/compact` path to generation.
+
+The builtin adapter preserves opaque IDs and `encrypted_content` in `compaction`, `compaction_summary` and `context_compaction` items. Ordinary message normalization remains unchanged, and plaintext still passes through privacy masking and restoration. See the official [remote compaction implementation](https://github.com/openai/codex/blob/rust-v0.170.0/codex-rs/core/src/compact_remote_v2.rs) and [wire item types](https://github.com/openai/codex/blob/rust-v0.170.0/codex-rs/protocol/src/models.rs).
+
+## Verification and limits
+
+| Evidence | Coverage |
+| --- | --- |
+| [Native metadata fixture](../scripts/test-codex-metadata.py) | Generated bundle and native HTTP plugin; explicit binding; actual peer classification; forged headers; query/method rejection; bounds; cold-init cancellation; shared failures; no host when disabled |
+| [Native compaction fixture](../scripts/test-codex-compaction.py) | Plain, gzip and zstd through the actual privacy worker and routing plugin; opaque IDs and ciphertext in JSON/SSE; plaintext masked upstream and restored downstream |
+| [MCP fixture](../scripts/test-mcp.py) | Existing tools, sessions and cancellation |
+| [Builtin hook tests](https://github.com/LIghtJUNction/zcalld-compat/tree/main/community/builtin/tests) | Fixed origin, redirects, malformed metadata, external ownership, bounded reads and compaction preparation |
+
+These fixtures use synthetic credentials and local network substitutes. They do not exercise a real subscription, spend credits, refresh an account or change a user's Codex configuration. Passing these contracts does not establish that every Codex feature or every provider account has been tested.

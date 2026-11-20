@@ -183,7 +183,11 @@ pub trait RetryPlugin {
 /// validate its own allowlist) and routing.providers/routes from loaded config.
 /// Providers expose id, plugin, account only. Routes expose id, dynamic, provider,
 /// model; dynamic groups have null provider/model. Caller headers cannot override
-/// any identity. Credentials, URLs and cookies are never included.
+/// any identity. untrusted_headers contains all ChatGPT-Account-Id header values
+/// solely for a plugin's reject-only consistency check; duplicates/empty values
+/// must be rejected, never used to select an account or grant permission.
+/// Configured provider credentials/URLs, Authorization and cookies are omitted.
+/// Query and consistency hints remain untrusted input and must not be logged.
 /// body is borrowed for this call and is not implicitly AI-redacted.
 ///
 /// handle returns the existing dev.zcalld.provider-stream v1 HTTP resource:
