@@ -44,7 +44,7 @@ Candidates require a full 40-character commit SHA. They retain build artifacts b
 | `SHA256SUMS` | Hashes of release archives and update executables |
 | AUR `zcalld` / `zcalld-bin` | Pinned source build / architecture-specific binary package |
 
-Linux archives build on Ubuntu 24.04 and use its libcurl ABI baseline. macOS uses system libcurl. Windows builds the pinned vcpkg curl port with its `ssl` feature, which selects Schannel for the desktop target. The GUI and compatibility packages are separate optional installations.
+Linux archives build on Ubuntu 24.04 and use its libcurl ABI baseline. macOS uses system libcurl and zlib, with zstd linked statically from Homebrew. Windows builds the pinned vcpkg curl port with its `ssl` feature, which selects Schannel for the desktop target; zstd and zlib use the x64-windows-static-md triplet. Linux declares zstd and zlib as runtime dependencies. Codec license notices are included in the archives. The GUI and compatibility packages are separate optional installations.
 
 Source packaging archives only committed files and recursively follows each gitlink. It rejects a submodule worktree whose HEAD differs from the recorded commit. Private configurations, ignored build outputs and untracked files cannot enter that source archive.
 

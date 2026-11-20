@@ -1,0 +1,7 @@
+{
+  "body": "{\"model\":\"test\",\"messages\":[{\"role\":\"user\",\"content\":\"compressed fixture\"}],\"stream\":false}",
+  "zstd_hex": "28b52ffd205b5d0200b2c51116a0a739d8104d0afdb281e9df4cce560569c224013c0e879f0aaa5a31e64b02478d4516066838fe8d043bd36a124ee24c49d12f5a753aac01a8de82f2db4a9a77b69a7cce6a0400",
+  "large_zstd_hex": "28b52ffd6000ff5500001078780100fb7f1d6001",
+  "privacy_body": "{\"model\":\"test\",\"messages\":[{\"role\":\"user\",\"content\":\"Contact jane.doe@acme.io for the fixture.\"}],\"stream\":false}",
+  "privacy_zstd_hex": "28b52ffd2072e502002207161890a76df695ed66428cbffd6f8904f44e23fcdacdd9ff4b0cc9d5b86456f75cb519243ecf630f452a2f6c494c058b73850e7024ced719caa2db85019b777d17221be7f5b0f906a61181594f38d52b1baf7e6d364ea0321200"
+}

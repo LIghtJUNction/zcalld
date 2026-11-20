@@ -185,3 +185,8 @@ private.
 .PP
 Project and detailed configuration documentation:
 https://github.com/LIghtJUNction/zcalld
+
+.SH CODEX TRANSPORT
+Valid WebSocket handshakes receive HTTP 426 so compatible clients can retry over HTTP/SSE.
+Incoming gzip and zstd bodies are decoded before privacy and routing, with separate encoded and decoded size limits and the original request deadline.
+This does not establish a WebSocket session.

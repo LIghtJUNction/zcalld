@@ -11,6 +11,8 @@ pkgbase = zcalld
 	depends = glibc
 	depends = libgcc
 	depends = curl
+	depends = zstd
+	depends = zlib
 	optdepends = systemd: system and user service management
 	optdepends = zcalld-compat>=0.1.5: privacy, audit history, OAuth accounts and community plugins
 	optdepends = zcall-gui: optional native desktop interface

@@ -1,6 +1,7 @@
 //! Native AI gateway: small CLI, explicit routes, optional native plugins.
 
 mod adapters;
+mod compression;
 mod config;
 mod control;
 mod curl;

@@ -180,6 +180,128 @@ class TransportTests(unittest.TestCase):
             self.assertEqual(status, 200)
         self.assertEqual(self.upstream.requests, [])
 
+
+    def test_websocket_negotiation_falls_back_to_http_streaming(self):
+        self.write_config()
+        self.start()
+        headers = {
+            "Upgrade": "WebSocket",
+            "Connection": "keep-alive, Upgrade",
+            "Sec-WebSocket-Version": "13",
+            "Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ==",
+        }
+        status, body = request(http.client.HTTPConnection(
+            "127.0.0.1", self.port, timeout=3), "/v1/responses", headers=headers)
+        self.assertEqual(status, 426)
+        self.assertEqual(json.loads(body)["error"]["code"], 426)
+        self.assertEqual(self.upstream.requests, [])
+        status, body = request(http.client.HTTPConnection(
+            "127.0.0.1", self.port, timeout=3), "/v1/chat/completions",
+            {"model": "test", "messages": [{"role": "user", "content": "fixture"}], "stream": True})
+        self.assertEqual(status, 200, body.decode(errors="replace"))
+        self.assertIn(b"socket works", body)
+        self.assertTrue(body.endswith(b"data: [DONE]\n\n"))
+        self.assertEqual(len(self.upstream.requests), 1)
+
+    def test_invalid_upgrades_keep_existing_rejections(self):
+        self.write_config()
+        self.start()
+        valid = [
+            "Host: localhost", "Upgrade: websocket", "Connection: Upgrade",
+            "Sec-WebSocket-Version: 13",
+            "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==",
+        ]
+        cases = [
+            ("GET", "HTTP/1.1", valid + ["Origin: https://example.invalid"], 403),
+            ("GET", "HTTP/1.1", valid + ["Expect: 100-continue"], 417),
+            ("POST", "HTTP/1.1", valid, 400),
+            ("GET", "HTTP/1.0", valid, 400),
+            ("GET", "HTTP/1.1", [h for h in valid if not h.startswith("Connection:")], 400),
+            ("GET", "HTTP/1.1", [h.replace("Upgrade: websocket", "Upgrade: h2c") for h in valid], 400),
+            ("GET", "HTTP/1.1", [h.replace("Version: 13", "Version: 12") for h in valid], 400),
+            ("GET", "HTTP/1.1", valid[:-1] + ["Sec-WebSocket-Key: invalid"], 400),
+            ("GET", "HTTP/1.1", [h.replace("Connection: Upgrade", "Connection: , Upgrade") for h in valid], 400),
+            ("GET", "HTTP/1.1", [h.replace("Connection: Upgrade", "Connection: keep alive, Upgrade") for h in valid], 400),
+            ("GET", "HTTP/1.1", valid + ["Content-Length: 1"], 400),
+            ("GET", "HTTP/1.1", valid + ["Content-Length: 0", "Transfer-Encoding: chunked"], 400),
+            ("GET", "HTTP/1.1", valid + ["Content-Length: invalid"], 400),
+            ("GET", "HTTP/1.1", valid + ["Upgrade: websocket"], 400),
+        ]
+        for method, version, headers, expected in cases:
+            with self.subTest(method=method, version=version, headers=headers):
+                with socket.create_connection(("127.0.0.1", self.port), timeout=3) as client:
+                    head = f"{method} /v1/responses {version}\r\n" + "\r\n".join(headers) + "\r\n\r\n"
+                    client.sendall(head.encode("ascii"))
+                    response = http.client.HTTPResponse(client)
+                    response.begin()
+                    self.assertEqual(response.status, expected)
+                    self.assertEqual(json.loads(response.read())["error"]["code"], expected)
+        self.assertEqual(self.upstream.requests, [])
+
+    @unittest.skipIf(os.name == "nt", "Unix socket transport is unavailable on Windows")
+    def test_websocket_fallback_uses_the_same_private_unix_transport(self):
+        self.write_config(tcp=False, unix=True)
+        self.start(unix=True)
+        status, body = request(UnixConnection(self.socket_path), "/v1/responses", headers={
+            "Upgrade": "websocket", "Connection": "Upgrade",
+            "Sec-WebSocket-Version": "13",
+            "Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ==",
+            "Content-Length": "0",
+        })
+        self.assertEqual(status, 426)
+        self.assertEqual(json.loads(body)["error"]["code"], 426)
+        self.assertEqual(self.upstream.requests, [])
+        self.assertEqual(request(UnixConnection(self.socket_path))[0], 200)
+
+    def test_compressed_requests_reach_the_provider_as_plain_json(self):
+        import gzip
+        fixture = json.loads((Path(__file__).parent / "fixtures" / "compressed-request.json").read_text())
+        plain = fixture["body"].encode()
+        self.write_config()
+        self.start()
+        for encoding, encoded in (("gzip", gzip.compress(plain)), ("zstd", bytes.fromhex(fixture["zstd_hex"]))):
+            with self.subTest(encoding=encoding):
+                with contextlib.closing(http.client.HTTPConnection("127.0.0.1", self.port, timeout=3)) as connection:
+                    connection.request("POST", "/v1/chat/completions", encoded, {
+                        "Content-Type": "application/json", "Content-Encoding": encoding,
+                        "Authorization": "Bearer fixture-caller-secret",
+                    })
+                    response = connection.getresponse()
+                    self.assertEqual(response.status, 200, response.read() if response.status != 200 else "")
+                    response.read()
+                forwarded = self.upstream.requests[-1]
+                expected = json.loads(plain)
+                expected["model"] = "upstream-test"
+                self.assertEqual(forwarded["body"], expected)
+                names = {name.lower() for name in forwarded["headers"]}
+                self.assertNotIn("content-encoding", names)
+                self.assertNotIn("authorization", names)
+
+    def test_compressed_limits_and_corruption_prevent_provider_requests(self):
+        import gzip
+        fixture = json.loads((Path(__file__).parent / "fixtures" / "compressed-request.json").read_text())
+        self.write_config()
+        self.config.write_text(self.config.read_text().replace("[server]\n", "[server]\nmax_body_bytes=4096\n"))
+        self.start()
+        cases = [
+            ("gzip", gzip.compress(b"x" * 65536), 413),
+            ("zstd", bytes.fromhex(fixture["large_zstd_hex"]), 413),
+            ("gzip", gzip.compress(fixture["body"].encode())[:-1], 400),
+            ("zstd", bytes.fromhex(fixture["zstd_hex"])[:-1], 400),
+            ("zstd", b"x" * 4097, 413),
+            ("br", b"{}", 415),
+        ]
+        for encoding, encoded, expected in cases:
+            with self.subTest(encoding=encoding, expected=expected):
+                with contextlib.closing(http.client.HTTPConnection("127.0.0.1", self.port, timeout=3)) as connection:
+                    connection.request("POST", "/v1/chat/completions", encoded, {
+                        "Content-Type": "application/json", "Content-Encoding": encoding,
+                    })
+                    response = connection.getresponse()
+                    self.assertEqual(response.status, expected)
+                    self.assertEqual(json.loads(response.read())["error"]["code"], expected)
+        self.assertEqual(self.upstream.requests, [])
+
     def write_config(self, tcp=True, unix=False, extra=""):
         self.config.write_text(
             f"[server]\nlisten={'127.0.0.1:' + str(self.port) if tcp else 'none'}\n"
@@ -283,6 +405,27 @@ class TransportTests(unittest.TestCase):
             else:
                 text = json.loads(body)["choices"][0]["message"]["content"]
             self.assertEqual(text, original)
+
+    def test_compressed_requests_are_masked_before_provider_egress(self):
+        import gzip
+        fixture = json.loads((Path(__file__).parent / "fixtures" / "compressed-request.json").read_text())
+        plain = fixture["privacy_body"].encode()
+        original = json.loads(plain)["messages"][0]["content"]
+        self.privacy()
+        self.upstream.mode = "echo"
+        self.start()
+        for encoding, encoded in (("gzip", gzip.compress(plain)), ("zstd", bytes.fromhex(fixture["privacy_zstd_hex"]))):
+            with self.subTest(encoding=encoding):
+                with contextlib.closing(http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)) as connection:
+                    connection.request("POST", "/v1/chat/completions", encoded, {
+                        "Content-Type": "application/json", "Content-Encoding": encoding,
+                    })
+                    response = connection.getresponse()
+                    body = response.read()
+                    self.assertEqual(response.status, 200, body.decode(errors="replace"))
+                sent = self.upstream.requests[-1]["body"]["messages"][0]["content"]
+                self.assertNotIn("jane.doe@acme.io", sent)
+                self.assertEqual(json.loads(body)["choices"][0]["message"]["content"], original)
 
     def test_unavailable_privacy_worker_prevents_egress(self):
         self.privacy(missing_worker=True)

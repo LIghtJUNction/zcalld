@@ -31,6 +31,9 @@ common = ["--binary", str(binary), "--redact-plugin", str(redact),
           "--privacy-worker", str(privacy_worker)]
 subprocess.run([sys.executable, str(root / "scripts/test-privacy-init.py"), *common],
                cwd=root, check=True)
+subprocess.run([sys.executable, str(root / "scripts/test-transport.py"), *common,
+                "TransportTests.test_compressed_requests_are_masked_before_provider_egress"],
+               cwd=root, check=True)
 subprocess.run([sys.executable, str(root / "scripts/test-routing-advanced.py"), *common,
                 "--pluginctl", str(pluginctl), "--routing-plugin", str(routing)],
                cwd=root, check=True)

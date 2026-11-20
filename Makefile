@@ -33,6 +33,8 @@ install:
 	install -Dm644 packaging/tmpfiles.d/zcalld.conf "$(DESTDIR)$(LIBDIR)/tmpfiles.d/zcalld.conf"
 	install -Dm644 packaging/man/zcalld.1 "$(DESTDIR)$(DATADIR)/man/man1/zcalld.1"
 	install -Dm644 LICENSE "$(DESTDIR)$(DATADIR)/licenses/zcalld/LICENSE"
+	install -Dm644 packaging/licenses/zstd.txt "$(DESTDIR)$(DATADIR)/licenses/zcalld/zstd.txt"
+	install -Dm644 packaging/licenses/zlib.txt "$(DESTDIR)$(DATADIR)/licenses/zcalld/zlib.txt"
 	install -Dm644 README.md "$(DESTDIR)$(DATADIR)/doc/zcalld/README.md"
 	cp -R docs "$(DESTDIR)$(DATADIR)/doc/zcalld/"
 	chmod -R u=rwX,go=rX "$(DESTDIR)$(DATADIR)/doc/zcalld/docs"

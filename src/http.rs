@@ -195,13 +195,20 @@ pub fn read_request(
         return Err(failure(417, "Expect is not supported"));
     }
     if request.header("upgrade").is_some() {
+        if websocket_fallback(&request, fields[2]) {
+            return Err(failure(
+                426,
+                "WebSocket upgrade is unavailable; retry using HTTP/SSE",
+            ));
+        }
         return Err(failure(400, "HTTP upgrades are not supported"));
     }
-    if request
+    let content_encoding = request
         .header("content-encoding")
-        .is_some_and(|value| !value.eq_ignore_ascii_case("identity"))
-    {
-        return Err(failure(415, "compressed request bodies are not supported"));
+        .unwrap_or("identity")
+        .to_ascii_lowercase();
+    if !matches!(content_encoding.as_str(), "identity" | "gzip" | "zstd") {
+        return Err(failure(415, "unsupported request content encoding"));
     }
     let length = request
         .header("content-length")
@@ -266,7 +273,62 @@ pub fn read_request(
             }
         }
     }
+    if content_encoding != "identity" {
+        request.body =
+            crate::compression::decode(&content_encoding, &request.body, max_body, input.deadline)?;
+        request.headers.retain(|(name, _)| {
+            !matches!(
+                name.as_str(),
+                "content-encoding" | "transfer-encoding" | "content-length"
+            )
+        });
+        request
+            .headers
+            .push(("content-length".into(), request.body.len().to_string()));
+    }
     Ok(request)
+}
+
+/// Codex treats HTTP 426 during WebSocket negotiation as a request to use HTTP/SSE.
+/// No protocol switch occurs. Only a complete, body-free WebSocket handshake is
+/// eligible; malformed upgrades retain their ordinary rejection.
+fn websocket_fallback(request: &Request, version: &str) -> bool {
+    if version != "HTTP/1.1"
+        || request.method != "GET"
+        || !request
+            .header("host")
+            .is_some_and(|value| !value.is_empty())
+        || !request
+            .header("upgrade")
+            .is_some_and(|value| value.eq_ignore_ascii_case("websocket"))
+        || request.header("sec-websocket-version") != Some("13")
+        || request.header("transfer-encoding").is_some()
+    {
+        return false;
+    }
+    if let Some(length) = request.header("content-length")
+        && (length.is_empty()
+            || !length.bytes().all(|byte| byte.is_ascii_digit())
+            || length.parse::<usize>() != Ok(0))
+    {
+        return false;
+    }
+    let mut upgrade = false;
+    for token in request.header("connection").unwrap_or("").split(',') {
+        let token = token.trim_matches([' ', '\t']);
+        if token.is_empty() || !token.bytes().all(token_char) {
+            return false;
+        }
+        upgrade |= token.eq_ignore_ascii_case("upgrade");
+    }
+    let key = request.header("sec-websocket-key").unwrap_or("").as_bytes();
+    upgrade
+        && key.len() == 24
+        && &key[22..] == b"=="
+        && key[..21].iter().all(|byte| byte.is_ascii_alphanumeric() || matches!(*byte, b'+' | b'/'))
+        // A 16-byte nonce leaves only two significant bits in its final
+        // base64 character; nonzero padding bits are not a canonical key.
+        && matches!(key[21], b'A' | b'Q' | b'g' | b'w')
 }
 
 fn token_char(byte: u8) -> bool {
@@ -395,6 +457,7 @@ pub fn reason(status: u16) -> &'static str {
         413 => "Content Too Large",
         415 => "Unsupported Media Type",
         417 => "Expectation Failed",
+        426 => "Upgrade Required",
         429 => "Too Many Requests",
         431 => "Request Header Fields Too Large",
         500 => "Internal Server Error",
