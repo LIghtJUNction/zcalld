@@ -29,6 +29,14 @@ impl Stream {
         }
     }
 
+    pub fn shutdown_write(&self) -> io::Result<()> {
+        match self {
+            Self::Tcp(socket) => socket.shutdown(std::net::Shutdown::Write),
+            #[cfg(unix)]
+            Self::Unix(socket) => socket.shutdown(std::net::Shutdown::Write),
+        }
+    }
+
     pub fn set_nodelay(&self, enabled: bool) -> io::Result<()> {
         match self {
             Self::Tcp(socket) => socket.set_nodelay(enabled),
