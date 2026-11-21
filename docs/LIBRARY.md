@@ -79,6 +79,8 @@ filesystem format.
 
 ```sh
 zcalld library skills install review --dir ./skills/review --agents claude,codex
+zcalld library skills fetch review-remote --git https://github.com/owner/skills.git \
+  --path skills/review --ref main --agents claude,codex
 zcalld library skills create notes --file ./SKILL.md --agents claude
 zcalld library skills list --json
 zcalld library skills show review --json
@@ -90,10 +92,42 @@ zcalld library skills apply --agent claude --dry-run
 zcalld library skills apply --agent claude
 ```
 
-`update` reads the remembered local source, or a new `--dir PATH`. For a Git-backed
-skill, check out and review the desired revision first, then pass that skill's
-directory. This command does not fetch a moving branch, install dependencies, or
-execute package lifecycle scripts.
+`install --dir` copies a local folder. `install --git` and `fetch --git` read a
+skill from an HTTPS Git repository or an existing local repository. `--path`
+selects the directory containing `SKILL.md` and defaults to the repository root;
+`--ref` selects a branch, tag or commit and defaults to the remote's `HEAD`.
+The saved source includes the exact resolved commit, which `show` and `list`
+expose for review. Credentials belong in Git's credential helper, not in the URL.
+
+`update NAME` uses the remembered folder or Git source. A branch follows its new
+head; a commit remains pinned until an explicit `--ref` selects another revision.
+`--git`, `--dir`, `--ref` and `--path` can replace the remembered source. Updating a
+Git skill with locally edited stored files stops without changing anything;
+`--force` explicitly replaces edits present when the update starts. Files added,
+removed, edited or whose executable bit changes during source loading stop the update,
+including when `--force` is set. Fetching and updating save the library
+copy only. Review it, then apply it to the intended agents with `skills apply`.
+
+An update that changes an existing path between a file and a directory is rejected;
+the stored files and source metadata keep their previous versions. Fetch that
+revision under a new skill name and review it, then disable the old name and apply
+the replacement to each selected agent. For example, to replace `review` in Claude:
+
+```sh
+zcalld library skills fetch review-next --git https://github.com/owner/skills.git \
+  --path skills/review --ref main --agents claude
+zcalld library skills show review-next --json
+zcalld library skills disable review
+zcalld library skills apply --agent claude --dry-run
+zcalld library skills apply --agent claude
+```
+
+Git objects are read directly into the bounded file transaction. Fetching does
+not check out the repository, invoke its filters or hooks, initialize submodules,
+install dependencies, or execute scripts. Binary resources and executable bits
+are preserved; symlinks and submodules are rejected. Temporary Git objects are
+removed when the operation ends. Git is required only for these on-demand commands
+and each subprocess has a 120-second deadline.
 
 `disable NAME` preserves the stored files and assignments while excluding that
 skill from subsequent applies. `enable NAME` restores its eligibility. `remove
@@ -251,7 +285,7 @@ accepted as proof that zcalld owns a live agent file.
 
 ## Boundaries retained from the source audit
 
-Magpie also provides market discovery, fetching/updating remote skills, WSL target
+Magpie also provides market discovery, WSL target
 mapping, profile-specific DSH YAML patches, MCP OAuth sign-in, an MCP hub, skill
 routing, cloud/peer synchronization, hooks, commands, subagents and rule automation.
 Those execution paths are not implemented by this native library module. Imported

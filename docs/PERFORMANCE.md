@@ -1,4 +1,8 @@
-# Performance reference: zcalld 0.1.0
+# Performance evidence
+
+The [2026-11-22 iteration report](validation/2026-11-22-magpie-iteration.md) compares the native gateway with Magpie on matched local JSON/SSE routing and measures large-request rewrites against the previous core. It records exact artifacts, accounting checks, process-tree memory and workload limits.
+
+## Historical reference: zcalld 0.1.0
 
 > These are historical **0.1.0 minimal-daemon** measurements. For the installed
 > **0.2.4 gateway with 0.1.5-2 compatibility workers**, see the

@@ -57,7 +57,9 @@ Configuration:
   profiles list|save|use
   library list|import|export|targets|apply|revert
   library mcp|instructions|skills <action> [--agent ID] [--dry-run]
-  usage summary|export
+  library skills fetch NAME --git URL [--ref REV] [--path DIR]
+  usage enable|disable|summary|export
+  usage summary [--model ROUTE] [--since UNIX_SECONDS] [--until UNIX_SECONDS]
 
 Migration and updates:
   migrate magpie [--source PATH] [--catalog FILE] [--apply]

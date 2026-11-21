@@ -1,0 +1,521 @@
+{
+  "captured_at_utc": "2026-11-21T20:32:28.258095+00:00",
+  "scope": "Linux native candidate; temporary configurations and local fixtures; no production service cutover",
+  "core_baseline_revision": "d22ccce",
+  "core_candidate_revision": "source changes committed with this report",
+  "gui_revision": "daa540307573d86838b108f4a76aa45230fca5f5",
+  "gui_binary_sha256": "e9f2517279d1232331edd827a82fdedca6e4814a4237cb78bb8222814c100123",
+  "ui_binary_hash_coverage": "All four Usage state reports record this binary hash. Recording reports do not record their own binary hash; their commands reference the same frozen candidate path.",
+  "locale_key_counts": {
+    "en": 282,
+    "zh-CN": 282,
+    "zh-TW": 282,
+    "ja": 282
+  },
+  "privacy_worker_sha256": "597c87d29ec7a0c9d04c28ea78931cf0d55f52b0ee827c7ee0c998bbe149e45d",
+  "dependencies": {
+    "core": [
+      {
+        "name": "zcall",
+        "version": "0.4.2",
+        "source": "git+https://github.com/LIghtJUNction/zcall.git#aaac54236f7ce0f4e1559c6e3b78d680d9dabf41"
+      },
+      {
+        "name": "zconv",
+        "version": "0.4.1",
+        "source": "git+https://github.com/LIghtJUNction/zconv.git#f78b97b7065bbb7cf9ddfd0914d7f2296bbfe712"
+      },
+      {
+        "name": "zplugin",
+        "version": "0.3.1",
+        "source": "git+https://github.com/LIghtJUNction/zplugin.git#592a1be623b81a775026c470e6f0efe91fcf78f3"
+      },
+      {
+        "name": "zsys",
+        "version": "0.1.1",
+        "source": "git+https://github.com/LIghtJUNction/zsys.git#808fcfdb73584ca7ca122e20b76f0209f56ab0f7"
+      }
+    ],
+    "gui": [
+      {
+        "name": "zgpui",
+        "version": "0.1.8",
+        "source": "git+https://github.com/LIghtJUNction/zgpui.git#eeb909e956ed0cff05e14525d4f29f5a78c553ec"
+      }
+    ]
+  },
+  "dependency_gitlinks": {
+    "vendor/zcall": "aaac54236f7ce0f4e1559c6e3b78d680d9dabf41",
+    "vendor/zconv": "f78b97b7065bbb7cf9ddfd0914d7f2296bbfe712",
+    "vendor/zplugin": "592a1be623b81a775026c470e6f0efe91fcf78f3",
+    "vendor/zsys": "808fcfdb73584ca7ca122e20b76f0209f56ab0f7",
+    "extensions/compat": "56a15b330384531b3a6c444190f53b6d3720bd5e",
+    "apps/zcall-gui/vendor/zgpui": "eeb909e956ed0cff05e14525d4f29f5a78c553ec"
+  },
+  "rust_tests": {
+    "core": {
+      "passed": 183,
+      "failed": 0,
+      "ignored": 0
+    },
+    "gui": {
+      "passed": 43,
+      "failed": 0,
+      "ignored": 0
+    }
+  },
+  "build_checks": {
+    "core": [
+      {
+        "step": "core-fmt-final",
+        "returncode": 0,
+        "seconds": 0.82
+      },
+      {
+        "step": "core-tests-final",
+        "returncode": 0,
+        "seconds": 10.85
+      },
+      {
+        "step": "core-clippy-final",
+        "returncode": 0,
+        "seconds": 1.37
+      },
+      {
+        "step": "candidate-core-final",
+        "returncode": 0,
+        "seconds": 91.03
+      }
+    ],
+    "gui": [
+      {
+        "step": "gui-dependency-final",
+        "returncode": 0,
+        "seconds": 1.67
+      },
+      {
+        "step": "gui-fmt-final",
+        "returncode": 0,
+        "seconds": 0.2
+      },
+      {
+        "step": "gui-tests-final",
+        "returncode": 0,
+        "seconds": 4.05
+      },
+      {
+        "step": "gui-clippy-final",
+        "returncode": 0,
+        "seconds": 1.57
+      },
+      {
+        "step": "candidate-gui-final",
+        "returncode": 0,
+        "seconds": 10.62
+      }
+    ]
+  },
+  "integration_checks": [
+    {
+      "step": "library-final",
+      "returncode": 0,
+      "seconds": 4.47,
+      "tests": 27,
+      "tail": "...........................\n----------------------------------------------------------------------\nRan 27 tests in 4.183s\n\nOK\n"
+    },
+    {
+      "step": "control-final",
+      "returncode": 0,
+      "seconds": 4.02,
+      "tests": 53,
+      "tail": "_record_has_bounded_memory (__main__.ControlTests.test_usage_large_record_has_bounded_memory) ... ok\ntest_usage_record_size_limit_and_line_endings (__main__.ControlTests.test_usage_record_size_limit_and_line_endings) ... ok\ntest_usage_rejects_unknown_or_ambiguous_options (__main__.ControlTests.test_usage_rejects_unknown_or_ambiguous_options) ... ok\n\n----------------------------------------------------------------------\nRan 53 tests in 3.731s\n\nOK\n"
+    },
+    {
+      "step": "usage-final",
+      "returncode": 0,
+      "seconds": 1.82,
+      "tests": 3,
+      "tail": "...\n----------------------------------------------------------------------\nRan 3 tests in 1.641s\n\nOK\n"
+    },
+    {
+      "step": "gateway-final",
+      "returncode": 0,
+      "seconds": 0.82,
+      "tests": 22,
+      "tail": "Tests.test_sigterm_is_graceful) ... ok\ntest_slow_client_backpressure_and_disconnect_cancel_upstream (__main__.GatewayTests.test_slow_client_backpressure_and_disconnect_cancel_upstream) ... ok\ntest_stream_arrives_before_upstream_finishes_and_preserves_utf8 (__main__.GatewayTests.test_stream_arrives_before_upstream_finishes_and_preserves_utf8) ... ok\n\n----------------------------------------------------------------------\nRan 22 tests in 0.665s\n\nOK\n"
+    },
+    {
+      "step": "routing-final",
+      "returncode": 0,
+      "seconds": 5.39,
+      "tests": 8,
+      "tail": "........\n----------------------------------------------------------------------\nRan 8 tests in 4.904s\n\nOK\n"
+    }
+  ],
+  "ui_checks": [
+    {
+      "step": "usage-ui-dark-final",
+      "returncode": 0,
+      "seconds": 12.43,
+      "tail": "},\n    {\n      \"case\": \"usage-legacy-usage-dark-zh-CN\",\n      \"retry_refreshed\": false,\n      \"read_only_calls\": 7,\n      \"renderer\": \"zcall-gui 0.1.6; renderer: llvmpipe (LLVM 23.1.5, 256 bits)\\nSmoke ready: state loaded and presented\\nPresented frames: 6\"\n    },\n    {\n      \"case\": \"usage-usage-unavailable-dark-zh-CN\",\n      \"retry_refreshed\": true,\n      \"read_only_calls\": 8,\n      \"renderer\": \"zcall-gui 0.1.6; renderer: llvmpipe (LLVM 23.1.5, 256 bits)\\nSmoke ready: state loaded and presented\\nPresented frames: 10\"\n    },\n    {\n      \"case\": \"usage-invalid-usage-dark-zh-CN\",\n      \"retry_refreshed\": true,\n      \"read_only_calls\": 8,\n      \"renderer\": \"zcall-gui 0.1.6; renderer: llvmpipe (LLVM 23.1.5, 256 bits)\\nSmoke ready: state loaded and presented\\nPresented frames: 10\"\n    }\n  ]\n}\n"
+    },
+    {
+      "step": "usage-ui-light-final",
+      "returncode": 0,
+      "seconds": 11.89,
+      "tail": "\"\n    },\n    {\n      \"case\": \"usage-legacy-usage-light-en\",\n      \"retry_refreshed\": false,\n      \"read_only_calls\": 7,\n      \"renderer\": \"zcall-gui 0.1.6; renderer: llvmpipe (LLVM 23.1.5, 256 bits)\\nSmoke ready: state loaded and presented\\nPresented frames: 6\"\n    },\n    {\n      \"case\": \"usage-usage-unavailable-light-en\",\n      \"retry_refreshed\": true,\n      \"read_only_calls\": 8,\n      \"renderer\": \"zcall-gui 0.1.6; renderer: llvmpipe (LLVM 23.1.5, 256 bits)\\nSmoke ready: state loaded and presented\\nPresented frames: 10\"\n    },\n    {\n      \"case\": \"usage-invalid-usage-light-en\",\n      \"retry_refreshed\": true,\n      \"read_only_calls\": 8,\n      \"renderer\": \"zcall-gui 0.1.6; renderer: llvmpipe (LLVM 23.1.5, 256 bits)\\nSmoke ready: state loaded and presented\\nPresented frames: 10\"\n    }\n  ]\n}\n"
+    },
+    {
+      "step": "recording-ui-dark-final",
+      "returncode": 0,
+      "seconds": 9.99,
+      "tail": "anguage\": \"en\",\n  \"window_pixels\": [\n    1080,\n    740\n  ],\n  \"enabled_without_restart\": true,\n  \"restart_requires_confirmation\": true,\n  \"pending_cleared_after_restart\": true,\n  \"disabled_history_retained\": true,\n  \"service_restart_calls\": 2,\n  \"usage_summary_calls\": 3,\n  \"accounting_fixture_sha256\": \"c2bb83f3ef6b596c32974eba084554344754ce821c47026f9de243f0141eff73\",\n  \"native_exit_code\": 0,\n  \"quit_input_exit_code\": 1,\n  \"quit_input_stderr\": \"X Error of failed request:  BadWindow (invalid Window parameter)\\n  Major opcode of failed request:  25 (X_SendEvent)\\n  Resource id in failed request:  0x400003\\n  Serial number of failed request:  55\\n  Current serial number in output stream:  56\",\n  \"scope\": \"Isolated native UI and stateful synthetic CLI; no service or provider was contacted.\"\n}\n"
+    },
+    {
+      "step": "recording-ui-light-final",
+      "returncode": 0,
+      "seconds": 17.28,
+      "tail": "{\n  \"passed\": true,\n  \"theme\": \"light\",\n  \"language\": \"en\",\n  \"window_pixels\": [\n    1080,\n    740\n  ],\n  \"enabled_without_restart\": true,\n  \"restart_requires_confirmation\": true,\n  \"pending_cleared_after_restart\": true,\n  \"disabled_history_retained\": true,\n  \"service_restart_calls\": 2,\n  \"usage_summary_calls\": 3,\n  \"accounting_fixture_sha256\": \"c2bb83f3ef6b596c32974eba084554344754ce821c47026f9de243f0141eff73\",\n  \"native_exit_code\": 0,\n  \"quit_input_exit_code\": 0,\n  \"quit_input_stderr\": \"\",\n  \"scope\": \"Isolated native UI and stateful synthetic CLI; no service or provider was contacted.\"\n}\n"
+    },
+    {
+      "step": "gui-navigation-final",
+      "returncode": 0,
+      "seconds": 24.65,
+      "tail": "rovider\",\n      \"selected_page\": 1,\n      \"header_sha256\": \"364b3441bf68b1fda3ebe9cb5102aa82e564c91ccfbdbe8bf69ae59bedd67c89\"\n    }\n  ],\n  \"provider_stdin_verified\": true,\n  \"actual_provider_state_verified\": false,\n  \"agent_apply_and_restore\": true,\n  \"catalog_uses_real_data_id\": true,\n  \"no_guessed_local_route\": true,\n  \"route_search_keyboard\": true,\n  \"route_picker_blocks_background\": true,\n  \"empty_catalog_disables_apply\": true,\n  \"unavailable_catalog_disables_apply\": false,\n  \"failed_catalog_retry\": false,\n  \"empty_catalog_add_provider\": true,\n  \"agent_pre_change_config_preserved\": false,\n  \"privacy_mode_verified\": true,\n  \"theme_language_persisted\": true,\n  \"restart_restores_dark\": true,\n  \"idle_cpu_ticks_2s\": 0,\n  \"clock_ticks_per_second\": 100,\n  \"calls\": 62,\n  \"host_input\": false\n}\n"
+    }
+  ],
+  "multilingual_checks": [
+    {
+      "step": "i18n-zh-TW-states",
+      "language": "zh-TW",
+      "theme": "light",
+      "returncode": 0,
+      "seconds": 11.49
+    },
+    {
+      "step": "i18n-zh-TW-recording",
+      "language": "zh-TW",
+      "theme": "light",
+      "returncode": 0,
+      "seconds": 9.03
+    },
+    {
+      "step": "i18n-ja-states",
+      "language": "ja",
+      "theme": "dark",
+      "returncode": 0,
+      "seconds": 10.69
+    },
+    {
+      "step": "i18n-ja-recording",
+      "language": "ja",
+      "theme": "dark",
+      "returncode": 0,
+      "seconds": 8.88
+    }
+  ],
+  "ui_reports": {
+    "ui-dark-final": {
+      "binary_sha256": "e9f2517279d1232331edd827a82fdedca6e4814a4237cb78bb8222814c100123",
+      "display": "private Xvfb",
+      "data": "synthetic local CLI only",
+      "host_input": false,
+      "cases": [
+        {
+          "case": "usage-usage-loading-dark-zh-CN",
+          "retry_refreshed": false,
+          "read_only_calls": 7,
+          "renderer": "zcall-gui 0.1.6; renderer: llvmpipe (LLVM 23.1.5, 256 bits)\nSmoke ready: state loaded and presented\nPresented frames: 5"
+        },
+        {
+          "case": "usage-healthy-dark-zh-CN",
+          "retry_refreshed": false,
+          "read_only_calls": 7,
+          "renderer": "zcall-gui 0.1.6; renderer: llvmpipe (LLVM 23.1.5, 256 bits)\nSmoke ready: state loaded and presented\nPresented frames: 6"
+        },
+        {
+          "case": "usage-empty-usage-dark-zh-CN",
+          "retry_refreshed": false,
+          "read_only_calls": 7,
+          "renderer": "zcall-gui 0.1.6; renderer: llvmpipe (LLVM 23.1.5, 256 bits)\nSmoke ready: state loaded and presented\nPresented frames: 6"
+        },
+        {
+          "case": "usage-recording-disabled-dark-zh-CN",
+          "retry_refreshed": false,
+          "read_only_calls": 7,
+          "renderer": "zcall-gui 0.1.6; renderer: llvmpipe (LLVM 23.1.5, 256 bits)\nSmoke ready: state loaded and presented\nPresented frames: 6"
+        },
+        {
+          "case": "usage-legacy-usage-dark-zh-CN",
+          "retry_refreshed": false,
+          "read_only_calls": 7,
+          "renderer": "zcall-gui 0.1.6; renderer: llvmpipe (LLVM 23.1.5, 256 bits)\nSmoke ready: state loaded and presented\nPresented frames: 6"
+        },
+        {
+          "case": "usage-usage-unavailable-dark-zh-CN",
+          "retry_refreshed": true,
+          "read_only_calls": 8,
+          "renderer": "zcall-gui 0.1.6; renderer: llvmpipe (LLVM 23.1.5, 256 bits)\nSmoke ready: state loaded and presented\nPresented frames: 10"
+        },
+        {
+          "case": "usage-invalid-usage-dark-zh-CN",
+          "retry_refreshed": true,
+          "read_only_calls": 8,
+          "renderer": "zcall-gui 0.1.6; renderer: llvmpipe (LLVM 23.1.5, 256 bits)\nSmoke ready: state loaded and presented\nPresented frames: 10"
+        }
+      ]
+    },
+    "ui-light-final": {
+      "binary_sha256": "e9f2517279d1232331edd827a82fdedca6e4814a4237cb78bb8222814c100123",
+      "display": "private Xvfb",
+      "data": "synthetic local CLI only",
+      "host_input": false,
+      "cases": [
+        {
+          "case": "usage-usage-loading-light-en",
+          "retry_refreshed": false,
+          "read_only_calls": 7,
+          "renderer": "zcall-gui 0.1.6; renderer: llvmpipe (LLVM 23.1.5, 256 bits)\nSmoke ready: state loaded and presented\nPresented frames: 6"
+        },
+        {
+          "case": "usage-healthy-light-en",
+          "retry_refreshed": false,
+          "read_only_calls": 7,
+          "renderer": "zcall-gui 0.1.6; renderer: llvmpipe (LLVM 23.1.5, 256 bits)\nSmoke ready: state loaded and presented\nPresented frames: 6"
+        },
+        {
+          "case": "usage-empty-usage-light-en",
+          "retry_refreshed": false,
+          "read_only_calls": 7,
+          "renderer": "zcall-gui 0.1.6; renderer: llvmpipe (LLVM 23.1.5, 256 bits)\nSmoke ready: state loaded and presented\nPresented frames: 6"
+        },
+        {
+          "case": "usage-recording-disabled-light-en",
+          "retry_refreshed": false,
+          "read_only_calls": 7,
+          "renderer": "zcall-gui 0.1.6; renderer: llvmpipe (LLVM 23.1.5, 256 bits)\nSmoke ready: state loaded and presented\nPresented frames: 6"
+        },
+        {
+          "case": "usage-legacy-usage-light-en",
+          "retry_refreshed": false,
+          "read_only_calls": 7,
+          "renderer": "zcall-gui 0.1.6; renderer: llvmpipe (LLVM 23.1.5, 256 bits)\nSmoke ready: state loaded and presented\nPresented frames: 6"
+        },
+        {
+          "case": "usage-usage-unavailable-light-en",
+          "retry_refreshed": true,
+          "read_only_calls": 8,
+          "renderer": "zcall-gui 0.1.6; renderer: llvmpipe (LLVM 23.1.5, 256 bits)\nSmoke ready: state loaded and presented\nPresented frames: 10"
+        },
+        {
+          "case": "usage-invalid-usage-light-en",
+          "retry_refreshed": true,
+          "read_only_calls": 8,
+          "renderer": "zcall-gui 0.1.6; renderer: llvmpipe (LLVM 23.1.5, 256 bits)\nSmoke ready: state loaded and presented\nPresented frames: 10"
+        }
+      ]
+    },
+    "recording-dark-final": {
+      "passed": true,
+      "theme": "dark",
+      "language": "en",
+      "window_pixels": [
+        1080,
+        740
+      ],
+      "enabled_without_restart": true,
+      "restart_requires_confirmation": true,
+      "pending_cleared_after_restart": true,
+      "disabled_history_retained": true,
+      "service_restart_calls": 2,
+      "usage_summary_calls": 3,
+      "accounting_fixture_sha256": "c2bb83f3ef6b596c32974eba084554344754ce821c47026f9de243f0141eff73",
+      "native_exit_code": 0,
+      "quit_input_exit_code": 1,
+      "quit_input_stderr": "X Error of failed request:  BadWindow (invalid Window parameter)\n  Major opcode of failed request:  25 (X_SendEvent)\n  Resource id in failed request:  0x400003\n  Serial number of failed request:  55\n  Current serial number in output stream:  56",
+      "scope": "Isolated native UI and stateful synthetic CLI; no service or provider was contacted."
+    },
+    "recording-light-final": {
+      "passed": true,
+      "theme": "light",
+      "language": "en",
+      "window_pixels": [
+        1080,
+        740
+      ],
+      "enabled_without_restart": true,
+      "restart_requires_confirmation": true,
+      "pending_cleared_after_restart": true,
+      "disabled_history_retained": true,
+      "service_restart_calls": 2,
+      "usage_summary_calls": 3,
+      "accounting_fixture_sha256": "c2bb83f3ef6b596c32974eba084554344754ce821c47026f9de243f0141eff73",
+      "native_exit_code": 0,
+      "quit_input_exit_code": 0,
+      "quit_input_stderr": "",
+      "scope": "Isolated native UI and stateful synthetic CLI; no service or provider was contacted."
+    },
+    "i18n-zh-TW-states": {
+      "binary_sha256": "e9f2517279d1232331edd827a82fdedca6e4814a4237cb78bb8222814c100123",
+      "display": "private Xvfb",
+      "data": "synthetic local CLI only",
+      "host_input": false,
+      "cases": [
+        {
+          "case": "usage-usage-loading-light-zh-TW",
+          "retry_refreshed": false,
+          "read_only_calls": 7,
+          "renderer": "zcall-gui 0.1.6; renderer: llvmpipe (LLVM 23.1.5, 256 bits)\nSmoke ready: state loaded and presented\nPresented frames: 6"
+        },
+        {
+          "case": "usage-healthy-light-zh-TW",
+          "retry_refreshed": false,
+          "read_only_calls": 7,
+          "renderer": "zcall-gui 0.1.6; renderer: llvmpipe (LLVM 23.1.5, 256 bits)\nSmoke ready: state loaded and presented\nPresented frames: 6"
+        },
+        {
+          "case": "usage-empty-usage-light-zh-TW",
+          "retry_refreshed": false,
+          "read_only_calls": 7,
+          "renderer": "zcall-gui 0.1.6; renderer: llvmpipe (LLVM 23.1.5, 256 bits)\nSmoke ready: state loaded and presented\nPresented frames: 6"
+        },
+        {
+          "case": "usage-recording-disabled-light-zh-TW",
+          "retry_refreshed": false,
+          "read_only_calls": 7,
+          "renderer": "zcall-gui 0.1.6; renderer: llvmpipe (LLVM 23.1.5, 256 bits)\nSmoke ready: state loaded and presented\nPresented frames: 6"
+        },
+        {
+          "case": "usage-legacy-usage-light-zh-TW",
+          "retry_refreshed": false,
+          "read_only_calls": 7,
+          "renderer": "zcall-gui 0.1.6; renderer: llvmpipe (LLVM 23.1.5, 256 bits)\nSmoke ready: state loaded and presented\nPresented frames: 6"
+        },
+        {
+          "case": "usage-usage-unavailable-light-zh-TW",
+          "retry_refreshed": true,
+          "read_only_calls": 8,
+          "renderer": "zcall-gui 0.1.6; renderer: llvmpipe (LLVM 23.1.5, 256 bits)\nSmoke ready: state loaded and presented\nPresented frames: 10"
+        },
+        {
+          "case": "usage-invalid-usage-light-zh-TW",
+          "retry_refreshed": true,
+          "read_only_calls": 8,
+          "renderer": "zcall-gui 0.1.6; renderer: llvmpipe (LLVM 23.1.5, 256 bits)\nSmoke ready: state loaded and presented\nPresented frames: 10"
+        }
+      ]
+    },
+    "i18n-ja-states": {
+      "binary_sha256": "e9f2517279d1232331edd827a82fdedca6e4814a4237cb78bb8222814c100123",
+      "display": "private Xvfb",
+      "data": "synthetic local CLI only",
+      "host_input": false,
+      "cases": [
+        {
+          "case": "usage-usage-loading-dark-ja",
+          "retry_refreshed": false,
+          "read_only_calls": 7,
+          "renderer": "zcall-gui 0.1.6; renderer: llvmpipe (LLVM 23.1.5, 256 bits)\nSmoke ready: state loaded and presented\nPresented frames: 6"
+        },
+        {
+          "case": "usage-healthy-dark-ja",
+          "retry_refreshed": false,
+          "read_only_calls": 7,
+          "renderer": "zcall-gui 0.1.6; renderer: llvmpipe (LLVM 23.1.5, 256 bits)\nSmoke ready: state loaded and presented\nPresented frames: 6"
+        },
+        {
+          "case": "usage-empty-usage-dark-ja",
+          "retry_refreshed": false,
+          "read_only_calls": 7,
+          "renderer": "zcall-gui 0.1.6; renderer: llvmpipe (LLVM 23.1.5, 256 bits)\nSmoke ready: state loaded and presented\nPresented frames: 6"
+        },
+        {
+          "case": "usage-recording-disabled-dark-ja",
+          "retry_refreshed": false,
+          "read_only_calls": 7,
+          "renderer": "zcall-gui 0.1.6; renderer: llvmpipe (LLVM 23.1.5, 256 bits)\nSmoke ready: state loaded and presented\nPresented frames: 6"
+        },
+        {
+          "case": "usage-legacy-usage-dark-ja",
+          "retry_refreshed": false,
+          "read_only_calls": 7,
+          "renderer": "zcall-gui 0.1.6; renderer: llvmpipe (LLVM 23.1.5, 256 bits)\nSmoke ready: state loaded and presented\nPresented frames: 6"
+        },
+        {
+          "case": "usage-usage-unavailable-dark-ja",
+          "retry_refreshed": true,
+          "read_only_calls": 8,
+          "renderer": "zcall-gui 0.1.6; renderer: llvmpipe (LLVM 23.1.5, 256 bits)\nSmoke ready: state loaded and presented\nPresented frames: 10"
+        },
+        {
+          "case": "usage-invalid-usage-dark-ja",
+          "retry_refreshed": true,
+          "read_only_calls": 8,
+          "renderer": "zcall-gui 0.1.6; renderer: llvmpipe (LLVM 23.1.5, 256 bits)\nSmoke ready: state loaded and presented\nPresented frames: 10"
+        }
+      ]
+    },
+    "i18n-zh-TW-recording": {
+      "passed": true,
+      "theme": "light",
+      "language": "zh-TW",
+      "window_pixels": [
+        1080,
+        740
+      ],
+      "enabled_without_restart": true,
+      "restart_requires_confirmation": true,
+      "pending_cleared_after_restart": true,
+      "disabled_history_retained": true,
+      "service_restart_calls": 2,
+      "usage_summary_calls": 3,
+      "accounting_fixture_sha256": "c2bb83f3ef6b596c32974eba084554344754ce821c47026f9de243f0141eff73",
+      "native_exit_code": 0,
+      "quit_input_exit_code": 1,
+      "quit_input_stderr": "X Error of failed request:  BadWindow (invalid Window parameter)\n  Major opcode of failed request:  25 (X_SendEvent)\n  Resource id in failed request:  0x400003\n  Serial number of failed request:  55\n  Current serial number in output stream:  56",
+      "scope": "Isolated native UI and stateful synthetic CLI; no service or provider was contacted."
+    },
+    "i18n-ja-recording": {
+      "passed": true,
+      "theme": "dark",
+      "language": "ja",
+      "window_pixels": [
+        1080,
+        740
+      ],
+      "enabled_without_restart": true,
+      "restart_requires_confirmation": true,
+      "pending_cleared_after_restart": true,
+      "disabled_history_retained": true,
+      "service_restart_calls": 2,
+      "usage_summary_calls": 3,
+      "accounting_fixture_sha256": "c2bb83f3ef6b596c32974eba084554344754ce821c47026f9de243f0141eff73",
+      "native_exit_code": 0,
+      "quit_input_exit_code": 1,
+      "quit_input_stderr": "X Error of failed request:  BadWindow (invalid Window parameter)\n  Major opcode of failed request:  25 (X_SendEvent)\n  Resource id in failed request:  0x400003\n  Serial number of failed request:  55\n  Current serial number in output stream:  56",
+      "scope": "Isolated native UI and stateful synthetic CLI; no service or provider was contacted."
+    }
+  },
+  "acceptance": [
+    {
+      "step": "integration-final",
+      "returncode": 0,
+      "seconds": 11.24
+    },
+    {
+      "step": "ui-final",
+      "returncode": 0,
+      "seconds": 77.27
+    },
+    {
+      "step": "magpie-comparison",
+      "returncode": 0,
+      "seconds": 130.39
+    },
+    {
+      "step": "rewrite-comparison",
+      "returncode": 0,
+      "seconds": 23.33
+    }
+  ]
+}

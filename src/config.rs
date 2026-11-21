@@ -136,7 +136,22 @@ impl Config {
         }
         if let Some((routing, groups)) = crate::extensions::routing_plugin(path)? {
             config.dynamic_routes = groups;
-            config.plugins.push(routing);
+            // The managed observer may already be explicitly configured. Loading
+            // the same library/configuration twice would write every usage row twice.
+            let same_path = |left: &Path, right: &Path| {
+                left == right
+                    || left
+                        .canonicalize()
+                        .ok()
+                        .zip(right.canonicalize().ok())
+                        .is_some_and(|(left, right)| left == right)
+            };
+            if !config.plugins.iter().any(|spec| {
+                same_path(&spec.path, &routing.path)
+                    && same_path(Path::new(&spec.config), Path::new(&routing.config))
+            }) {
+                config.plugins.push(routing);
+            }
         }
         if let Some(desktop) = crate::desktop::plugin(path)? {
             config.plugins.push(desktop);

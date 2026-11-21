@@ -102,7 +102,8 @@ zcalld desktop show --json
 zcalld profiles save work --json
 zcalld library list --json
 zcalld library targets --json
-zcalld usage summary --json
+zcalld usage enable --json
+zcalld usage summary --model group/work --json
 zcalld usage export --file usage-export.jsonl --json
 zcalld update check --json
 ```
@@ -119,7 +120,7 @@ Group definition files preserve member `weight` and `off` settings and literal r
 
 Agent edits preserve unrelated fields and keep exact-byte backups. Revert refuses to overwrite later user edits unless explicitly forced. Account controls operate on the actual private compatibility-host store. Community packages must be deliberately enabled; trusted native libraries run inside the daemon process.
 
-The [agent library](docs/LIBRARY.md) manages MCP definitions, instruction sets and skill files separately from gateway providers. Preview/apply/revert keeps exact owned bytes and refuses conflicting user edits. [Community MCP](docs/MCP.md) uses the optional HTTP plugin interface and the same shared Bun process as community providers; initialize and ping do not start that process. Caller-key permissions remain separate from upstream credentials.
+The [agent library](docs/LIBRARY.md) manages MCP definitions, instruction sets and skill files separately from gateway providers. Preview/apply/revert keeps exact owned bytes and refuses conflicting user edits. Skills can be fetched from an HTTPS or local Git repository, restricted to one subdirectory, and updated from a remembered branch, tag or commit. Fetching never checks out or runs repository code; later local edits require an explicit force before replacement. [Community MCP](docs/MCP.md) uses the optional HTTP plugin interface and the same shared Bun process as community providers; initialize and ping do not start that process. Caller-key permissions remain separate from upstream credentials.
 
 Privacy runs before model-group classification. JSON and fragmented SSE responses restore masked values. If a required privacy worker is unavailable, requests fail closed before upstream generation. With compatibility 0.1.3 or later, private daily audit files continue recording detection metadata and per-agent counters; request bodies and restoration maps are not stored. Audit writes have size and retention bounds. A disk-write failure is reported without discarding a valid redacted request. Group modes include order, smart, rotate, usage, pace, weight and drain; turn affinity is bounded. Explicit upstream 429/503 responses may select another member before downstream headers are committed, with at most four total attempts. An already-started stream or an ambiguous network failure is never replayed. [Advanced rules](docs/ROUTING.md) support IANA time zones, RE2 message conditions and trusted workspace conditions through a lazy optional worker; ordinary groups do not start it.
 
@@ -127,7 +128,7 @@ Privacy runs before model-group classification. JSON and fragmented SSE response
 
 `plugins quota list` reads local saved results. With the optional compatibility helper 0.1.6 or newer, `plugins quota refresh --account ACCOUNT_ID` explicitly updates one supported account; ordinary status and quota-list commands do not refresh credentials or contact providers.
 
-Usage summaries scan local `usage.jsonl` with bounded record buffering and skip records over 1 MiB, excluding LF or CRLF. `usage export --file PATH` copies the original bytes to a new file, refuses existing destinations and uses mode `0600` on Unix. If the source cannot be opened, no destination is created. See the [usage validation](docs/validation/usage-bounds-20261120.md) for boundary coverage and export limits.
+[Usage recording](docs/USAGE.md) counts upstream attempts, including retries, and exposes input, output, cache and reasoning token details. `usage enable` validates the native observer and destination before saving; `usage disable` retains history. Both report whether an explicit gateway restart is required. The GUI provides recording controls, retained totals, refresh and a separate restart action. Summaries support model and time filters, scan native or migrated history with bounded record buffering, and skip records over 1 MiB, excluding LF or CRLF. `usage export --file PATH` preserves original bytes and refuses existing destinations. See the [usage boundary validation](docs/validation/usage-bounds-20261120.md) and [Magpie alignment matrix](docs/MAGPIE_PARITY.md) for tested scope and remaining gaps.
 
 [Desktop integration](docs/DESKTOP.md) is a separate native plugin, disabled by default.
 It can keep the device awake while an agent is working and deliver usage, balance,

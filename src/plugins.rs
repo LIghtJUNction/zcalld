@@ -12,6 +12,7 @@ use zplugin::{Error, Plugin, UnloadPolicy};
 
 const MAX_PLUGINS: usize = 32;
 const MAX_CONFIG_BYTES: usize = 65_536;
+const REQUEST_BUFFER_HEADROOM: usize = 2048;
 
 #[derive(Clone)]
 pub struct PluginSpec {
@@ -585,25 +586,19 @@ impl Plugins {
         let mut changed: Option<Vec<u8>> = None;
         let mut output = Vec::new();
         for entry in &mut self.entries {
-            let input = changed.as_deref().unwrap_or(body);
-            let count = loop {
-                match entry.proxy.request(protocol, input, &mut output) {
-                    Ok(count) => break count,
-                    Err(Error::BufferTooSmall) if output.len() < max_body => {
-                        let capacity = if output.is_empty() {
-                            input.len().saturating_add(1024).max(256).min(max_body)
-                        } else {
-                            output.len().saturating_mul(2).min(max_body)
-                        };
-                        output.resize(capacity, 0);
-                    }
-                    Err(error) => return Err(hook_error(&entry.path, "request", error)),
-                }
-            };
-            if count > 0 {
-                let count = checked_count(count, output.len(), &entry.path)?;
-                changed = Some(output[..count].to_vec());
-            }
+            request_hook(
+                body,
+                &mut changed,
+                &mut output,
+                max_body,
+                &entry.path,
+                |input, output| entry.proxy.request(protocol, input, output),
+            )?;
+        }
+        if let Some(body) = &mut changed {
+            // A shrinking transform must not retain a previous, much larger
+            // request allocation for the lifetime of an upstream generation.
+            body.shrink_to(body.len().saturating_add(REQUEST_BUFFER_HEADROOM));
         }
         Ok(changed)
     }
@@ -634,6 +629,43 @@ fn validate_model(model: &str) -> Result<(), String> {
         return Err(format!(
             "model must contain 1..={MAX_MODEL_BYTES} UTF-8 bytes without control characters"
         ));
+    }
+    Ok(())
+}
+
+fn request_hook(
+    body: &[u8],
+    changed: &mut Option<Vec<u8>>,
+    output: &mut Vec<u8>,
+    max_body: usize,
+    path: &std::path::Path,
+    mut request: impl FnMut(&[u8], &mut [u8]) -> Result<u64, Error>,
+) -> Result<(), String> {
+    let input = changed.as_deref().unwrap_or(body);
+    let count = loop {
+        match request(input, output) {
+            Ok(count) => break count,
+            Err(Error::BufferTooSmall) if output.len() < max_body => {
+                let capacity = if output.is_empty() {
+                    input
+                        .len()
+                        .saturating_add(REQUEST_BUFFER_HEADROOM)
+                        .min(max_body)
+                } else {
+                    output.len().saturating_mul(2).min(max_body)
+                };
+                output.resize(capacity, 0);
+            }
+            Err(error) => return Err(hook_error(path, "request", error)),
+        }
+    };
+    if count > 0 {
+        let count = checked_count(count, output.len(), path)?;
+        output.truncate(count);
+        // Transfer ownership of the initialized bytes instead of cloning the
+        // entire request. The previous result becomes scratch for a later hook;
+        // input and output remain distinct throughout every plugin call.
+        *output = changed.replace(std::mem::take(output)).unwrap_or_default();
     }
     Ok(())
 }
@@ -821,6 +853,123 @@ mod tests {
             None
         );
         plugins.observe(200, 10, 2, 3).unwrap();
+    }
+
+    #[test]
+    fn request_hooks_reuse_owned_buffers_and_preserve_chain_order() {
+        let body = vec![b'a'; 1024 * 1024];
+        let mut changed = None;
+        let mut output = Vec::new();
+        let path = std::path::Path::new("/fixture/request-plugin");
+        let mut buffers = Vec::new();
+        for (before, after) in [(b'a', b'b'), (b'b', b'c'), (b'c', b'd'), (b'd', b'e')] {
+            let mut written = std::ptr::null();
+            request_hook(
+                &body,
+                &mut changed,
+                &mut output,
+                body.len(),
+                path,
+                |input, output| {
+                    assert_eq!(input.len(), body.len());
+                    assert!(input.iter().all(|byte| *byte == before));
+                    if output.len() < input.len() {
+                        return Err(Error::BufferTooSmall);
+                    }
+                    assert_ne!(input.as_ptr(), output.as_ptr());
+                    output[..input.len()].fill(after);
+                    written = output.as_ptr();
+                    Ok(input.len() as u64)
+                },
+            )
+            .unwrap();
+            let current = changed.as_deref().unwrap();
+            assert_eq!(
+                current.as_ptr(),
+                written,
+                "a completed hook must not copy its output"
+            );
+            assert!(current.iter().all(|byte| *byte == after));
+            buffers.push(written);
+
+            // A subsequent unchanged hook may inspect the current replacement
+            // and write scratch, but must not replace or corrupt that input.
+            request_hook(
+                &body,
+                &mut changed,
+                &mut output,
+                body.len(),
+                path,
+                |input, output| {
+                    assert!(input.iter().all(|byte| *byte == after));
+                    output.fill(b'x');
+                    Ok(0)
+                },
+            )
+            .unwrap();
+            assert_eq!(changed.as_ref().unwrap().as_ptr(), written);
+            assert!(changed.as_ref().unwrap().iter().all(|byte| *byte == after));
+        }
+        assert_eq!(buffers[0], buffers[2]);
+        assert_eq!(buffers[1], buffers[3]);
+        assert_ne!(buffers[0], buffers[1]);
+        assert!(body.iter().all(|byte| *byte == b'a'));
+    }
+
+    #[test]
+    fn unchanged_request_hook_keeps_original_borrowed() {
+        let body = b"{\"model\":\"local\"}";
+        let mut changed = None;
+        let mut output = Vec::new();
+        request_hook(
+            body,
+            &mut changed,
+            &mut output,
+            1024,
+            std::path::Path::new("/fixture/request-plugin"),
+            |input, output| {
+                assert_eq!(input.as_ptr(), body.as_ptr());
+                assert!(output.is_empty());
+                Ok(0)
+            },
+        )
+        .unwrap();
+        assert!(changed.is_none());
+        assert_eq!(output.capacity(), 0);
+    }
+
+    #[test]
+    fn failed_request_hook_never_publishes_partial_output() {
+        let body = b"original";
+        let path = std::path::Path::new("/fixture/request-plugin");
+        let mut changed = Some(b"previous".to_vec());
+        let mut output = Vec::new();
+        let mut sizes = Vec::new();
+        let error = request_hook(body, &mut changed, &mut output, 512, path, |_, output| {
+            sizes.push(output.len());
+            output.fill(b'x');
+            Err(Error::BufferTooSmall)
+        });
+        assert!(error.is_err());
+        assert_eq!(sizes, [0, 512]);
+        assert_eq!(changed.as_deref(), Some(b"previous".as_slice()));
+
+        let error = request_hook(body, &mut changed, &mut output, 512, path, |_, output| {
+            Ok(output.len() as u64 + 1)
+        });
+        assert!(error.unwrap_err().contains("exceeded its output buffer"));
+        assert_eq!(changed.as_deref(), Some(b"previous".as_slice()));
+
+        let error = request_hook(body, &mut changed, &mut output, 512, path, |_, output| {
+            output.fill(b'x');
+            Err(Error::PluginStatus(status::REQUEST_TOO_LARGE))
+        });
+        assert!(
+            error
+                .unwrap_err()
+                .contains("request exceeds plugin body limit")
+        );
+        assert_eq!(changed.as_deref(), Some(b"previous".as_slice()));
     }
 
     #[test]

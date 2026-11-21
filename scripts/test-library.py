@@ -2,10 +2,12 @@
 """Exercise library CRUD and native-file application in disposable agent homes."""
 import json
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import time
 import tomllib
 import unittest
 
@@ -387,6 +389,210 @@ class LibraryTests(unittest.TestCase):
         targets = {v["agent"]: v for v in self.cli("targets")["targets"]}
         self.assertFalse(targets["dsh"]["mcp"])
         self.assertTrue(targets["codex"]["skills"])
+
+    def git_skill(self):
+        repo = self.home / "skill-repository"
+        repo.mkdir()
+        subprocess.run(["git", "init", "--quiet", "--template=", str(repo)],
+                       env=self.env, check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(repo), "symbolic-ref", "HEAD", "refs/heads/main"],
+                       env=self.env, check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(repo), "config", "uploadpack.allowFilter", "true"],
+                       env=self.env, check=True, capture_output=True)
+        self.write("skill-repository/skills/review/SKILL.md", "---\nname: review\ndescription: fixture\n---\nFirst version\n")
+        self.write("skill-repository/skills/review/references/style.md", "Original style\n")
+        self.write("skill-repository/unrelated.txt", "Outside the selected skill\n")
+        return repo
+
+    def git_commit(self, repo):
+        for args in [["add", "--all"], ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--quiet", "-m", "Update fixture"]]:
+            subprocess.run(["git", "-C", str(repo), *args], env=self.env, check=True, capture_output=True)
+        return subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD"], env=self.env, text=True).strip()
+
+    @unittest.skipUnless(shutil.which("git"), "Git skill fixture")
+    def test_git_skill_fetch_update_and_local_edit_conflict(self):
+        repo = self.git_skill()
+        binary = repo / "skills/review/payload.bin"
+        binary.write_bytes(bytes(range(256)))
+        script = self.write("skill-repository/skills/review/scripts/check.sh", "#!/bin/sh\nexit 0\n")
+        if os.name != "nt":
+            script.chmod(0o755)
+        first = self.git_commit(repo)
+        self.cli("skills", "fetch", "review", "--git", repo, "--path", "skills/review", "--agents", "claude")
+        stored = self.directory / "library/skills/review"
+        shown = self.cli("skills", "show", "review")
+        self.assertEqual(shown["source"]["commit"], first)
+        self.assertEqual(shown["source"]["ref"], "HEAD")
+        self.assertEqual((stored / "payload.bin").read_bytes(), bytes(range(256)))
+        if os.name != "nt":
+            self.assertTrue((stored / "scripts/check.sh").stat().st_mode & 0o111)
+        self.assertFalse((stored / "unrelated.txt").exists())
+        self.assertFalse((stored / ".git").exists())
+        self.assertFalse((self.home / ".claude/skills/review").exists())
+        self.cli("skills", "apply", "--agent", "claude")
+        applied = self.home / ".claude/skills/review/SKILL.md"
+        original = applied.read_bytes()
+        (repo / "skills/review/SKILL.md").write_text("Second version\n")
+        (repo / "skills/review/references/style.md").unlink()
+        second = self.git_commit(repo)
+        self.cli("skills", "update", "review")
+        self.assertEqual(self.cli("skills", "show", "review")["source"]["commit"], second)
+        self.assertEqual((stored / "SKILL.md").read_text(), "Second version\n")
+        self.assertFalse((stored / "references/style.md").exists())
+        self.assertEqual(applied.read_bytes(), original)
+        local = self.write("local.md", "Local edits\n")
+        self.cli("skills", "write", "review", "--input", local)
+        before = (self.directory / "library.json").read_bytes()
+        self.cli("skills", "update", "review", ok=False)
+        self.assertEqual((self.directory / "library.json").read_bytes(), before)
+        self.assertEqual((stored / "SKILL.md").read_text(), "Local edits\n")
+        self.cli("skills", "update", "review", "--dir", repo / "skills/review", ok=False)
+        self.assertEqual((self.directory / "library.json").read_bytes(), before)
+        self.assertEqual((stored / "SKILL.md").read_text(), "Local edits\n")
+        self.cli("skills", "update", "review", "--force")
+        self.assertEqual((stored / "SKILL.md").read_text(), "Second version\n")
+        self.assertEqual(self.cli("skills", "show", "review")["agents"], ["claude"])
+        self.assertEqual(list(self.directory.glob(".skill-fetch-*")), [])
+
+    @unittest.skipUnless(shutil.which("git"), "Git skill fixture")
+    def test_git_skill_pinned_revision_and_failed_fetch_are_atomic(self):
+        repo = self.git_skill()
+        first = self.git_commit(repo)
+        self.cli("skills", "install", "review", "--git", repo, "--ref", first, "--path", "skills/review")
+        (repo / "skills/review/SKILL.md").write_text("New branch head\n")
+        second = self.git_commit(repo)
+        self.cli("skills", "update", "review")
+        self.assertEqual(self.cli("skills", "show", "review")["source"]["commit"], first)
+        self.cli("skills", "update", "review", "--ref", "main")
+        self.assertEqual(self.cli("skills", "show", "review")["source"]["commit"], second)
+        state = (self.directory / "library.json").read_bytes()
+        files = (self.directory / "library/skills/review/SKILL.md").read_bytes()
+        for args in [("--ref", "missing-ref"), ("--path", "../escape"), ("--path", "missing-skill")]:
+            self.cli("skills", "update", "review", *args, ok=False)
+            self.assertEqual((self.directory / "library.json").read_bytes(), state)
+            self.assertEqual((self.directory / "library/skills/review/SKILL.md").read_bytes(), files)
+        self.assertEqual(list(self.directory.glob(".skill-fetch-*")), [])
+
+    @unittest.skipUnless(shutil.which("git") and os.name != "nt", "Git fetch gate fixture")
+    def test_git_skill_edits_during_fetch_are_not_overwritten_even_with_force(self):
+        repo = self.git_skill()
+        self.git_commit(repo)
+        self.cli("skills", "fetch", "review", "--git", repo, "--path", "skills/review")
+        stored = self.directory / "library/skills/review"
+
+        def snapshot():
+            return {p.relative_to(stored): (p.read_bytes(), p.stat().st_mode & 0o777)
+                    for p in stored.rglob("*") if p.is_file()}
+
+        original = snapshot()
+        state = (self.directory / "library.json").read_bytes()
+        (repo / "skills/review/SKILL.md").write_text("New upstream version\n")
+        self.git_commit(repo)
+        real_git = shutil.which("git")
+        wrapper = self.write("gate-bin/git", f"""#!{sys.executable}
+import os, pathlib, sys, time
+if 'fetch' in sys.argv[1:] and '--depth=1' in sys.argv[1:]:
+    pathlib.Path(os.environ['LIBRARY_GIT_READY']).touch()
+    release = pathlib.Path(os.environ['LIBRARY_GIT_RELEASE'])
+    deadline = time.monotonic() + 10
+    while not release.exists():
+        if time.monotonic() >= deadline:
+            sys.exit('Git fixture gate timed out')
+        time.sleep(0.01)
+os.execv({real_git!r}, [{real_git!r}, *sys.argv[1:]])
+""")
+        wrapper.chmod(0o700)
+        for force in (False, True):
+            for change in ("content", "create", "remove", "mode", "metadata"):
+                with self.subTest(force=force, change=change):
+                    (self.directory / "library.json").write_bytes(state)
+                    expected_state = state
+                    shutil.rmtree(stored)
+                    for relative, (data, mode) in original.items():
+                        path = stored / relative
+                        path.parent.mkdir(parents=True, exist_ok=True)
+                        path.write_bytes(data)
+                        path.chmod(mode)
+                    if force:
+                        (stored / "SKILL.md").write_bytes(b"Known edit before update\n")
+                    ready = self.home / f"{force}-{change}.ready"
+                    release = self.home / f"{force}-{change}.release"
+                    env = dict(self.env, PATH=str(wrapper.parent) + os.pathsep + self.env.get("PATH", ""),
+                               LIBRARY_GIT_READY=str(ready), LIBRARY_GIT_RELEASE=str(release))
+                    process = subprocess.Popen(
+                        [str(BINARY), "library", "skills", "update", "review",
+                         *(["--force"] if force else []), "--config", str(self.config), "--json"],
+                        env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8")
+                    try:
+                        deadline = time.monotonic() + 10
+                        while not ready.exists() and process.poll() is None and time.monotonic() < deadline:
+                            time.sleep(0.01)
+                        self.assertTrue(ready.exists(), "update did not reach the Git fetch gate")
+                        if change == "content":
+                            (stored / "SKILL.md").write_bytes(b"Edit made during fetch\n")
+                        elif change == "create":
+                            (stored / "local.txt").write_bytes(b"Added during fetch\n")
+                        elif change == "remove":
+                            (stored / "references/style.md").unlink()
+                        elif change == "mode":
+                            (stored / "SKILL.md").chmod(0o700)
+                        else:
+                            edited_registry = json.loads(state)
+                            edited_registry["manual_note"] = "Edited during Git fetch"
+                            expected_state = (json.dumps(edited_registry, indent=2) + "\n").encode("utf-8")
+                            (self.directory / "library.json").write_bytes(expected_state)
+                        expected = snapshot()
+                        release.touch()
+                        stdout, stderr = process.communicate(timeout=20)
+                        self.assertNotEqual(process.returncode, 0, stdout + stderr)
+                        error = ("a library target changed while preparing the operation" if change == "metadata"
+                                 else "changed while loading its source")
+                        self.assertIn(error, stdout + stderr)
+                        self.assertEqual(snapshot(), expected)
+                        self.assertEqual((self.directory / "library.json").read_bytes(), expected_state)
+                        self.assertEqual(list(self.directory.glob(".skill-fetch-*")), [])
+                    finally:
+                        release.touch()
+                        if process.poll() is None:
+                            try:
+                                process.communicate(timeout=5)
+                            except subprocess.TimeoutExpired:
+                                process.kill()
+                                process.communicate()
+
+    @unittest.skipUnless(shutil.which("git"), "Git path type fixture")
+    def test_git_skill_file_directory_conversion_failure_is_atomic(self):
+        repo = self.git_skill()
+        self.git_commit(repo)
+        self.cli("skills", "fetch", "review", "--git", repo, "--path", "skills/review")
+        stored = self.directory / "library/skills/review"
+        state = (self.directory / "library.json").read_bytes()
+        before = {p.relative_to(stored): p.read_bytes() for p in stored.rglob("*") if p.is_file()}
+        references = repo / "skills/review/references"
+        (references / "style.md").unlink()
+        references.rmdir()
+        references.write_bytes(b"The directory is now a file\n")
+        (repo / "skills/review/SKILL.md").write_bytes(b"New upstream version\n")
+        self.git_commit(repo)
+        for args in ((), ("--force",)):
+            self.cli("skills", "update", "review", *args, ok=False)
+            self.assertEqual((self.directory / "library.json").read_bytes(), state)
+            self.assertEqual({p.relative_to(stored): p.read_bytes() for p in stored.rglob("*") if p.is_file()}, before)
+            self.assertTrue((stored / "references").is_dir())
+            self.assertEqual(list(self.directory.glob(".skill-fetch-*")), [])
+
+    @unittest.skipUnless(shutil.which("git") and os.name != "nt", "Git symlink fixture")
+    def test_git_skill_rejects_links_without_changing_existing_files(self):
+        repo = self.git_skill()
+        self.git_commit(repo)
+        self.cli("skills", "fetch", "review", "--git", repo, "--path", "skills/review")
+        before = (self.directory / "library.json").read_bytes()
+        (repo / "skills/review/escape").symlink_to("../../unrelated.txt")
+        self.git_commit(repo)
+        self.cli("skills", "update", "review", ok=False)
+        self.assertEqual((self.directory / "library.json").read_bytes(), before)
+        self.assertFalse((self.directory / "library/skills/review/escape").exists())
+        self.assertEqual(list(self.directory.glob(".skill-fetch-*")), [])
 
     @unittest.skipUnless(sys.platform == "linux", "flock contention fixture")
     def test_concurrent_library_writer_is_rejected(self):

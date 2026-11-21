@@ -26,6 +26,7 @@ mod digest;
 mod json;
 use json::{Value, object};
 mod advanced;
+mod usage;
 mod http {
     pub fn quote(value: &str) -> String {
         let mut out = String::from("\"");
@@ -113,8 +114,10 @@ struct RequestState {
     turn_key: String,
     input_tokens: u64,
     output_tokens: u64,
-    response_tail: Vec<u8>,
-    stream: bool,
+    cache_read_tokens: u64,
+    cache_write_tokens: u64,
+    reasoning_tokens: u64,
+    usage: usage::Collector,
     preferred: Vec<String>,
     excluded: Vec<String>,
     apply_effort: bool,
@@ -1177,13 +1180,24 @@ impl GatewayPlugin for Router {
             let record = object([
                 ("time", now().into()),
                 ("model", state.model.clone().into()),
-                ("upstream", state.selected.clone().into()),
+                (
+                    "upstream",
+                    if state.selected.is_empty() {
+                        state.model.clone()
+                    } else {
+                        state.selected.clone()
+                    }
+                    .into(),
+                ),
                 ("status", u64::from(status).into()),
                 ("elapsed_ms", elapsed_ms.into()),
                 ("input_bytes", input_bytes.into()),
                 ("output_bytes", output_bytes.into()),
                 ("input_tokens", state.input_tokens.into()),
                 ("output_tokens", state.output_tokens.into()),
+                ("cache_read_tokens", state.cache_read_tokens.into()),
+                ("cache_write_tokens", state.cache_write_tokens.into()),
+                ("reasoning_tokens", state.reasoning_tokens.into()),
             ])
             .stringify()
                 + "\n";
@@ -1286,7 +1300,10 @@ impl RetryPlugin for Router {
         state.excluded = excluded;
         state.input_tokens = 0;
         state.output_tokens = 0;
-        state.response_tail.clear();
+        state.cache_read_tokens = 0;
+        state.cache_write_tokens = 0;
+        state.reasoning_tokens = 0;
+        state.usage.reset(false);
         Ok(selected.len() as u64)
     }
 
@@ -1373,74 +1390,43 @@ impl zcalld_plugin_api::RecoveryPlugin for Router {
         state.excluded.retain(|excluded| excluded != model);
         state.input_tokens = 0;
         state.output_tokens = 0;
-        state.response_tail.clear();
+        state.cache_read_tokens = 0;
+        state.cache_write_tokens = 0;
+        state.reasoning_tokens = 0;
+        state.usage.reset(false);
         drop(state);
         Ok(count)
     }
 }
 
-fn extract_usage(value: &Value, state: &mut RequestState) {
-    let usage = if !matches!(value.get("usage"), Value::Null) {
-        value.get("usage")
-    } else if !matches!(value.get("response").get("usage"), Value::Null) {
-        value.get("response").get("usage")
-    } else {
-        value.get("usageMetadata")
-    };
-    let input = usage
-        .get("input_tokens")
-        .as_u64()
-        .or_else(|| usage.get("prompt_tokens").as_u64())
-        .or_else(|| usage.get("promptTokenCount").as_u64())
-        .unwrap_or(0);
-    let output = usage
-        .get("output_tokens")
-        .as_u64()
-        .or_else(|| usage.get("completion_tokens").as_u64())
-        .or_else(|| usage.get("candidatesTokenCount").as_u64())
-        .unwrap_or(0);
-    state.input_tokens = state.input_tokens.max(input);
-    state.output_tokens = state.output_tokens.max(output);
-}
 impl ResponsePlugin for Router {
     fn configure(&mut self, config: &str) -> Result<()> {
         self.configure_path(config)
     }
     fn begin(&mut self, _status: u32, content_type: &str) -> Result<()> {
         let mut state = self.current()?.borrow_mut();
-        state.stream = content_type.contains("text/event-stream");
-        state.response_tail.clear();
+        state
+            .usage
+            .reset(content_type.contains("text/event-stream"));
+        state.input_tokens = 0;
+        state.output_tokens = 0;
+        state.cache_read_tokens = 0;
+        state.cache_write_tokens = 0;
+        state.reasoning_tokens = 0;
         Ok(())
     }
-    fn write(&mut self, input: &[u8], final_chunk: u32, output: &mut [u8]) -> Result<u64> {
+    fn write(&mut self, input: &[u8], _final_chunk: u32, output: &mut [u8]) -> Result<u64> {
         if input.len() > output.len() {
             return Err(Error::BufferTooSmall);
         }
         let mut state = self.current()?.borrow_mut();
-        if state.response_tail.len() + input.len() > 65536 {
-            let keep = 65536usize.saturating_sub(input.len().min(65536));
-            if state.response_tail.len() > keep {
-                let remove = state.response_tail.len() - keep;
-                state.response_tail.drain(..remove);
-            }
-        }
-        state
-            .response_tail
-            .extend_from_slice(&input[input.len().saturating_sub(65536)..]);
-        if state.stream {
-            while let Some(end) = state.response_tail.iter().position(|b| *b == b'\n') {
-                let line: Vec<_> = state.response_tail.drain(..=end).collect();
-                if let Some(json) = line.strip_prefix(b"data: ")
-                    && let Ok(value) = json::parse(json)
-                {
-                    extract_usage(&value, &mut state);
-                }
-            }
-        } else if final_chunk != 0
-            && let Ok(value) = json::parse(&state.response_tail)
-        {
-            extract_usage(&value, &mut state);
-        }
+        state.usage.write(input);
+        let tokens = state.usage.tokens;
+        state.input_tokens = tokens.input;
+        state.output_tokens = tokens.output;
+        state.cache_read_tokens = tokens.cache_read;
+        state.cache_write_tokens = tokens.cache_write;
+        state.reasoning_tokens = tokens.reasoning;
         output[..input.len()].copy_from_slice(input);
         Ok(input.len() as u64)
     }
@@ -1492,15 +1478,9 @@ mod tests {
     }
     #[test]
     fn usage_counts_stream_final_totals() {
-        let mut state = RequestState::default();
-        extract_usage(
-            &invalid(json::parse(
-                br#"{"response":{"usage":{"input_tokens":9,"output_tokens":3}}}"#,
-            ))
-            .unwrap(),
-            &mut state,
-        );
-        assert_eq!((state.input_tokens, state.output_tokens), (9, 3));
+        let mut collector = usage::Collector::default();
+        collector.write(br#"{"response":{"usage":{"input_tokens":9,"output_tokens":3}}}"#);
+        assert_eq!((collector.tokens.input, collector.tokens.output), (9, 3));
     }
 
     #[test]

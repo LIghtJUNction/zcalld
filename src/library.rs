@@ -14,6 +14,9 @@ const END: &str = "<!-- zcalld:library:end -->";
 const MAX_TREE: usize = 32 * 1024 * 1024;
 const MAX_FILES: usize = 2048;
 
+#[path = "library_git.rs"]
+mod git_source;
+
 fn empty() -> Value {
     object([
         ("mcp", Value::Array(Vec::new())),
@@ -498,6 +501,7 @@ fn skills(context: &Context, state: &mut Value, args: &[String]) -> Result<(), S
                             ("enabled", (!off(v)).into()),
                             ("agents", v.get("agents").clone()),
                             ("source_kind", v.get("source").get("kind").clone()),
+                            ("source_commit", v.get("source").get("commit").clone()),
                             (
                                 "available",
                                 v.get("name")
@@ -520,16 +524,51 @@ fn skills(context: &Context, state: &mut Value, args: &[String]) -> Result<(), S
         .position(|v| v.get("name").as_str() == Some(id));
     let mut plan = Plan::default();
     match action {
-        "install" | "update" => {
-            if action == "install" && index.is_some() { return Err("skill already exists; use update".into()); }
+        "install" | "fetch" | "update" => {
+            if action != "update" && index.is_some() { return Err("skill already exists; use update".into()); }
             if action == "update" && index.is_none() { return Err("unknown skill".into()); }
-            let dir = control::option(args, "--dir")?.map(PathBuf::from).or_else(|| index.and_then(|i| entries[i].get("source").get("dir").as_str().map(PathBuf::from))).ok_or("install/update requires --dir; git-backed skills must be checked out at the desired revision first")?;
-            let tree = read_tree(&dir, true)?;
+            let directory = control::option(args, "--dir")?;
+            let explicit_git = control::option(args, "--git")?;
+            if directory.is_some() && explicit_git.is_some() { return Err("select one skill source: --dir or --git".into()); }
+            let previous = index.map(|i| entries[i].get("source")).unwrap_or(&Value::Null);
+            let git = explicit_git.or_else(|| if directory.is_none() && previous.get("kind").as_str() == Some("git") { previous.get("url").as_str() } else { None });
+            if action == "fetch" && git.is_none() { return Err("skills fetch requires --git URL".into()); }
             let dest = root.join(id);
-            if dest.exists() { for path in read_tree(&dest, false)?.keys() { if !tree.contains_key(path) { plan.set(dest.join(path), None)?; } } }
+            let current = if dest.exists() { read_tree(&dest, false)? } else { BTreeMap::new() };
+            if action == "update" && previous.get("kind").as_str() == Some("git")
+                && tree_record(&current) != *previous.get("files") && !args.iter().any(|arg| arg == "--force") {
+                return Err("stored Git skill has local changes; review them or use --force to replace them".into());
+            }
+            // Force accepts this snapshot, never edits made while loading the source.
+            for (path, file) in &current {
+                plan.original.insert(dest.join(path), Some(file.clone()));
+            }
+            let registry = context.directory.join("library.json");
+            plan.original.insert(registry.clone(), read_file(&registry)?);
+            let (tree, source) = if let Some(url) = git {
+                let reuse = explicit_git.is_none() || previous.get("url").as_str() == Some(url);
+                let revision = control::option(args, "--ref")?.or_else(|| if reuse { previous.get("ref").as_str() } else { None }).unwrap_or("HEAD");
+                let path = control::option(args, "--path")?.or_else(|| if reuse { previous.get("path").as_str() } else { None }).unwrap_or(".");
+                git_source::fetch(&context.directory, url, revision, path)?
+            } else {
+                if control::option(args, "--ref")?.is_some() || control::option(args, "--path")?.is_some() { return Err("--ref and --path require a Git skill source".into()); }
+                let dir = directory.map(PathBuf::from).or_else(|| previous.get("dir").as_str().map(PathBuf::from)).ok_or("install/update requires --dir PATH or --git URL")?;
+                let tree = read_tree(&dir, true)?;
+                let source = object([("kind", "folder".into()), ("dir", dir.canonicalize().map_err(|e| e.to_string())?.to_string_lossy().into_owned().into())]);
+                (tree, source)
+            };
+            let latest = if dest.exists() { read_tree(&dest, false)? } else { BTreeMap::new() };
+            if latest != current {
+                return Err("stored skill changed while loading its source; review the changes and retry".into());
+            }
+            drop(latest);
+            for path in tree.keys() {
+                plan.original.entry(dest.join(path)).or_insert(None);
+            }
+            for path in current.keys() { if !tree.contains_key(path) { plan.set(dest.join(path), None)?; } }
             for (path, data) in tree { plan.set(dest.join(path), Some(data))?; }
             let mut entry = index.map(|i| entries[i].clone()).unwrap_or_else(|| object([("name", id.into()), ("agents", Value::Array(Vec::new()))]));
-            entry.set("source", object([("kind", "folder".into()), ("dir", dir.canonicalize().map_err(|e| e.to_string())?.to_string_lossy().into_owned().into())]));
+            entry.set("source", source);
             entry.set("offHere", false.into()); entry.remove("pending"); entry.remove("missing");
             if let Some(agents) = agents_arg(args)? { entry.set("agents", agents); }
             if let Some(i) = index { entries[i] = entry; } else { entries.push(entry); }
@@ -540,7 +579,7 @@ fn skills(context: &Context, state: &mut Value, args: &[String]) -> Result<(), S
             plan.text(root.join(id).join("SKILL.md"), &control::read_text(Path::new(input))?)?;
             entries.push(object([("name", id.into()), ("agents", agents_arg(args)?.unwrap_or(Value::Array(Vec::new())))]));
         }
-        "show" => { let i = index.ok_or("unknown skill")?; let files = read_tree(&root.join(id), true)?; return control::emit(object([("name", id.into()), ("agents", entries[i].get("agents").clone()), ("enabled", (!off(&entries[i])).into()), ("files", Value::Array(files.keys().map(|p| resource_path(p).into()).collect()))])); }
+        "show" => { let i = index.ok_or("unknown skill")?; let files = read_tree(&root.join(id), true)?; let mut source = entries[i].get("source").clone(); source.remove("files"); return control::emit(object([("name", id.into()), ("agents", entries[i].get("agents").clone()), ("enabled", (!off(&entries[i])).into()), ("source", source), ("files", Value::Array(files.keys().map(|p| resource_path(p).into()).collect()))])); }
         "read" | "write" => {
             index.ok_or("unknown skill")?; let file = relative(control::option(args, "--file")?.unwrap_or("SKILL.md"))?; let path = root.join(id).join(file);
             if action == "read" { return control::emit(object([("text", control::read_text(&path)?.into())])); }
@@ -550,7 +589,7 @@ fn skills(context: &Context, state: &mut Value, args: &[String]) -> Result<(), S
         "remove" => { let i = index.ok_or("unknown skill")?; entries.remove(i); if root.join(id).exists() { for path in read_tree(&root.join(id), false)?.keys() { plan.set(root.join(id).join(path), None)?; } } }
         "enable" | "disable" => { let i = index.ok_or("unknown skill")?; entries[i].set("offHere", (action == "disable").into()); }
         "assign" => { let i = index.ok_or("unknown skill")?; entries[i].set("agents", agents_arg(args)?.ok_or("assign requires --agents")?); }
-        _ => return Err("skills expects list, show, create, install, update, read, write, remove, enable, disable, assign, apply or revert".into()),
+        _ => return Err("skills expects list, show, create, install, fetch, update, read, write, remove, enable, disable, assign, apply or revert".into()),
     }
     state.set("skills", Value::Array(entries));
     save(context, state, plan)

@@ -626,9 +626,198 @@ fn library(context: &Context, args: &[String]) -> Result<(), String> {
     agent_library::run(context, args)
 }
 
+/// The setting is persisted configuration, not a claim about a running daemon.
+fn usage_file(state: &Value, name: &str) -> Result<Option<std::path::PathBuf>, String> {
+    match state.get(name) {
+        Value::Null => Ok(None),
+        Value::String(value) if value.is_empty() => Ok(None),
+        Value::String(value) => {
+            let path = std::path::PathBuf::from(value);
+            if !path.is_absolute() || value.chars().any(char::is_control) {
+                return Err(format!("routing.json {name} must be an absolute file path"));
+            }
+            Ok(Some(path))
+        }
+        _ => Err(format!("routing.json {name} must be a file path string")),
+    }
+}
+
+fn usage_history(context: &Context, state: &Value) -> Result<std::path::PathBuf, String> {
+    Ok(usage_file(state, "usage_file")?
+        .or(usage_file(state, "usage_history_file")?)
+        .unwrap_or_else(|| context.directory.join("usage.jsonl")))
+}
+
+fn usage_recording(context: &Context, enabled: bool) -> Result<(), String> {
+    use std::io::Write;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static PROBE: AtomicU64 = AtomicU64::new(1);
+
+    let path = context.directory.join("routing.json");
+    let metadata = match fs::symlink_metadata(&path) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+            return Err("refusing to replace a routing configuration symlink or non-file".into());
+        }
+        Ok(metadata) => Some(metadata),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error.to_string()),
+    };
+    let mut state = routing_state(context)?;
+    let original = state.stringify();
+    let configured = usage_file(&state, "usage_file")?;
+    let native = if enabled {
+        // Discover the library and validate the ordinary configuration before
+        // staging files. Native configure below validates the routing settings.
+        let native = crate::extensions::library("plugin_routing")?;
+        let directory = fs::canonicalize(&context.directory).map_err(|e| e.to_string())?;
+        crate::config::Config::parse(&control::config_text(context)?, &directory)?;
+        let target = usage_history(context, &state)?;
+        let target = if target.is_absolute() {
+            target
+        } else {
+            directory.join("usage.jsonl")
+        };
+        if !target.parent().is_some_and(std::path::Path::is_dir) {
+            return Err("usage history directory does not exist".into());
+        }
+        if target.exists() && !target.is_file() {
+            return Err("usage history path is not a regular file".into());
+        }
+        if !target.exists() {
+            // A valid path is not necessarily writable. Probe the target directory
+            // with an empty private file, without creating or truncating the log.
+            let write_probe = target.parent().unwrap().join(format!(
+                ".usage-write-probe-{}-{}",
+                std::process::id(),
+                PROBE.fetch_add(1, Ordering::Relaxed)
+            ));
+            let mut options = fs::OpenOptions::new();
+            options.write(true).create_new(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.mode(0o600);
+            }
+            drop(options.open(&write_probe).map_err(|e| e.to_string())?);
+            fs::remove_file(&write_probe).map_err(|e| e.to_string())?;
+        }
+        if target.is_file() {
+            // Check append access without changing the retained history bytes.
+            fs::OpenOptions::new()
+                .append(true)
+                .open(&target)
+                .map_err(|e| e.to_string())?;
+        }
+        state.set("usage_file", target.to_string_lossy().into_owned().into());
+        state.remove("usage_history_file");
+        Some(native)
+    } else {
+        if let Some(target) = configured {
+            // Keep a custom log readable and reusable while recording is disabled.
+            state.set(
+                "usage_history_file",
+                target.to_string_lossy().into_owned().into(),
+            );
+        }
+        state.remove("usage_file");
+        None
+    };
+    let next = state.stringify();
+    let changed = next != original;
+    if changed || enabled {
+        let probe = fs::canonicalize(&context.directory)
+            .map_err(|e| e.to_string())?
+            .join(format!(
+                ".usage-probe-{}-{}.json",
+                std::process::id(),
+                PROBE.fetch_add(1, Ordering::Relaxed)
+            ));
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            options.access_mode(0x40000000 | 0x00040000);
+        }
+        let file = options.open(&probe).map_err(|e| e.to_string())?;
+        let result = (|| {
+            let mut file = file;
+            #[cfg(windows)]
+            crate::extensions::privacy_windows::protect(&file)?;
+            file.write_all(next.as_bytes())
+                .and_then(|_| file.sync_all())
+                .map_err(|e| e.to_string())?;
+            drop(file);
+            if let Some(native) = native {
+                // Preflight against the staged file before publishing the setting.
+                let _plugins = crate::plugins::Plugins::load(&[crate::plugins::PluginSpec {
+                    path: native,
+                    config: probe.to_string_lossy().into_owned(),
+                }])
+                .map_err(|error| {
+                    format!("usage recording preflight failed; configuration unchanged: {error}")
+                })?;
+            }
+            if changed {
+                if let Some(metadata) = metadata {
+                    fs::set_permissions(&probe, metadata.permissions())
+                        .map_err(|e| e.to_string())?;
+                }
+                control::backup(context, std::slice::from_ref(&path), "usage-recording")?;
+                fs::rename(&probe, &path).map_err(|e| e.to_string())?;
+                #[cfg(unix)]
+                fs::File::open(&context.directory)
+                    .and_then(|f| f.sync_all())
+                    .map_err(|e| e.to_string())?;
+            }
+            Ok::<(), String>(())
+        })();
+        let _ = fs::remove_file(&probe);
+        result?;
+    }
+    control::emit(object([
+        ("ok", true.into()),
+        ("recording_configured", enabled.into()),
+        ("restart_required", changed.into()),
+    ]))
+}
+
 fn usage(context: &Context, args: &[String]) -> Result<(), String> {
-    let path = context.directory.join("usage.jsonl");
-    if args.first().is_some_and(|v| v == "export") {
+    let action = args.first().map(String::as_str).unwrap_or("summary");
+    if matches!(action, "enable" | "disable") {
+        if args.len() != 1 {
+            return Err("usage enable and disable do not accept options".into());
+        }
+        return usage_recording(context, action == "enable");
+    }
+    if !matches!(action, "summary" | "export") {
+        return Err("usage expects enable, disable, summary or export".into());
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    let options = args.get(1..).unwrap_or(&[]);
+    for pair in options.chunks(2) {
+        let name = pair[0].as_str();
+        let allowed = if action == "export" {
+            name == "--file"
+        } else {
+            matches!(name, "--model" | "--since" | "--until")
+        };
+        if !allowed || !seen.insert(name) {
+            return Err("unknown or duplicate usage option".into());
+        }
+        if pair.len() != 2 || pair[1].is_empty() || pair[1].starts_with("--") {
+            return Err("usage option requires a value".into());
+        }
+    }
+    let state = routing_state(context)?;
+    let recording_configured = usage_file(&state, "usage_file")?.is_some();
+    let path = usage_history(context, &state)?;
+    if action == "export" {
         let target = control::option(args, "--file")?.ok_or("usage export requires --file")?;
         // A missing source must not leave an empty destination behind.
         let mut input = fs::File::open(&path).map_err(|e| e.to_string())?;
@@ -643,12 +832,30 @@ fn usage(context: &Context, args: &[String]) -> Result<(), String> {
         std::io::copy(&mut input, &mut output).map_err(|e| e.to_string())?;
         return control::emit(object([("ok", true.into())]));
     }
+    let model = control::option(args, "--model")?;
+    let bound = |name| {
+        control::option(args, name)?
+            .map(|value| {
+                value
+                    .parse::<u64>()
+                    .map_err(|_| format!("{name} requires Unix seconds"))
+            })
+            .transpose()
+    };
+    let since = bound("--since")?;
+    let until = bound("--until")?;
+    if since.zip(until).is_some_and(|(start, end)| start >= end) {
+        return Err("--until must be later than --since".into());
+    }
     use std::io::{BufRead, BufReader, Read};
     const MAX_LINE_BYTES: usize = 1024 * 1024;
     let mut requests = 0u64;
     let mut failed = 0u64;
     let mut input = 0u64;
     let mut output = 0u64;
+    let mut cache_read = 0u64;
+    let mut cache_write = 0u64;
+    let mut reasoning = 0u64;
     if path.exists() {
         let mut reader = BufReader::new(fs::File::open(&path).map_err(|e| e.to_string())?);
         let mut line = Vec::new();
@@ -679,6 +886,23 @@ fn usage(context: &Context, args: &[String]) -> Result<(), String> {
             std::str::from_utf8(&line)
                 .map_err(|_| "stream did not contain valid UTF-8".to_owned())?;
             if let Ok(v) = json::parse(&line) {
+                if v.as_object().is_none() {
+                    continue;
+                }
+                let requested = v.get("req").as_str().or_else(|| v.get("model").as_str());
+                if model.is_some_and(|model| requested != Some(model)) {
+                    continue;
+                }
+                if since.is_some() || until.is_some() {
+                    let Some(time) = usage_timestamp(&v) else {
+                        continue;
+                    };
+                    if since.is_some_and(|start| time < start)
+                        || until.is_some_and(|end| time >= end)
+                    {
+                        continue;
+                    }
+                }
                 requests += 1;
                 if v.get("status").as_u64().is_some_and(|v| v >= 400) {
                     failed += 1;
@@ -695,6 +919,24 @@ fn usage(context: &Context, args: &[String]) -> Result<(), String> {
                         .or_else(|| v.get("out").as_u64())
                         .unwrap_or(0),
                 );
+                cache_read = cache_read.saturating_add(
+                    v.get("cache_read_tokens")
+                        .as_u64()
+                        .or_else(|| v.get("cache_read").as_u64())
+                        .unwrap_or(0),
+                );
+                cache_write = cache_write.saturating_add(
+                    v.get("cache_write_tokens")
+                        .as_u64()
+                        .or_else(|| v.get("cache_write").as_u64())
+                        .unwrap_or(0),
+                );
+                reasoning = reasoning.saturating_add(
+                    v.get("reasoning_tokens")
+                        .as_u64()
+                        .or_else(|| v.get("reasoning").as_u64())
+                        .unwrap_or(0),
+                );
             }
         }
     }
@@ -703,8 +945,85 @@ fn usage(context: &Context, args: &[String]) -> Result<(), String> {
         ("failed", failed.into()),
         ("input_tokens", input.into()),
         ("output_tokens", output.into()),
+        ("cache_read_tokens", cache_read.into()),
+        ("cache_write_tokens", cache_write.into()),
+        ("reasoning_tokens", reasoning.into()),
+        ("recording_configured", recording_configured.into()),
         ("source", path.to_string_lossy().into_owned().into()),
     ]))
+}
+
+// Native records use Unix seconds; migrated Magpie rows use RFC 3339 in `t`.
+fn usage_timestamp(row: &Value) -> Option<u64> {
+    if let Some(time) = row.get("time").as_u64().or_else(|| row.get("t").as_u64()) {
+        return Some(time);
+    }
+    let value = row.get("t").as_str().or_else(|| row.get("time").as_str())?;
+    let bytes = value.as_bytes();
+    if bytes.len() < 20
+        || bytes.get(4) != Some(&b'-')
+        || bytes.get(7) != Some(&b'-')
+        || !matches!(bytes.get(10), Some(b'T' | b't'))
+        || bytes.get(13) != Some(&b':')
+        || bytes.get(16) != Some(&b':')
+    {
+        return None;
+    }
+    let part = |start, end| -> Option<i64> {
+        let bytes = bytes.get(start..end)?;
+        if !bytes.iter().all(u8::is_ascii_digit) {
+            return None;
+        }
+        std::str::from_utf8(bytes).ok()?.parse().ok()
+    };
+    let (mut year, month, day) = (part(0, 4)?, part(5, 7)?, part(8, 10)?);
+    let (hour, minute, second) = (part(11, 13)?, part(14, 16)?, part(17, 19)?);
+    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let days = match month {
+        2 => {
+            if leap {
+                29
+            } else {
+                28
+            }
+        }
+        4 | 6 | 9 | 11 => 30,
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        _ => return None,
+    };
+    if !(1..=days).contains(&day) || hour > 23 || minute > 59 || second > 59 {
+        return None;
+    }
+    let mut end = 19;
+    if bytes.get(end) == Some(&b'.') {
+        end += 1;
+        let begin = end;
+        while bytes.get(end).is_some_and(u8::is_ascii_digit) {
+            end += 1;
+        }
+        if begin == end {
+            return None;
+        }
+    }
+    let zone = bytes.get(end..)?;
+    let offset = if matches!(zone, b"Z" | b"z") {
+        0
+    } else if zone.len() == 6 && matches!(zone[0], b'+' | b'-') && zone[3] == b':' {
+        let (hours, minutes) = (part(end + 1, end + 3)?, part(end + 4, end + 6)?);
+        if hours > 23 || minutes > 59 {
+            return None;
+        }
+        (hours * 3600 + minutes * 60) * if zone[0] == b'-' { -1 } else { 1 }
+    } else {
+        return None;
+    };
+    year -= i64::from(month <= 2);
+    let era = year.div_euclid(400);
+    let y = year - era * 400;
+    let m = month + if month > 2 { -3 } else { 9 };
+    let day_of_year = (153 * m + 2) / 5 + day - 1;
+    let epoch_days = era * 146097 + y * 365 + y / 4 - y / 100 + day_of_year - 719468;
+    u64::try_from(epoch_days * 86400 + hour * 3600 + minute * 60 + second - offset).ok()
 }
 
 #[cfg(test)]

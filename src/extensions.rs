@@ -227,7 +227,7 @@ pub fn privacy_plugin(config_path: &Path) -> Result<Option<PluginSpec>, String> 
     }))
 }
 
-/// Group routing runs after privacy, so an optional decision provider sees masked text.
+/// Group routing and optional usage collection run after privacy.
 pub fn routing_plugin(config_path: &Path) -> Result<Option<(PluginSpec, Vec<String>)>, String> {
     let path = root(config_path)?
         .parent()
@@ -237,7 +237,12 @@ pub fn routing_plugin(config_path: &Path) -> Result<Option<(PluginSpec, Vec<Stri
         return Ok(None);
     }
     let value = state_json::read(&path)?;
-    if value.get("groups").as_array().is_empty() {
+    if value.get("groups").as_array().is_empty()
+        && !value
+            .get("usage_file")
+            .as_str()
+            .is_some_and(|path| !path.is_empty())
+    {
         return Ok(None);
     }
     let groups = value

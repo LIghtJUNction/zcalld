@@ -950,6 +950,95 @@ class ControlTests(unittest.TestCase):
         self.assertTrue(listed["deciders"][0]["credential_configured"])
 
 
+    def test_usage_enable_disable_preserves_groups_history_and_permissions(self):
+        self.assertFalse(self.cli("usage", "summary")["recording_configured"])
+        self.assertEqual(self.cli("usage", "disable"),
+                         {"ok": True, "recording_configured": False, "restart_required": False})
+        self.assertFalse((self.directory / "routing.json").exists())
+        self.cli("groups", "set", "group/work", "--members", "fixture/model")
+        routing = self.directory / "routing.json"
+        state = json.loads(routing.read_text(encoding="utf-8"))
+        history = self.home / "retained-usage.jsonl"
+        history.write_bytes(b'{"input_tokens":11,"output_tokens":7,"status":200}\n')
+        state.update(usage_history_file=str(history), retained={"setting": "unchanged"})
+        routing.write_text(json.dumps(state), encoding="utf-8")
+        if os.name == "posix":
+            routing.chmod(0o640)
+            history.chmod(0o600)
+        config_before, history_before = self.config.read_bytes(), history.read_bytes()
+        enabled = self.cli("usage", "enable")
+        self.assertEqual(enabled,
+                         {"ok": True, "recording_configured": True, "restart_required": True})
+        enabled_state = json.loads(routing.read_text(encoding="utf-8"))
+        self.assertEqual(enabled_state["groups"], state["groups"])
+        self.assertEqual(enabled_state["retained"], state["retained"])
+        self.assertEqual(enabled_state["usage_file"], str(history))
+        self.assertNotIn("usage_history_file", enabled_state)
+        self.assertEqual(self.cli("usage", "enable"),
+                         {"ok": True, "recording_configured": True, "restart_required": False})
+        self.check_config()
+        disabled = self.cli("usage", "disable")
+        self.assertEqual(disabled,
+                         {"ok": True, "recording_configured": False, "restart_required": True})
+        disabled_state = json.loads(routing.read_text(encoding="utf-8"))
+        self.assertNotIn("usage_file", disabled_state)
+        self.assertEqual(disabled_state, state)
+        self.assertEqual(self.cli("usage", "disable")["restart_required"], False)
+        totals = self.cli("usage", "summary")
+        self.assertFalse(totals["recording_configured"])
+        self.assertEqual((totals["requests"], totals["input_tokens"], totals["source"]),
+                         (1, 11, str(history)))
+        export = self.home / "retained-export.jsonl"
+        self.cli("usage", "export", "--file", str(export))
+        self.assertEqual(export.read_bytes(), history_before)
+        self.assertEqual(self.config.read_bytes(), config_before)
+        self.assertEqual(history.read_bytes(), history_before)
+        if os.name == "posix":
+            self.assertEqual(routing.stat().st_mode & 0o777, 0o640)
+            self.assertEqual(history.stat().st_mode & 0o777, 0o600)
+        self.check_config()
+
+    def test_usage_enable_failure_preserves_configuration_and_history(self):
+        routing = self.directory / "routing.json"
+        history = self.directory / "usage.jsonl"
+        history.write_bytes(b'{"in":3}\n')
+        cases = [[], {"groups": {}}, {"groups": [], "usage_file": 7},
+                 {"groups": [], "usage_file": "relative.jsonl"},
+                 {"groups": [], "usage_file": str(self.home / "missing" / "usage.jsonl")},
+                 {"groups": [{"name": "group/work", "mode": "invalid",
+                               "members": [{"model": "fixture/model"}]}]}]
+        if os.name == "posix" and os.geteuid() != 0:
+            readonly = self.home / "readonly-history"
+            readonly.mkdir(mode=0o500)
+            cases.append({"groups": [], "usage_file": str(readonly / "usage.jsonl")})
+        for state in cases:
+            with self.subTest(state=state):
+                routing.write_text(json.dumps(state), encoding="utf-8")
+                before = self.directory_state(self.directory)
+                self.cli("usage", "enable", ok=False)
+                self.assertEqual(self.directory_state(self.directory), before)
+        routing.write_text('{"groups":[]}', encoding="utf-8")
+        config_before = self.config.read_bytes()
+        self.config.write_bytes(config_before.replace(b"protocol = chat", b"protocol = invalid"))
+        before = self.directory_state(self.directory)
+        self.cli("usage", "enable", ok=False)
+        self.assertEqual(self.directory_state(self.directory), before)
+        self.config.write_bytes(config_before)
+        missing = self.home / "missing-native-library"
+        invalid = self.home / "invalid-native-library"
+        invalid.write_bytes(b"not a native library")
+        for native in (missing, invalid):
+            with self.subTest(native=native):
+                self.env["ZCALLD_PLUGIN_ROUTING_PLUGIN"] = str(native)
+                before = self.directory_state(self.directory)
+                self.cli("usage", "enable", ok=False)
+                self.assertEqual(self.directory_state(self.directory), before)
+        # A broken or uninstalled plugin must not trap the user in enabled state.
+        routing.write_text(json.dumps({"groups": [], "usage_file": str(history)}), encoding="utf-8")
+        self.assertTrue(self.cli("usage", "summary")["recording_configured"])
+        self.assertFalse(self.cli("usage", "disable")["recording_configured"])
+        self.assertEqual(history.read_bytes(), b'{"in":3}\n')
+
     def test_usage_record_size_limit_and_line_endings(self):
         limit = 1024 * 1024
         record = b'{"input_tokens":3,"output_tokens":4,"status":503}'
@@ -973,6 +1062,46 @@ class ControlTests(unittest.TestCase):
     def test_usage_invalid_utf8_is_an_error(self):
         (self.directory / "usage.jsonl").write_bytes(b'{"in":1}\n\xff\n')
         self.cli("usage", "summary", ok=False)
+
+    def test_usage_cache_reasoning_and_filtered_migrated_records(self):
+        rows = [
+            {"time": 1767312000, "model": "group/work", "input_tokens": 10,
+             "output_tokens": 3, "cache_read_tokens": 6, "cache_write_tokens": 2,
+             "reasoning_tokens": 1, "status": 200},
+            {"t": "2026-01-02T00:00:01.123Z", "req": "group/work", "model": "actual",
+             "in": 20, "out": 7, "cache_read": 9, "cache_write": 4,
+             "reasoning": 3, "status": 503},
+            {"t": "2026-01-02T08:00:02+08:00", "req": "group/other", "model": "actual",
+             "in": 30, "out": 11, "status": 200},
+            {"model": "group/work", "in": 40, "out": 13, "status": 200},
+        ]
+        # The native timestamp is exactly 2026-01-02T00:00:00Z.
+        rows[0]["time"] = 1767312000
+        (self.directory / "usage.jsonl").write_text(
+            "\n".join(json.dumps(row) for row in rows) + "\nnull\n123\n[]\n",
+            encoding="utf-8", newline="\n")
+        totals = self.cli("usage", "summary")
+        self.assertEqual(tuple(totals[key] for key in
+            ("requests", "failed", "input_tokens", "output_tokens", "cache_read_tokens",
+             "cache_write_tokens", "reasoning_tokens")), (4, 1, 100, 34, 15, 6, 4))
+        filtered = self.cli("usage", "summary", "--since", "1767312000",
+                            "--until", "1767312002", "--model", "group/work")
+        self.assertEqual(tuple(filtered[key] for key in
+            ("requests", "failed", "input_tokens", "output_tokens", "cache_read_tokens",
+             "cache_write_tokens", "reasoning_tokens")), (2, 1, 30, 10, 15, 6, 4))
+        other = self.cli("usage", "summary", "--since", "1767312002",
+                         "--until", "1767312003")
+        self.assertEqual((other["requests"], other["input_tokens"]), (1, 30))
+
+    def test_usage_rejects_unknown_or_ambiguous_options(self):
+        for args in [("unknown",), ("summary", "--since", "yesterday"),
+                     ("summary", "--since", "20", "--until", "20"),
+                     ("summary", "--model"),
+                     ("summary", "--model", "a", "--model", "b"),
+                     ("summary", "--provider", "a"),
+                     ("enable", "--file", "unused"), ("disable", "unexpected")]:
+            with self.subTest(args=args):
+                self.cli("usage", *args, ok=False)
 
     @unittest.skipUnless(sys.platform.startswith("linux"), "requires Linux address-space limits")
     def test_usage_large_record_has_bounded_memory(self):

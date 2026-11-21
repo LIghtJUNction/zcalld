@@ -1,0 +1,4154 @@
+{
+  "schema_version": 1,
+  "measured_at_utc": "2026-11-21T20:21:56.252382+00:00",
+  "script_sha256": "b3fe6a23a90df4bde4713eaf6043c75d8ec42844e01fb2ac734bcb0580da915e",
+  "artifacts": {
+    "baseline": {
+      "binary": "/home/lightjunction/Documents/GITHUB/project_z/zcalld/dist/magpie-parity-20261122/dist/iteration-evidence/zcalld-baseline",
+      "binary_sha256": "f99c11d3ae89f0d0431b51fe521e89eed4deb3402399c6d40da9882ab6f6ae34",
+      "binary_bytes": 2903088,
+      "version": "zcalld 0.4.4",
+      "routing_plugin": "/home/lightjunction/Documents/GITHUB/project_z/zcalld/dist/magpie-parity-20261122/dist/iteration-evidence/libzcalld_plugin_routing.so",
+      "routing_plugin_sha256": "72c2d7bda19fdb9fa2d274178635aaf538c139f82f29584c29fb5ac53a9ee19d",
+      "routing_plugin_bytes": 921880
+    },
+    "candidate": {
+      "binary": "/home/lightjunction/Documents/GITHUB/project_z/zcalld/dist/magpie-parity-20261122/dist/iteration-evidence/candidate/zcalld",
+      "binary_sha256": "f5a313c773e40b195e1094fa65875396ff0edf94943cdad73ec5a245c0294290",
+      "binary_bytes": 2983488,
+      "version": "zcalld 0.4.4",
+      "routing_plugin": "/home/lightjunction/Documents/GITHUB/project_z/zcalld/dist/magpie-parity-20261122/dist/iteration-evidence/candidate/libzcalld_plugin_routing.so",
+      "routing_plugin_sha256": "d77d5b68335f04a3a2fa059e491af3a64ec491aec2866e81770f9de80dbfc5a9",
+      "routing_plugin_bytes": 930832
+    }
+  },
+  "environment": {
+    "platform": "Linux",
+    "architecture": "x86_64",
+    "kernel": "7.3.5-arch1-1",
+    "python": "3.14.10",
+    "available_cpus": 24,
+    "cpu_affinity": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22,
+      23
+    ],
+    "load_average_at_start": [
+      12.94287109375,
+      12.48681640625,
+      11.59375
+    ]
+  },
+  "configuration": {
+    "sizes_mib": [
+      1,
+      4
+    ],
+    "concurrency": [
+      1,
+      4
+    ],
+    "workers": "equal to concurrency",
+    "requests_per_run": 24,
+    "warmup_minimum": 4,
+    "rounds": 4,
+    "queue": 16,
+    "memory_sample_interval_ms": 10,
+    "execution_budget_seconds": 180.0,
+    "plugins": [
+      "native routing: order, single member, no classifier"
+    ],
+    "response_bytes": 250,
+    "new_downstream_connection_per_request": true
+  },
+  "notes": [
+    "This measures local HTTP proxying with native request rewriting, not a remote model or TLS.",
+    "Payload bytes are prepared once per size outside timing; the same mock validates full prompt hashes.",
+    "Latency includes Python client/mock scheduling and validation; executor queue time is excluded.",
+    "Only daemon/descendant RSS is counted; benchmark driver and mock memory are excluded.",
+    "Process-tree RSS sums shared mappings in each process; it is not proportional set size (PSS).",
+    "Sampled peaks can miss sub-10 ms spikes; daemon VmHWM covers startup, warm-up and measurement.",
+    "Each percentile is per run; summary medians do not pool latency samples across rounds.",
+    "Small samples and shared-machine load limit conclusions; no significance or overall product superiority is claimed."
+  ],
+  "results": [
+    {
+      "status": "passed",
+      "workers": 1,
+      "concurrency": 1,
+      "prompt_bytes": 1048576,
+      "payload_bytes": 1048694,
+      "payload_sha256": "f537d97e565b7f07d229bd6dd8ff603a44aa28d5471a487d0157f3d0a68756a3",
+      "startup_to_health_ms": 21.438,
+      "idle": {
+        "daemon_rss_kib": 11668,
+        "daemon_hwm_kib": 11668,
+        "tree_rss_kib": 11668,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2
+      },
+      "warmup": {
+        "requests": 4,
+        "successful_requests": 4,
+        "errors": [],
+        "elapsed_seconds": 0.066475,
+        "requests_per_second": 60.173,
+        "latencies_ms": [
+          21.2156,
+          15.6894,
+          15.9227,
+          13.4603
+        ],
+        "latency": {
+          "p50_ms": 15.6894,
+          "p95_ms": 21.2156,
+          "mean_ms": 16.572,
+          "min_ms": 13.4603,
+          "max_ms": 21.2156
+        }
+      },
+      "after_warmup": {
+        "daemon_rss_kib": 18136,
+        "daemon_hwm_kib": 22700,
+        "tree_rss_kib": 18136,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2
+      },
+      "workload": {
+        "requests": 24,
+        "successful_requests": 24,
+        "errors": [],
+        "elapsed_seconds": 0.304458,
+        "requests_per_second": 78.829,
+        "latencies_ms": [
+          12.6305,
+          11.6297,
+          11.2892,
+          11.7463,
+          11.7469,
+          12.5974,
+          11.7778,
+          10.8042,
+          14.1155,
+          11.1039,
+          11.3541,
+          11.0554,
+          12.2033,
+          13.4011,
+          13.5954,
+          14.1292,
+          14.8749,
+          14.3946,
+          14.3864,
+          13.9062,
+          15.0451,
+          12.5252,
+          11.8674,
+          11.8504
+        ],
+        "latency": {
+          "p50_ms": 12.2033,
+          "p95_ms": 14.8749,
+          "mean_ms": 12.6679,
+          "min_ms": 10.8042,
+          "max_ms": 15.0451
+        }
+      },
+      "after_workload": {
+        "daemon_rss_kib": 18136,
+        "daemon_hwm_kib": 23956,
+        "tree_rss_kib": 18136,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2
+      },
+      "measured_peak": {
+        "daemon_rss_kib": 22796,
+        "tree_rss_kib": 22796,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2,
+        "samples": 31,
+        "sampling_errors": 0
+      },
+      "upstream": {
+        "requests": 28,
+        "errors": []
+      },
+      "shutdown": {
+        "exit_code": 0,
+        "killed": false
+      },
+      "variant": "baseline",
+      "size_mib": 1,
+      "round": 1,
+      "pair_order": [
+        "baseline",
+        "candidate"
+      ]
+    },
+    {
+      "status": "passed",
+      "workers": 1,
+      "concurrency": 1,
+      "prompt_bytes": 1048576,
+      "payload_bytes": 1048694,
+      "payload_sha256": "f537d97e565b7f07d229bd6dd8ff603a44aa28d5471a487d0157f3d0a68756a3",
+      "startup_to_health_ms": 21.794,
+      "idle": {
+        "daemon_rss_kib": 11708,
+        "daemon_hwm_kib": 11708,
+        "tree_rss_kib": 11708,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2
+      },
+      "warmup": {
+        "requests": 4,
+        "successful_requests": 4,
+        "errors": [],
+        "elapsed_seconds": 0.050134,
+        "requests_per_second": 79.786,
+        "latencies_ms": [
+          13.0476,
+          12.1805,
+          13.0334,
+          11.7589
+        ],
+        "latency": {
+          "p50_ms": 12.1805,
+          "p95_ms": 13.0476,
+          "mean_ms": 12.5051,
+          "min_ms": 11.7589,
+          "max_ms": 13.0476
+        }
+      },
+      "after_warmup": {
+        "daemon_rss_kib": 17112,
+        "daemon_hwm_kib": 21396,
+        "tree_rss_kib": 17112,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2
+      },
+      "workload": {
+        "requests": 24,
+        "successful_requests": 24,
+        "errors": [],
+        "elapsed_seconds": 0.311118,
+        "requests_per_second": 77.141,
+        "latencies_ms": [
+          12.395,
+          11.8597,
+          11.0323,
+          10.8053,
+          11.3315,
+          11.46,
+          12.6948,
+          12.655,
+          12.6514,
+          14.4949,
+          12.6783,
+          13.6649,
+          12.4191,
+          11.3985,
+          14.5759,
+          10.7949,
+          11.8974,
+          13.7142,
+          14.4735,
+          15.8866,
+          14.9621,
+          13.9639,
+          15.4131,
+          13.4269
+        ],
+        "latency": {
+          "p50_ms": 12.655,
+          "p95_ms": 15.4131,
+          "mean_ms": 12.9437,
+          "min_ms": 10.7949,
+          "max_ms": 15.8866
+        }
+      },
+      "after_workload": {
+        "daemon_rss_kib": 17112,
+        "daemon_hwm_kib": 21404,
+        "tree_rss_kib": 17112,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2
+      },
+      "measured_peak": {
+        "daemon_rss_kib": 21628,
+        "tree_rss_kib": 21628,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2,
+        "samples": 31,
+        "sampling_errors": 0
+      },
+      "upstream": {
+        "requests": 28,
+        "errors": []
+      },
+      "shutdown": {
+        "exit_code": 0,
+        "killed": false
+      },
+      "variant": "candidate",
+      "size_mib": 1,
+      "round": 1,
+      "pair_order": [
+        "baseline",
+        "candidate"
+      ]
+    },
+    {
+      "status": "passed",
+      "workers": 4,
+      "concurrency": 4,
+      "prompt_bytes": 1048576,
+      "payload_bytes": 1048694,
+      "payload_sha256": "f537d97e565b7f07d229bd6dd8ff603a44aa28d5471a487d0157f3d0a68756a3",
+      "startup_to_health_ms": 10.725,
+      "idle": {
+        "daemon_rss_kib": 11932,
+        "daemon_hwm_kib": 11932,
+        "tree_rss_kib": 11932,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5
+      },
+      "warmup": {
+        "requests": 4,
+        "successful_requests": 4,
+        "errors": [],
+        "elapsed_seconds": 0.026727,
+        "requests_per_second": 149.659,
+        "latencies_ms": [
+          26.6592,
+          23.7051,
+          20.467,
+          20.8646
+        ],
+        "latency": {
+          "p50_ms": 20.8646,
+          "p95_ms": 26.6592,
+          "mean_ms": 22.924,
+          "min_ms": 20.467,
+          "max_ms": 26.6592
+        }
+      },
+      "after_warmup": {
+        "daemon_rss_kib": 23288,
+        "daemon_hwm_kib": 34344,
+        "tree_rss_kib": 23288,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5
+      },
+      "workload": {
+        "requests": 24,
+        "successful_requests": 24,
+        "errors": [],
+        "elapsed_seconds": 0.115379,
+        "requests_per_second": 208.011,
+        "latencies_ms": [
+          22.1719,
+          20.7924,
+          16.4082,
+          17.0121,
+          17.0768,
+          20.3917,
+          21.7894,
+          17.2747,
+          13.5437,
+          13.6625,
+          13.0132,
+          17.6384,
+          22.6346,
+          19.1413,
+          17.6839,
+          19.001,
+          17.8656,
+          18.2057,
+          22.9314,
+          19.5702,
+          17.5541,
+          16.4939,
+          20.7879,
+          17.647
+        ],
+        "latency": {
+          "p50_ms": 17.6839,
+          "p95_ms": 22.6346,
+          "mean_ms": 18.3455,
+          "min_ms": 13.0132,
+          "max_ms": 22.9314
+        }
+      },
+      "after_workload": {
+        "daemon_rss_kib": 36096,
+        "daemon_hwm_kib": 48900,
+        "tree_rss_kib": 36096,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5
+      },
+      "measured_peak": {
+        "daemon_rss_kib": 45016,
+        "tree_rss_kib": 45016,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5,
+        "samples": 10,
+        "sampling_errors": 0
+      },
+      "upstream": {
+        "requests": 28,
+        "errors": []
+      },
+      "shutdown": {
+        "exit_code": 0,
+        "killed": false
+      },
+      "variant": "baseline",
+      "size_mib": 1,
+      "round": 1,
+      "pair_order": [
+        "baseline",
+        "candidate"
+      ]
+    },
+    {
+      "status": "passed",
+      "workers": 4,
+      "concurrency": 4,
+      "prompt_bytes": 1048576,
+      "payload_bytes": 1048694,
+      "payload_sha256": "f537d97e565b7f07d229bd6dd8ff603a44aa28d5471a487d0157f3d0a68756a3",
+      "startup_to_health_ms": 10.893,
+      "idle": {
+        "daemon_rss_kib": 11768,
+        "daemon_hwm_kib": 11768,
+        "tree_rss_kib": 11768,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5
+      },
+      "warmup": {
+        "requests": 4,
+        "successful_requests": 4,
+        "errors": [],
+        "elapsed_seconds": 0.020841,
+        "requests_per_second": 191.932,
+        "latencies_ms": [
+          18.5664,
+          20.0594,
+          20.1869,
+          20.4684
+        ],
+        "latency": {
+          "p50_ms": 20.0594,
+          "p95_ms": 20.4684,
+          "mean_ms": 19.8203,
+          "min_ms": 18.5664,
+          "max_ms": 20.4684
+        }
+      },
+      "after_warmup": {
+        "daemon_rss_kib": 19204,
+        "daemon_hwm_kib": 35568,
+        "tree_rss_kib": 19204,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5
+      },
+      "workload": {
+        "requests": 24,
+        "successful_requests": 24,
+        "errors": [],
+        "elapsed_seconds": 0.110023,
+        "requests_per_second": 218.137,
+        "latencies_ms": [
+          18.5864,
+          16.7035,
+          19.1022,
+          18.4895,
+          17.0768,
+          18.9371,
+          19.198,
+          17.31,
+          17.6628,
+          18.4584,
+          17.3472,
+          19.8152,
+          18.8691,
+          17.0278,
+          18.2663,
+          19.434,
+          16.8923,
+          19.0285,
+          19.5138,
+          16.4909,
+          17.7603,
+          18.5166,
+          17.6557,
+          19.4034
+        ],
+        "latency": {
+          "p50_ms": 18.4584,
+          "p95_ms": 19.5138,
+          "mean_ms": 18.2311,
+          "min_ms": 16.4909,
+          "max_ms": 19.8152
+        }
+      },
+      "after_workload": {
+        "daemon_rss_kib": 32012,
+        "daemon_hwm_kib": 49232,
+        "tree_rss_kib": 32012,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5
+      },
+      "measured_peak": {
+        "daemon_rss_kib": 38724,
+        "tree_rss_kib": 38724,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5,
+        "samples": 11,
+        "sampling_errors": 0
+      },
+      "upstream": {
+        "requests": 28,
+        "errors": []
+      },
+      "shutdown": {
+        "exit_code": 0,
+        "killed": false
+      },
+      "variant": "candidate",
+      "size_mib": 1,
+      "round": 1,
+      "pair_order": [
+        "baseline",
+        "candidate"
+      ]
+    },
+    {
+      "status": "passed",
+      "workers": 1,
+      "concurrency": 1,
+      "prompt_bytes": 4194304,
+      "payload_bytes": 4194422,
+      "payload_sha256": "20a1f9217c3c24afaa6c59468856ad05068741929ae7d99ca45ea4787767d14f",
+      "startup_to_health_ms": 10.892,
+      "idle": {
+        "daemon_rss_kib": 11736,
+        "daemon_hwm_kib": 11736,
+        "tree_rss_kib": 11736,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2
+      },
+      "warmup": {
+        "requests": 4,
+        "successful_requests": 4,
+        "errors": [],
+        "elapsed_seconds": 0.22622,
+        "requests_per_second": 17.682,
+        "latencies_ms": [
+          67.3479,
+          56.765,
+          47.669,
+          54.3019
+        ],
+        "latency": {
+          "p50_ms": 54.3019,
+          "p95_ms": 67.3479,
+          "mean_ms": 56.521,
+          "min_ms": 47.669,
+          "max_ms": 67.3479
+        }
+      },
+      "after_warmup": {
+        "daemon_rss_kib": 33460,
+        "daemon_hwm_kib": 53068,
+        "tree_rss_kib": 33460,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2
+      },
+      "workload": {
+        "requests": 24,
+        "successful_requests": 24,
+        "errors": [],
+        "elapsed_seconds": 1.532247,
+        "requests_per_second": 15.663,
+        "latencies_ms": [
+          62.8442,
+          55.4282,
+          56.5468,
+          65.6454,
+          60.3475,
+          59.2967,
+          55.8866,
+          65.3823,
+          62.0465,
+          63.8304,
+          66.2549,
+          55.3091,
+          62.965,
+          62.1567,
+          62.6216,
+          66.8801,
+          68.7854,
+          74.7612,
+          86.885,
+          73.9522,
+          62.9335,
+          59.4904,
+          62.7938,
+          58.5951
+        ],
+        "latency": {
+          "p50_ms": 62.7938,
+          "p95_ms": 74.7612,
+          "mean_ms": 63.8183,
+          "min_ms": 55.3091,
+          "max_ms": 86.885
+        }
+      },
+      "after_workload": {
+        "daemon_rss_kib": 33296,
+        "daemon_hwm_kib": 53636,
+        "tree_rss_kib": 33296,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2
+      },
+      "measured_peak": {
+        "daemon_rss_kib": 53820,
+        "tree_rss_kib": 53820,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2,
+        "samples": 142,
+        "sampling_errors": 0
+      },
+      "upstream": {
+        "requests": 28,
+        "errors": []
+      },
+      "shutdown": {
+        "exit_code": 0,
+        "killed": false
+      },
+      "variant": "baseline",
+      "size_mib": 4,
+      "round": 1,
+      "pair_order": [
+        "baseline",
+        "candidate"
+      ]
+    },
+    {
+      "status": "passed",
+      "workers": 1,
+      "concurrency": 1,
+      "prompt_bytes": 4194304,
+      "payload_bytes": 4194422,
+      "payload_sha256": "20a1f9217c3c24afaa6c59468856ad05068741929ae7d99ca45ea4787767d14f",
+      "startup_to_health_ms": 20.942,
+      "idle": {
+        "daemon_rss_kib": 11800,
+        "daemon_hwm_kib": 11800,
+        "tree_rss_kib": 11800,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2
+      },
+      "warmup": {
+        "requests": 4,
+        "successful_requests": 4,
+        "errors": [],
+        "elapsed_seconds": 0.217208,
+        "requests_per_second": 18.416,
+        "latencies_ms": [
+          62.4948,
+          51.1097,
+          51.3859,
+          52.0509
+        ],
+        "latency": {
+          "p50_ms": 51.3859,
+          "p95_ms": 62.4948,
+          "mean_ms": 54.2603,
+          "min_ms": 51.1097,
+          "max_ms": 62.4948
+        }
+      },
+      "after_warmup": {
+        "daemon_rss_kib": 29592,
+        "daemon_hwm_kib": 49020,
+        "tree_rss_kib": 29592,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2
+      },
+      "workload": {
+        "requests": 24,
+        "successful_requests": 24,
+        "errors": [],
+        "elapsed_seconds": 1.213092,
+        "requests_per_second": 19.784,
+        "latencies_ms": [
+          45.1512,
+          45.8417,
+          46.5811,
+          42.6623,
+          48.6426,
+          55.3513,
+          49.7119,
+          53.0602,
+          52.4577,
+          55.235,
+          49.6821,
+          45.6,
+          48.2381,
+          49.0804,
+          49.0914,
+          53.2573,
+          52.5938,
+          55.2267,
+          53.4567,
+          49.8705,
+          53.9899,
+          55.2393,
+          54.476,
+          48.0789
+        ],
+        "latency": {
+          "p50_ms": 49.7119,
+          "p95_ms": 55.2393,
+          "mean_ms": 50.524,
+          "min_ms": 42.6623,
+          "max_ms": 55.3513
+        }
+      },
+      "after_workload": {
+        "daemon_rss_kib": 29592,
+        "daemon_hwm_kib": 49428,
+        "tree_rss_kib": 29592,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2
+      },
+      "measured_peak": {
+        "daemon_rss_kib": 49312,
+        "tree_rss_kib": 49312,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2,
+        "samples": 115,
+        "sampling_errors": 0
+      },
+      "upstream": {
+        "requests": 28,
+        "errors": []
+      },
+      "shutdown": {
+        "exit_code": 0,
+        "killed": false
+      },
+      "variant": "candidate",
+      "size_mib": 4,
+      "round": 1,
+      "pair_order": [
+        "baseline",
+        "candidate"
+      ]
+    },
+    {
+      "status": "passed",
+      "workers": 4,
+      "concurrency": 4,
+      "prompt_bytes": 4194304,
+      "payload_bytes": 4194422,
+      "payload_sha256": "20a1f9217c3c24afaa6c59468856ad05068741929ae7d99ca45ea4787767d14f",
+      "startup_to_health_ms": 10.895,
+      "idle": {
+        "daemon_rss_kib": 11944,
+        "daemon_hwm_kib": 11944,
+        "tree_rss_kib": 11944,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5
+      },
+      "warmup": {
+        "requests": 4,
+        "successful_requests": 4,
+        "errors": [],
+        "elapsed_seconds": 0.103514,
+        "requests_per_second": 38.642,
+        "latencies_ms": [
+          100.5663,
+          103.384,
+          93.9592,
+          93.84
+        ],
+        "latency": {
+          "p50_ms": 93.9592,
+          "p95_ms": 103.384,
+          "mean_ms": 97.9374,
+          "min_ms": 93.84,
+          "max_ms": 103.384
+        }
+      },
+      "after_warmup": {
+        "daemon_rss_kib": 47964,
+        "daemon_hwm_kib": 123640,
+        "tree_rss_kib": 47964,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5
+      },
+      "workload": {
+        "requests": 24,
+        "successful_requests": 24,
+        "errors": [],
+        "elapsed_seconds": 0.482469,
+        "requests_per_second": 49.744,
+        "latencies_ms": [
+          98.7822,
+          73.7524,
+          72.0918,
+          82.9658,
+          77.16,
+          74.0451,
+          95.4598,
+          73.6958,
+          78.3972,
+          83.6879,
+          74.7705,
+          72.9978,
+          96.1659,
+          73.6901,
+          73.8111,
+          76.301,
+          93.2162,
+          69.1259,
+          78.7385,
+          60.9371,
+          68.3444,
+          65.2055,
+          74.1546,
+          68.54
+        ],
+        "latency": {
+          "p50_ms": 74.0451,
+          "p95_ms": 96.1659,
+          "mean_ms": 77.3349,
+          "min_ms": 60.9371,
+          "max_ms": 98.7822
+        }
+      },
+      "after_workload": {
+        "daemon_rss_kib": 97640,
+        "daemon_hwm_kib": 175112,
+        "tree_rss_kib": 97640,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5
+      },
+      "measured_peak": {
+        "daemon_rss_kib": 166848,
+        "tree_rss_kib": 166848,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5,
+        "samples": 38,
+        "sampling_errors": 0
+      },
+      "upstream": {
+        "requests": 28,
+        "errors": []
+      },
+      "shutdown": {
+        "exit_code": 0,
+        "killed": false
+      },
+      "variant": "baseline",
+      "size_mib": 4,
+      "round": 1,
+      "pair_order": [
+        "baseline",
+        "candidate"
+      ]
+    },
+    {
+      "status": "passed",
+      "workers": 4,
+      "concurrency": 4,
+      "prompt_bytes": 4194304,
+      "payload_bytes": 4194422,
+      "payload_sha256": "20a1f9217c3c24afaa6c59468856ad05068741929ae7d99ca45ea4787767d14f",
+      "startup_to_health_ms": 10.856,
+      "idle": {
+        "daemon_rss_kib": 11736,
+        "daemon_hwm_kib": 11736,
+        "tree_rss_kib": 11736,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5
+      },
+      "warmup": {
+        "requests": 4,
+        "successful_requests": 4,
+        "errors": [],
+        "elapsed_seconds": 0.100921,
+        "requests_per_second": 39.635,
+        "latencies_ms": [
+          87.601,
+          100.5922,
+          87.5692,
+          97.847
+        ],
+        "latency": {
+          "p50_ms": 87.601,
+          "p95_ms": 100.5922,
+          "mean_ms": 93.4024,
+          "min_ms": 87.5692,
+          "max_ms": 100.5922
+        }
+      },
+      "after_warmup": {
+        "daemon_rss_kib": 31324,
+        "daemon_hwm_kib": 102816,
+        "tree_rss_kib": 31324,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5
+      },
+      "workload": {
+        "requests": 24,
+        "successful_requests": 24,
+        "errors": [],
+        "elapsed_seconds": 0.448359,
+        "requests_per_second": 53.528,
+        "latencies_ms": [
+          92.6908,
+          73.4059,
+          79.0663,
+          64.8653,
+          67.3546,
+          67.3718,
+          89.7047,
+          75.8161,
+          72.6223,
+          64.6908,
+          64.7733,
+          70.0351,
+          73.7799,
+          63.5292,
+          68.18,
+          72.841,
+          63.8571,
+          64.3476,
+          90.2192,
+          79.2495,
+          79.5466,
+          64.2545,
+          67.4702,
+          67.42
+        ],
+        "latency": {
+          "p50_ms": 68.18,
+          "p95_ms": 90.2192,
+          "mean_ms": 72.3788,
+          "min_ms": 63.5292,
+          "max_ms": 92.6908
+        }
+      },
+      "after_workload": {
+        "daemon_rss_kib": 80992,
+        "daemon_hwm_kib": 128508,
+        "tree_rss_kib": 80992,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5
+      },
+      "measured_peak": {
+        "daemon_rss_kib": 119724,
+        "tree_rss_kib": 119724,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5,
+        "samples": 37,
+        "sampling_errors": 0
+      },
+      "upstream": {
+        "requests": 28,
+        "errors": []
+      },
+      "shutdown": {
+        "exit_code": 0,
+        "killed": false
+      },
+      "variant": "candidate",
+      "size_mib": 4,
+      "round": 1,
+      "pair_order": [
+        "baseline",
+        "candidate"
+      ]
+    },
+    {
+      "status": "passed",
+      "workers": 1,
+      "concurrency": 1,
+      "prompt_bytes": 1048576,
+      "payload_bytes": 1048694,
+      "payload_sha256": "f537d97e565b7f07d229bd6dd8ff603a44aa28d5471a487d0157f3d0a68756a3",
+      "startup_to_health_ms": 10.652,
+      "idle": {
+        "daemon_rss_kib": 11940,
+        "daemon_hwm_kib": 11940,
+        "tree_rss_kib": 11940,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2
+      },
+      "warmup": {
+        "requests": 4,
+        "successful_requests": 4,
+        "errors": [],
+        "elapsed_seconds": 0.053324,
+        "requests_per_second": 75.014,
+        "latencies_ms": [
+          14.5838,
+          12.7822,
+          13.3918,
+          12.4417
+        ],
+        "latency": {
+          "p50_ms": 12.7822,
+          "p95_ms": 14.5838,
+          "mean_ms": 13.2999,
+          "min_ms": 12.4417,
+          "max_ms": 14.5838
+        }
+      },
+      "after_warmup": {
+        "daemon_rss_kib": 17280,
+        "daemon_hwm_kib": 21876,
+        "tree_rss_kib": 17280,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2
+      },
+      "workload": {
+        "requests": 24,
+        "successful_requests": 24,
+        "errors": [],
+        "elapsed_seconds": 0.32891,
+        "requests_per_second": 72.968,
+        "latencies_ms": [
+          13.6465,
+          12.2435,
+          13.1832,
+          12.5658,
+          12.2476,
+          13.8032,
+          14.837,
+          15.2026,
+          15.6251,
+          16.8613,
+          13.6598,
+          14.0556,
+          14.2751,
+          14.3998,
+          14.0111,
+          12.406,
+          12.3559,
+          13.0855,
+          14.1219,
+          14.2103,
+          13.8457,
+          12.6414,
+          12.8699,
+          12.2997
+        ],
+        "latency": {
+          "p50_ms": 13.6598,
+          "p95_ms": 15.6251,
+          "mean_ms": 13.6856,
+          "min_ms": 12.2435,
+          "max_ms": 16.8613
+        }
+      },
+      "after_workload": {
+        "daemon_rss_kib": 17280,
+        "daemon_hwm_kib": 21996,
+        "tree_rss_kib": 17280,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2
+      },
+      "measured_peak": {
+        "daemon_rss_kib": 21540,
+        "tree_rss_kib": 21540,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2,
+        "samples": 33,
+        "sampling_errors": 0
+      },
+      "upstream": {
+        "requests": 28,
+        "errors": []
+      },
+      "shutdown": {
+        "exit_code": 0,
+        "killed": false
+      },
+      "variant": "candidate",
+      "size_mib": 1,
+      "round": 2,
+      "pair_order": [
+        "candidate",
+        "baseline"
+      ]
+    },
+    {
+      "status": "passed",
+      "workers": 1,
+      "concurrency": 1,
+      "prompt_bytes": 1048576,
+      "payload_bytes": 1048694,
+      "payload_sha256": "f537d97e565b7f07d229bd6dd8ff603a44aa28d5471a487d0157f3d0a68756a3",
+      "startup_to_health_ms": 10.817,
+      "idle": {
+        "daemon_rss_kib": 11488,
+        "daemon_hwm_kib": 11488,
+        "tree_rss_kib": 11488,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2
+      },
+      "warmup": {
+        "requests": 4,
+        "successful_requests": 4,
+        "errors": [],
+        "elapsed_seconds": 0.057587,
+        "requests_per_second": 69.46,
+        "latencies_ms": [
+          17.5865,
+          15.9568,
+          12.3045,
+          11.6265
+        ],
+        "latency": {
+          "p50_ms": 12.3045,
+          "p95_ms": 17.5865,
+          "mean_ms": 14.3685,
+          "min_ms": 11.6265,
+          "max_ms": 17.5865
+        }
+      },
+      "after_warmup": {
+        "daemon_rss_kib": 18012,
+        "daemon_hwm_kib": 22200,
+        "tree_rss_kib": 18012,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2
+      },
+      "workload": {
+        "requests": 24,
+        "successful_requests": 24,
+        "errors": [],
+        "elapsed_seconds": 0.294146,
+        "requests_per_second": 81.592,
+        "latencies_ms": [
+          12.2451,
+          13.5107,
+          13.2799,
+          12.8499,
+          13.356,
+          14.0735,
+          11.8225,
+          11.2544,
+          11.2343,
+          11.2433,
+          12.9367,
+          12.7968,
+          12.04,
+          11.4371,
+          10.5816,
+          11.5562,
+          11.6672,
+          12.2078,
+          12.302,
+          12.5496,
+          13.6851,
+          11.8339,
+          11.659,
+          11.5711
+        ],
+        "latency": {
+          "p50_ms": 12.04,
+          "p95_ms": 13.6851,
+          "mean_ms": 12.2372,
+          "min_ms": 10.5816,
+          "max_ms": 14.0735
+        }
+      },
+      "after_workload": {
+        "daemon_rss_kib": 18012,
+        "daemon_hwm_kib": 23108,
+        "tree_rss_kib": 18012,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2
+      },
+      "measured_peak": {
+        "daemon_rss_kib": 20960,
+        "tree_rss_kib": 20960,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2,
+        "samples": 30,
+        "sampling_errors": 0
+      },
+      "upstream": {
+        "requests": 28,
+        "errors": []
+      },
+      "shutdown": {
+        "exit_code": 0,
+        "killed": false
+      },
+      "variant": "baseline",
+      "size_mib": 1,
+      "round": 2,
+      "pair_order": [
+        "candidate",
+        "baseline"
+      ]
+    },
+    {
+      "status": "passed",
+      "workers": 4,
+      "concurrency": 4,
+      "prompt_bytes": 1048576,
+      "payload_bytes": 1048694,
+      "payload_sha256": "f537d97e565b7f07d229bd6dd8ff603a44aa28d5471a487d0157f3d0a68756a3",
+      "startup_to_health_ms": 10.787,
+      "idle": {
+        "daemon_rss_kib": 11928,
+        "daemon_hwm_kib": 11928,
+        "tree_rss_kib": 11928,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5
+      },
+      "warmup": {
+        "requests": 4,
+        "successful_requests": 4,
+        "errors": [],
+        "elapsed_seconds": 0.021915,
+        "requests_per_second": 182.526,
+        "latencies_ms": [
+          20.7933,
+          21.1495,
+          21.848,
+          18.8223
+        ],
+        "latency": {
+          "p50_ms": 20.7933,
+          "p95_ms": 21.848,
+          "mean_ms": 20.6533,
+          "min_ms": 18.8223,
+          "max_ms": 21.848
+        }
+      },
+      "after_warmup": {
+        "daemon_rss_kib": 19092,
+        "daemon_hwm_kib": 35164,
+        "tree_rss_kib": 19092,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5
+      },
+      "workload": {
+        "requests": 24,
+        "successful_requests": 24,
+        "errors": [],
+        "elapsed_seconds": 0.120327,
+        "requests_per_second": 199.457,
+        "latencies_ms": [
+          20.1189,
+          18.8941,
+          21.0643,
+          19.7739,
+          20.9839,
+          18.8206,
+          18.9559,
+          18.7364,
+          21.3811,
+          19.8655,
+          20.5504,
+          19.4687,
+          18.7643,
+          16.1529,
+          25.5121,
+          18.8776,
+          21.2877,
+          19.3553,
+          19.7232,
+          18.7853,
+          21.5644,
+          19.3369,
+          21.2046,
+          19.0827
+        ],
+        "latency": {
+          "p50_ms": 19.4687,
+          "p95_ms": 21.5644,
+          "mean_ms": 19.9275,
+          "min_ms": 16.1529,
+          "max_ms": 25.5121
+        }
+      },
+      "after_workload": {
+        "daemon_rss_kib": 31896,
+        "daemon_hwm_kib": 48252,
+        "tree_rss_kib": 31896,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5
+      },
+      "measured_peak": {
+        "daemon_rss_kib": 40860,
+        "tree_rss_kib": 40860,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5,
+        "samples": 11,
+        "sampling_errors": 0
+      },
+      "upstream": {
+        "requests": 28,
+        "errors": []
+      },
+      "shutdown": {
+        "exit_code": 0,
+        "killed": false
+      },
+      "variant": "candidate",
+      "size_mib": 1,
+      "round": 2,
+      "pair_order": [
+        "candidate",
+        "baseline"
+      ]
+    },
+    {
+      "status": "passed",
+      "workers": 4,
+      "concurrency": 4,
+      "prompt_bytes": 1048576,
+      "payload_bytes": 1048694,
+      "payload_sha256": "f537d97e565b7f07d229bd6dd8ff603a44aa28d5471a487d0157f3d0a68756a3",
+      "startup_to_health_ms": 10.782,
+      "idle": {
+        "daemon_rss_kib": 11928,
+        "daemon_hwm_kib": 11928,
+        "tree_rss_kib": 11928,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5
+      },
+      "warmup": {
+        "requests": 4,
+        "successful_requests": 4,
+        "errors": [],
+        "elapsed_seconds": 0.026242,
+        "requests_per_second": 152.426,
+        "latencies_ms": [
+          22.8763,
+          22.4351,
+          26.0103,
+          25.4709
+        ],
+        "latency": {
+          "p50_ms": 22.8763,
+          "p95_ms": 26.0103,
+          "mean_ms": 24.1981,
+          "min_ms": 22.4351,
+          "max_ms": 26.0103
+        }
+      },
+      "after_warmup": {
+        "daemon_rss_kib": 23260,
+        "daemon_hwm_kib": 36832,
+        "tree_rss_kib": 23260,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5
+      },
+      "workload": {
+        "requests": 24,
+        "successful_requests": 24,
+        "errors": [],
+        "elapsed_seconds": 0.128353,
+        "requests_per_second": 186.985,
+        "latencies_ms": [
+          21.8454,
+          19.6211,
+          22.003,
+          19.9829,
+          22.4476,
+          21.4305,
+          21.0141,
+          17.5926,
+          23.75,
+          21.6966,
+          21.4501,
+          18.774,
+          22.0289,
+          18.6025,
+          21.4445,
+          21.3343,
+          22.836,
+          21.699,
+          20.8867,
+          19.3925,
+          19.394,
+          23.9648,
+          21.4644,
+          22.1737
+        ],
+        "latency": {
+          "p50_ms": 21.4445,
+          "p95_ms": 23.75,
+          "mean_ms": 21.1179,
+          "min_ms": 17.5926,
+          "max_ms": 23.9648
+        }
+      },
+      "after_workload": {
+        "daemon_rss_kib": 36072,
+        "daemon_hwm_kib": 54608,
+        "tree_rss_kib": 36072,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5
+      },
+      "measured_peak": {
+        "daemon_rss_kib": 47148,
+        "tree_rss_kib": 47148,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5,
+        "samples": 13,
+        "sampling_errors": 0
+      },
+      "upstream": {
+        "requests": 28,
+        "errors": []
+      },
+      "shutdown": {
+        "exit_code": 0,
+        "killed": false
+      },
+      "variant": "baseline",
+      "size_mib": 1,
+      "round": 2,
+      "pair_order": [
+        "candidate",
+        "baseline"
+      ]
+    },
+    {
+      "status": "passed",
+      "workers": 1,
+      "concurrency": 1,
+      "prompt_bytes": 4194304,
+      "payload_bytes": 4194422,
+      "payload_sha256": "20a1f9217c3c24afaa6c59468856ad05068741929ae7d99ca45ea4787767d14f",
+      "startup_to_health_ms": 10.696,
+      "idle": {
+        "daemon_rss_kib": 11944,
+        "daemon_hwm_kib": 11944,
+        "tree_rss_kib": 11944,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2
+      },
+      "warmup": {
+        "requests": 4,
+        "successful_requests": 4,
+        "errors": [],
+        "elapsed_seconds": 0.250611,
+        "requests_per_second": 15.961,
+        "latencies_ms": [
+          65.8287,
+          65.8491,
+          61.2349,
+          57.5487
+        ],
+        "latency": {
+          "p50_ms": 61.2349,
+          "p95_ms": 65.8491,
+          "mean_ms": 62.6153,
+          "min_ms": 57.5487,
+          "max_ms": 65.8491
+        }
+      },
+      "after_warmup": {
+        "daemon_rss_kib": 29508,
+        "daemon_hwm_kib": 49116,
+        "tree_rss_kib": 29508,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2
+      },
+      "workload": {
+        "requests": 24,
+        "successful_requests": 24,
+        "errors": [],
+        "elapsed_seconds": 1.483581,
+        "requests_per_second": 16.177,
+        "latencies_ms": [
+          63.0853,
+          60.4872,
+          53.2617,
+          54.7153,
+          51.8318,
+          58.4038,
+          64.147,
+          56.331,
+          52.6166,
+          56.2156,
+          58.5689,
+          64.347,
+          60.0887,
+          62.4918,
+          73.6188,
+          93.8699,
+          86.2639,
+          74.3609,
+          60.8371,
+          60.2411,
+          54.3183,
+          55.6209,
+          56.3155,
+          50.9291
+        ],
+        "latency": {
+          "p50_ms": 58.5689,
+          "p95_ms": 86.2639,
+          "mean_ms": 61.7903,
+          "min_ms": 50.9291,
+          "max_ms": 93.8699
+        }
+      },
+      "after_workload": {
+        "daemon_rss_kib": 29504,
+        "daemon_hwm_kib": 50688,
+        "tree_rss_kib": 29504,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2
+      },
+      "measured_peak": {
+        "daemon_rss_kib": 48592,
+        "tree_rss_kib": 48592,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2,
+        "samples": 137,
+        "sampling_errors": 0
+      },
+      "upstream": {
+        "requests": 28,
+        "errors": []
+      },
+      "shutdown": {
+        "exit_code": 0,
+        "killed": false
+      },
+      "variant": "candidate",
+      "size_mib": 4,
+      "round": 2,
+      "pair_order": [
+        "candidate",
+        "baseline"
+      ]
+    },
+    {
+      "status": "passed",
+      "workers": 1,
+      "concurrency": 1,
+      "prompt_bytes": 4194304,
+      "payload_bytes": 4194422,
+      "payload_sha256": "20a1f9217c3c24afaa6c59468856ad05068741929ae7d99ca45ea4787767d14f",
+      "startup_to_health_ms": 10.891,
+      "idle": {
+        "daemon_rss_kib": 11728,
+        "daemon_hwm_kib": 11728,
+        "tree_rss_kib": 11728,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2
+      },
+      "warmup": {
+        "requests": 4,
+        "successful_requests": 4,
+        "errors": [],
+        "elapsed_seconds": 0.2331,
+        "requests_per_second": 17.16,
+        "latencies_ms": [
+          63.2266,
+          59.4644,
+          55.7058,
+          54.4779
+        ],
+        "latency": {
+          "p50_ms": 55.7058,
+          "p95_ms": 63.2266,
+          "mean_ms": 58.2187,
+          "min_ms": 54.4779,
+          "max_ms": 63.2266
+        }
+      },
+      "after_warmup": {
+        "daemon_rss_kib": 33360,
+        "daemon_hwm_kib": 53076,
+        "tree_rss_kib": 33360,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2
+      },
+      "workload": {
+        "requests": 24,
+        "successful_requests": 24,
+        "errors": [],
+        "elapsed_seconds": 1.237816,
+        "requests_per_second": 19.389,
+        "latencies_ms": [
+          53.5109,
+          57.0971,
+          50.8602,
+          53.333,
+          53.495,
+          52.9525,
+          53.5462,
+          50.918,
+          52.628,
+          54.064,
+          54.2021,
+          58.79,
+          54.4036,
+          55.566,
+          51.8486,
+          46.5822,
+          46.1587,
+          48.4562,
+          48.1512,
+          47.3804,
+          47.8608,
+          50.6496,
+          47.3234,
+          47.647
+        ],
+        "latency": {
+          "p50_ms": 51.8486,
+          "p95_ms": 57.0971,
+          "mean_ms": 51.5594,
+          "min_ms": 46.1587,
+          "max_ms": 58.79
+        }
+      },
+      "after_workload": {
+        "daemon_rss_kib": 33360,
+        "daemon_hwm_kib": 53708,
+        "tree_rss_kib": 33360,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2
+      },
+      "measured_peak": {
+        "daemon_rss_kib": 51536,
+        "tree_rss_kib": 51536,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2,
+        "samples": 117,
+        "sampling_errors": 0
+      },
+      "upstream": {
+        "requests": 28,
+        "errors": []
+      },
+      "shutdown": {
+        "exit_code": 0,
+        "killed": false
+      },
+      "variant": "baseline",
+      "size_mib": 4,
+      "round": 2,
+      "pair_order": [
+        "candidate",
+        "baseline"
+      ]
+    },
+    {
+      "status": "passed",
+      "workers": 4,
+      "concurrency": 4,
+      "prompt_bytes": 4194304,
+      "payload_bytes": 4194422,
+      "payload_sha256": "20a1f9217c3c24afaa6c59468856ad05068741929ae7d99ca45ea4787767d14f",
+      "startup_to_health_ms": 10.827,
+      "idle": {
+        "daemon_rss_kib": 11976,
+        "daemon_hwm_kib": 11976,
+        "tree_rss_kib": 11976,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5
+      },
+      "warmup": {
+        "requests": 4,
+        "successful_requests": 4,
+        "errors": [],
+        "elapsed_seconds": 0.087778,
+        "requests_per_second": 45.57,
+        "latencies_ms": [
+          77.7956,
+          85.263,
+          70.9034,
+          87.3326
+        ],
+        "latency": {
+          "p50_ms": 77.7956,
+          "p95_ms": 87.3326,
+          "mean_ms": 80.3237,
+          "min_ms": 70.9034,
+          "max_ms": 87.3326
+        }
+      },
+      "after_warmup": {
+        "daemon_rss_kib": 31612,
+        "daemon_hwm_kib": 108456,
+        "tree_rss_kib": 31612,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5
+      },
+      "workload": {
+        "requests": 24,
+        "successful_requests": 24,
+        "errors": [],
+        "elapsed_seconds": 0.45963,
+        "requests_per_second": 52.216,
+        "latencies_ms": [
+          80.7588,
+          73.5568,
+          73.7508,
+          81.8066,
+          67.3939,
+          71.3694,
+          65.026,
+          80.7198,
+          79.2144,
+          81.4935,
+          72.9345,
+          76.8742,
+          80.4563,
+          70.7268,
+          74.5383,
+          71.8101,
+          68.1303,
+          93.7812,
+          77.7706,
+          74.4133,
+          73.3479,
+          79.8825,
+          71.4176,
+          78.8319
+        ],
+        "latency": {
+          "p50_ms": 74.4133,
+          "p95_ms": 81.8066,
+          "mean_ms": 75.8336,
+          "min_ms": 65.026,
+          "max_ms": 93.7812
+        }
+      },
+      "after_workload": {
+        "daemon_rss_kib": 81288,
+        "daemon_hwm_kib": 156196,
+        "tree_rss_kib": 81288,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5
+      },
+      "measured_peak": {
+        "daemon_rss_kib": 129848,
+        "tree_rss_kib": 129848,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5,
+        "samples": 35,
+        "sampling_errors": 0
+      },
+      "upstream": {
+        "requests": 28,
+        "errors": []
+      },
+      "shutdown": {
+        "exit_code": 0,
+        "killed": false
+      },
+      "variant": "candidate",
+      "size_mib": 4,
+      "round": 2,
+      "pair_order": [
+        "candidate",
+        "baseline"
+      ]
+    },
+    {
+      "status": "passed",
+      "workers": 4,
+      "concurrency": 4,
+      "prompt_bytes": 4194304,
+      "payload_bytes": 4194422,
+      "payload_sha256": "20a1f9217c3c24afaa6c59468856ad05068741929ae7d99ca45ea4787767d14f",
+      "startup_to_health_ms": 10.83,
+      "idle": {
+        "daemon_rss_kib": 12008,
+        "daemon_hwm_kib": 12008,
+        "tree_rss_kib": 12008,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5
+      },
+      "warmup": {
+        "requests": 4,
+        "successful_requests": 4,
+        "errors": [],
+        "elapsed_seconds": 0.118967,
+        "requests_per_second": 33.623,
+        "latencies_ms": [
+          108.1297,
+          107.644,
+          118.6331,
+          115.9643
+        ],
+        "latency": {
+          "p50_ms": 108.1297,
+          "p95_ms": 118.6331,
+          "mean_ms": 112.5928,
+          "min_ms": 107.644,
+          "max_ms": 118.6331
+        }
+      },
+      "after_warmup": {
+        "daemon_rss_kib": 47912,
+        "daemon_hwm_kib": 123996,
+        "tree_rss_kib": 47912,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5
+      },
+      "workload": {
+        "requests": 24,
+        "successful_requests": 24,
+        "errors": [],
+        "elapsed_seconds": 0.553471,
+        "requests_per_second": 43.363,
+        "latencies_ms": [
+          98.1151,
+          89.7929,
+          91.268,
+          95.0051,
+          94.5124,
+          84.5784,
+          95.1282,
+          96.3678,
+          91.6189,
+          90.6811,
+          91.0591,
+          77.3044,
+          95.0804,
+          95.9722,
+          88.3678,
+          94.6992,
+          91.7437,
+          83.8845,
+          93.9236,
+          93.7301,
+          82.612,
+          106.4351,
+          89.1455,
+          76.9854
+        ],
+        "latency": {
+          "p50_ms": 91.6189,
+          "p95_ms": 98.1151,
+          "mean_ms": 91.1671,
+          "min_ms": 76.9854,
+          "max_ms": 106.4351
+        }
+      },
+      "after_workload": {
+        "daemon_rss_kib": 97592,
+        "daemon_hwm_kib": 173796,
+        "tree_rss_kib": 97592,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5
+      },
+      "measured_peak": {
+        "daemon_rss_kib": 167980,
+        "tree_rss_kib": 167980,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5,
+        "samples": 42,
+        "sampling_errors": 0
+      },
+      "upstream": {
+        "requests": 28,
+        "errors": []
+      },
+      "shutdown": {
+        "exit_code": 0,
+        "killed": false
+      },
+      "variant": "baseline",
+      "size_mib": 4,
+      "round": 2,
+      "pair_order": [
+        "candidate",
+        "baseline"
+      ]
+    },
+    {
+      "status": "passed",
+      "workers": 1,
+      "concurrency": 1,
+      "prompt_bytes": 1048576,
+      "payload_bytes": 1048694,
+      "payload_sha256": "f537d97e565b7f07d229bd6dd8ff603a44aa28d5471a487d0157f3d0a68756a3",
+      "startup_to_health_ms": 10.774,
+      "idle": {
+        "daemon_rss_kib": 11508,
+        "daemon_hwm_kib": 11508,
+        "tree_rss_kib": 11508,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2
+      },
+      "warmup": {
+        "requests": 4,
+        "successful_requests": 4,
+        "errors": [],
+        "elapsed_seconds": 0.059026,
+        "requests_per_second": 67.767,
+        "latencies_ms": [
+          15.7271,
+          15.3739,
+          13.5448,
+          14.2456
+        ],
+        "latency": {
+          "p50_ms": 14.2456,
+          "p95_ms": 15.7271,
+          "mean_ms": 14.7229,
+          "min_ms": 13.5448,
+          "max_ms": 15.7271
+        }
+      },
+      "after_warmup": {
+        "daemon_rss_kib": 17968,
+        "daemon_hwm_kib": 22748,
+        "tree_rss_kib": 17968,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2
+      },
+      "workload": {
+        "requests": 24,
+        "successful_requests": 24,
+        "errors": [],
+        "elapsed_seconds": 0.30642,
+        "requests_per_second": 78.324,
+        "latencies_ms": [
+          13.3482,
+          15.0856,
+          12.2008,
+          12.0018,
+          12.9967,
+          13.149,
+          13.8976,
+          15.5713,
+          12.1766,
+          12.5751,
+          12.9284,
+          14.7049,
+          12.3581,
+          11.2676,
+          12.2181,
+          11.1713,
+          12.3238,
+          12.9265,
+          13.4927,
+          13.0682,
+          12.17,
+          11.5043,
+          11.5424,
+          11.2654
+        ],
+        "latency": {
+          "p50_ms": 12.3581,
+          "p95_ms": 15.0856,
+          "mean_ms": 12.7477,
+          "min_ms": 11.1713,
+          "max_ms": 15.5713
+        }
+      },
+      "after_workload": {
+        "daemon_rss_kib": 17968,
+        "daemon_hwm_kib": 23808,
+        "tree_rss_kib": 17968,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2
+      },
+      "measured_peak": {
+        "daemon_rss_kib": 22428,
+        "tree_rss_kib": 22428,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2,
+        "samples": 31,
+        "sampling_errors": 0
+      },
+      "upstream": {
+        "requests": 28,
+        "errors": []
+      },
+      "shutdown": {
+        "exit_code": 0,
+        "killed": false
+      },
+      "variant": "baseline",
+      "size_mib": 1,
+      "round": 3,
+      "pair_order": [
+        "baseline",
+        "candidate"
+      ]
+    },
+    {
+      "status": "passed",
+      "workers": 1,
+      "concurrency": 1,
+      "prompt_bytes": 1048576,
+      "payload_bytes": 1048694,
+      "payload_sha256": "f537d97e565b7f07d229bd6dd8ff603a44aa28d5471a487d0157f3d0a68756a3",
+      "startup_to_health_ms": 11.093,
+      "idle": {
+        "daemon_rss_kib": 11772,
+        "daemon_hwm_kib": 11772,
+        "tree_rss_kib": 11772,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2
+      },
+      "warmup": {
+        "requests": 4,
+        "successful_requests": 4,
+        "errors": [],
+        "elapsed_seconds": 0.047381,
+        "requests_per_second": 84.421,
+        "latencies_ms": [
+          13.5537,
+          11.7057,
+          10.8721,
+          11.0679
+        ],
+        "latency": {
+          "p50_ms": 11.0679,
+          "p95_ms": 13.5537,
+          "mean_ms": 11.7999,
+          "min_ms": 10.8721,
+          "max_ms": 13.5537
+        }
+      },
+      "after_warmup": {
+        "daemon_rss_kib": 17144,
+        "daemon_hwm_kib": 21660,
+        "tree_rss_kib": 17144,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2
+      },
+      "workload": {
+        "requests": 24,
+        "successful_requests": 24,
+        "errors": [],
+        "elapsed_seconds": 0.292918,
+        "requests_per_second": 81.934,
+        "latencies_ms": [
+          12.0786,
+          11.9159,
+          13.7336,
+          12.3667,
+          11.4819,
+          12.1637,
+          11.482,
+          11.538,
+          12.3059,
+          11.9335,
+          10.7636,
+          10.4821,
+          10.6324,
+          11.001,
+          12.3343,
+          14.2273,
+          15.3194,
+          12.8478,
+          12.8398,
+          11.7544,
+          11.5992,
+          11.8205,
+          13.7303,
+          12.1186
+        ],
+        "latency": {
+          "p50_ms": 11.9335,
+          "p95_ms": 14.2273,
+          "mean_ms": 12.1863,
+          "min_ms": 10.4821,
+          "max_ms": 15.3194
+        }
+      },
+      "after_workload": {
+        "daemon_rss_kib": 17144,
+        "daemon_hwm_kib": 21660,
+        "tree_rss_kib": 17144,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2
+      },
+      "measured_peak": {
+        "daemon_rss_kib": 21396,
+        "tree_rss_kib": 21396,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2,
+        "samples": 29,
+        "sampling_errors": 0
+      },
+      "upstream": {
+        "requests": 28,
+        "errors": []
+      },
+      "shutdown": {
+        "exit_code": 0,
+        "killed": false
+      },
+      "variant": "candidate",
+      "size_mib": 1,
+      "round": 3,
+      "pair_order": [
+        "baseline",
+        "candidate"
+      ]
+    },
+    {
+      "status": "passed",
+      "workers": 4,
+      "concurrency": 4,
+      "prompt_bytes": 1048576,
+      "payload_bytes": 1048694,
+      "payload_sha256": "f537d97e565b7f07d229bd6dd8ff603a44aa28d5471a487d0157f3d0a68756a3",
+      "startup_to_health_ms": 10.731,
+      "idle": {
+        "daemon_rss_kib": 11724,
+        "daemon_hwm_kib": 11724,
+        "tree_rss_kib": 11724,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5
+      },
+      "warmup": {
+        "requests": 4,
+        "successful_requests": 4,
+        "errors": [],
+        "elapsed_seconds": 0.028742,
+        "requests_per_second": 139.167,
+        "latencies_ms": [
+          27.9047,
+          21.397,
+          25.662,
+          28.4151
+        ],
+        "latency": {
+          "p50_ms": 25.662,
+          "p95_ms": 28.4151,
+          "mean_ms": 25.8447,
+          "min_ms": 21.397,
+          "max_ms": 28.4151
+        }
+      },
+      "after_warmup": {
+        "daemon_rss_kib": 23112,
+        "daemon_hwm_kib": 36712,
+        "tree_rss_kib": 23112,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5
+      },
+      "workload": {
+        "requests": 24,
+        "successful_requests": 24,
+        "errors": [],
+        "elapsed_seconds": 0.133184,
+        "requests_per_second": 180.202,
+        "latencies_ms": [
+          23.9473,
+          18.6554,
+          19.6074,
+          18.8893,
+          17.3094,
+          16.6674,
+          23.1595,
+          19.7657,
+          29.246,
+          17.9974,
+          17.4251,
+          24.863,
+          22.8315,
+          21.9482,
+          20.3988,
+          16.746,
+          24.9412,
+          19.1414,
+          23.3943,
+          22.3637,
+          26.8289,
+          25.1706,
+          17.9595,
+          17.0314
+        ],
+        "latency": {
+          "p50_ms": 19.7657,
+          "p95_ms": 26.8289,
+          "mean_ms": 21.0953,
+          "min_ms": 16.6674,
+          "max_ms": 29.246
+        }
+      },
+      "after_workload": {
+        "daemon_rss_kib": 35920,
+        "daemon_hwm_kib": 50860,
+        "tree_rss_kib": 35920,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5
+      },
+      "measured_peak": {
+        "daemon_rss_kib": 51628,
+        "tree_rss_kib": 51628,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5,
+        "samples": 13,
+        "sampling_errors": 0
+      },
+      "upstream": {
+        "requests": 28,
+        "errors": []
+      },
+      "shutdown": {
+        "exit_code": 0,
+        "killed": false
+      },
+      "variant": "baseline",
+      "size_mib": 1,
+      "round": 3,
+      "pair_order": [
+        "baseline",
+        "candidate"
+      ]
+    },
+    {
+      "status": "passed",
+      "workers": 4,
+      "concurrency": 4,
+      "prompt_bytes": 1048576,
+      "payload_bytes": 1048694,
+      "payload_sha256": "f537d97e565b7f07d229bd6dd8ff603a44aa28d5471a487d0157f3d0a68756a3",
+      "startup_to_health_ms": 12.053,
+      "idle": {
+        "daemon_rss_kib": 11816,
+        "daemon_hwm_kib": 11816,
+        "tree_rss_kib": 11816,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5
+      },
+      "warmup": {
+        "requests": 4,
+        "successful_requests": 4,
+        "errors": [],
+        "elapsed_seconds": 0.027123,
+        "requests_per_second": 147.476,
+        "latencies_ms": [
+          26.2699,
+          23.6476,
+          26.8808,
+          26.618
+        ],
+        "latency": {
+          "p50_ms": 26.2699,
+          "p95_ms": 26.8808,
+          "mean_ms": 25.8541,
+          "min_ms": 23.6476,
+          "max_ms": 26.8808
+        }
+      },
+      "after_warmup": {
+        "daemon_rss_kib": 21116,
+        "daemon_hwm_kib": 33692,
+        "tree_rss_kib": 21116,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5
+      },
+      "workload": {
+        "requests": 24,
+        "successful_requests": 24,
+        "errors": [],
+        "elapsed_seconds": 0.152863,
+        "requests_per_second": 157.004,
+        "latencies_ms": [
+          25.2222,
+          25.9495,
+          21.6013,
+          25.5082,
+          28.1617,
+          18.7221,
+          22.9168,
+          29.8454,
+          24.734,
+          25.0287,
+          26.7515,
+          22.7875,
+          25.0502,
+          16.6385,
+          16.4864,
+          16.2069,
+          26.5193,
+          26.0584,
+          26.5141,
+          25.4132,
+          21.726,
+          27.8853,
+          28.8602,
+          21.9847
+        ],
+        "latency": {
+          "p50_ms": 25.0502,
+          "p95_ms": 28.8602,
+          "mean_ms": 24.0238,
+          "min_ms": 16.2069,
+          "max_ms": 29.8454
+        }
+      },
+      "after_workload": {
+        "daemon_rss_kib": 31864,
+        "daemon_hwm_kib": 41628,
+        "tree_rss_kib": 31864,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5
+      },
+      "measured_peak": {
+        "daemon_rss_kib": 37400,
+        "tree_rss_kib": 37400,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5,
+        "samples": 13,
+        "sampling_errors": 0
+      },
+      "upstream": {
+        "requests": 28,
+        "errors": []
+      },
+      "shutdown": {
+        "exit_code": 0,
+        "killed": false
+      },
+      "variant": "candidate",
+      "size_mib": 1,
+      "round": 3,
+      "pair_order": [
+        "baseline",
+        "candidate"
+      ]
+    },
+    {
+      "status": "passed",
+      "workers": 1,
+      "concurrency": 1,
+      "prompt_bytes": 4194304,
+      "payload_bytes": 4194422,
+      "payload_sha256": "20a1f9217c3c24afaa6c59468856ad05068741929ae7d99ca45ea4787767d14f",
+      "startup_to_health_ms": 10.892,
+      "idle": {
+        "daemon_rss_kib": 11492,
+        "daemon_hwm_kib": 11492,
+        "tree_rss_kib": 11492,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2
+      },
+      "warmup": {
+        "requests": 4,
+        "successful_requests": 4,
+        "errors": [],
+        "elapsed_seconds": 0.613362,
+        "requests_per_second": 6.521,
+        "latencies_ms": [
+          83.5305,
+          97.4893,
+          144.9496,
+          287.1937
+        ],
+        "latency": {
+          "p50_ms": 97.4893,
+          "p95_ms": 287.1937,
+          "mean_ms": 153.2908,
+          "min_ms": 83.5305,
+          "max_ms": 287.1937
+        }
+      },
+      "after_warmup": {
+        "daemon_rss_kib": 33380,
+        "daemon_hwm_kib": 52700,
+        "tree_rss_kib": 33380,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2
+      },
+      "workload": {
+        "requests": 24,
+        "successful_requests": 24,
+        "errors": [],
+        "elapsed_seconds": 1.606789,
+        "requests_per_second": 14.937,
+        "latencies_ms": [
+          201.9779,
+          166.607,
+          109.1102,
+          65.1691,
+          57.1123,
+          52.8448,
+          49.5256,
+          50.7085,
+          48.0316,
+          51.004,
+          55.9791,
+          52.6791,
+          57.4188,
+          63.3214,
+          53.9666,
+          52.2834,
+          50.8061,
+          53.6496,
+          52.8477,
+          48.1921,
+          51.9472,
+          50.973,
+          54.5185,
+          55.549
+        ],
+        "latency": {
+          "p50_ms": 52.8477,
+          "p95_ms": 166.607,
+          "mean_ms": 66.9259,
+          "min_ms": 48.0316,
+          "max_ms": 201.9779
+        }
+      },
+      "after_workload": {
+        "daemon_rss_kib": 33380,
+        "daemon_hwm_kib": 53316,
+        "tree_rss_kib": 33380,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2
+      },
+      "measured_peak": {
+        "daemon_rss_kib": 53740,
+        "tree_rss_kib": 53740,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2,
+        "samples": 152,
+        "sampling_errors": 0
+      },
+      "upstream": {
+        "requests": 28,
+        "errors": []
+      },
+      "shutdown": {
+        "exit_code": 0,
+        "killed": false
+      },
+      "variant": "baseline",
+      "size_mib": 4,
+      "round": 3,
+      "pair_order": [
+        "baseline",
+        "candidate"
+      ]
+    },
+    {
+      "status": "passed",
+      "workers": 1,
+      "concurrency": 1,
+      "prompt_bytes": 4194304,
+      "payload_bytes": 4194422,
+      "payload_sha256": "20a1f9217c3c24afaa6c59468856ad05068741929ae7d99ca45ea4787767d14f",
+      "startup_to_health_ms": 31.461,
+      "idle": {
+        "daemon_rss_kib": 11924,
+        "daemon_hwm_kib": 11924,
+        "tree_rss_kib": 11924,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2
+      },
+      "warmup": {
+        "requests": 4,
+        "successful_requests": 4,
+        "errors": [],
+        "elapsed_seconds": 0.220858,
+        "requests_per_second": 18.111,
+        "latencies_ms": [
+          60.4553,
+          51.8396,
+          51.1304,
+          57.2516
+        ],
+        "latency": {
+          "p50_ms": 51.8396,
+          "p95_ms": 60.4553,
+          "mean_ms": 55.1692,
+          "min_ms": 51.1304,
+          "max_ms": 60.4553
+        }
+      },
+      "after_warmup": {
+        "daemon_rss_kib": 29536,
+        "daemon_hwm_kib": 48744,
+        "tree_rss_kib": 29536,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2
+      },
+      "workload": {
+        "requests": 24,
+        "successful_requests": 24,
+        "errors": [],
+        "elapsed_seconds": 1.18963,
+        "requests_per_second": 20.174,
+        "latencies_ms": [
+          63.2434,
+          52.9544,
+          53.7832,
+          50.0503,
+          49.7175,
+          51.072,
+          51.17,
+          51.2509,
+          52.3966,
+          48.7136,
+          54.8014,
+          45.6746,
+          46.9624,
+          47.9129,
+          43.7262,
+          46.8021,
+          44.7313,
+          45.7529,
+          48.4413,
+          47.6994,
+          47.8538,
+          44.353,
+          51.4161,
+          48.6302
+        ],
+        "latency": {
+          "p50_ms": 48.6302,
+          "p95_ms": 54.8014,
+          "mean_ms": 49.5462,
+          "min_ms": 43.7262,
+          "max_ms": 63.2434
+        }
+      },
+      "after_workload": {
+        "daemon_rss_kib": 29536,
+        "daemon_hwm_kib": 49936,
+        "tree_rss_kib": 29536,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2
+      },
+      "measured_peak": {
+        "daemon_rss_kib": 49896,
+        "tree_rss_kib": 49896,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2,
+        "samples": 113,
+        "sampling_errors": 0
+      },
+      "upstream": {
+        "requests": 28,
+        "errors": []
+      },
+      "shutdown": {
+        "exit_code": 0,
+        "killed": false
+      },
+      "variant": "candidate",
+      "size_mib": 4,
+      "round": 3,
+      "pair_order": [
+        "baseline",
+        "candidate"
+      ]
+    },
+    {
+      "status": "passed",
+      "workers": 4,
+      "concurrency": 4,
+      "prompt_bytes": 4194304,
+      "payload_bytes": 4194422,
+      "payload_sha256": "20a1f9217c3c24afaa6c59468856ad05068741929ae7d99ca45ea4787767d14f",
+      "startup_to_health_ms": 11.009,
+      "idle": {
+        "daemon_rss_kib": 11836,
+        "daemon_hwm_kib": 11836,
+        "tree_rss_kib": 11836,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5
+      },
+      "warmup": {
+        "requests": 4,
+        "successful_requests": 4,
+        "errors": [],
+        "elapsed_seconds": 0.098392,
+        "requests_per_second": 40.654,
+        "latencies_ms": [
+          87.6365,
+          88.0106,
+          98.194,
+          95.8157
+        ],
+        "latency": {
+          "p50_ms": 88.0106,
+          "p95_ms": 98.194,
+          "mean_ms": 92.4142,
+          "min_ms": 87.6365,
+          "max_ms": 98.194
+        }
+      },
+      "after_warmup": {
+        "daemon_rss_kib": 47768,
+        "daemon_hwm_kib": 126396,
+        "tree_rss_kib": 47768,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5
+      },
+      "workload": {
+        "requests": 24,
+        "successful_requests": 24,
+        "errors": [],
+        "elapsed_seconds": 0.535829,
+        "requests_per_second": 44.79,
+        "latencies_ms": [
+          89.6342,
+          71.9896,
+          89.6067,
+          84.4938,
+          98.3425,
+          98.3537,
+          89.8936,
+          78.5039,
+          87.0156,
+          80.8579,
+          96.8003,
+          98.5502,
+          89.6256,
+          78.7863,
+          75.0863,
+          92.3142,
+          101.8811,
+          97.8044,
+          92.3812,
+          78.8558,
+          81.1778,
+          86.1721,
+          95.4694,
+          89.3988
+        ],
+        "latency": {
+          "p50_ms": 89.6067,
+          "p95_ms": 98.5502,
+          "mean_ms": 88.4581,
+          "min_ms": 71.9896,
+          "max_ms": 101.8811
+        }
+      },
+      "after_workload": {
+        "daemon_rss_kib": 97424,
+        "daemon_hwm_kib": 173884,
+        "tree_rss_kib": 97424,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5
+      },
+      "measured_peak": {
+        "daemon_rss_kib": 170732,
+        "tree_rss_kib": 170732,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5,
+        "samples": 39,
+        "sampling_errors": 0
+      },
+      "upstream": {
+        "requests": 28,
+        "errors": []
+      },
+      "shutdown": {
+        "exit_code": 0,
+        "killed": false
+      },
+      "variant": "baseline",
+      "size_mib": 4,
+      "round": 3,
+      "pair_order": [
+        "baseline",
+        "candidate"
+      ]
+    },
+    {
+      "status": "passed",
+      "workers": 4,
+      "concurrency": 4,
+      "prompt_bytes": 4194304,
+      "payload_bytes": 4194422,
+      "payload_sha256": "20a1f9217c3c24afaa6c59468856ad05068741929ae7d99ca45ea4787767d14f",
+      "startup_to_health_ms": 10.802,
+      "idle": {
+        "daemon_rss_kib": 11716,
+        "daemon_hwm_kib": 11716,
+        "tree_rss_kib": 11716,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5
+      },
+      "warmup": {
+        "requests": 4,
+        "successful_requests": 4,
+        "errors": [],
+        "elapsed_seconds": 0.098992,
+        "requests_per_second": 40.407,
+        "latencies_ms": [
+          95.5415,
+          87.4461,
+          86.9684,
+          98.7484
+        ],
+        "latency": {
+          "p50_ms": 87.4461,
+          "p95_ms": 98.7484,
+          "mean_ms": 92.1761,
+          "min_ms": 86.9684,
+          "max_ms": 98.7484
+        }
+      },
+      "after_warmup": {
+        "daemon_rss_kib": 31368,
+        "daemon_hwm_kib": 106588,
+        "tree_rss_kib": 31368,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5
+      },
+      "workload": {
+        "requests": 24,
+        "successful_requests": 24,
+        "errors": [],
+        "elapsed_seconds": 0.524572,
+        "requests_per_second": 45.752,
+        "latencies_ms": [
+          95.1102,
+          88.4167,
+          82.7789,
+          86.9506,
+          78.5126,
+          88.7258,
+          92.2898,
+          88.4249,
+          79.2905,
+          89.7884,
+          81.1367,
+          92.906,
+          92.2439,
+          88.3337,
+          85.6533,
+          83.9776,
+          85.4128,
+          88.7713,
+          91.5724,
+          89.1758,
+          89.1157,
+          82.9081,
+          79.0064,
+          72.0455
+        ],
+        "latency": {
+          "p50_ms": 88.3337,
+          "p95_ms": 92.906,
+          "mean_ms": 86.3562,
+          "min_ms": 72.0455,
+          "max_ms": 95.1102
+        }
+      },
+      "after_workload": {
+        "daemon_rss_kib": 81040,
+        "daemon_hwm_kib": 158456,
+        "tree_rss_kib": 81040,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5
+      },
+      "measured_peak": {
+        "daemon_rss_kib": 145796,
+        "tree_rss_kib": 145796,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5,
+        "samples": 37,
+        "sampling_errors": 0
+      },
+      "upstream": {
+        "requests": 28,
+        "errors": []
+      },
+      "shutdown": {
+        "exit_code": 0,
+        "killed": false
+      },
+      "variant": "candidate",
+      "size_mib": 4,
+      "round": 3,
+      "pair_order": [
+        "baseline",
+        "candidate"
+      ]
+    },
+    {
+      "status": "passed",
+      "workers": 1,
+      "concurrency": 1,
+      "prompt_bytes": 1048576,
+      "payload_bytes": 1048694,
+      "payload_sha256": "f537d97e565b7f07d229bd6dd8ff603a44aa28d5471a487d0157f3d0a68756a3",
+      "startup_to_health_ms": 10.79,
+      "idle": {
+        "daemon_rss_kib": 11820,
+        "daemon_hwm_kib": 11820,
+        "tree_rss_kib": 11820,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2
+      },
+      "warmup": {
+        "requests": 4,
+        "successful_requests": 4,
+        "errors": [],
+        "elapsed_seconds": 0.057547,
+        "requests_per_second": 69.509,
+        "latencies_ms": [
+          15.9575,
+          14.0344,
+          13.757,
+          13.6749
+        ],
+        "latency": {
+          "p50_ms": 13.757,
+          "p95_ms": 15.9575,
+          "mean_ms": 14.3559,
+          "min_ms": 13.6749,
+          "max_ms": 15.9575
+        }
+      },
+      "after_warmup": {
+        "daemon_rss_kib": 17272,
+        "daemon_hwm_kib": 22196,
+        "tree_rss_kib": 17272,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2
+      },
+      "workload": {
+        "requests": 24,
+        "successful_requests": 24,
+        "errors": [],
+        "elapsed_seconds": 0.320373,
+        "requests_per_second": 74.913,
+        "latencies_ms": [
+          13.9516,
+          14.1053,
+          13.6206,
+          12.1166,
+          14.4421,
+          13.5381,
+          12.8896,
+          12.9954,
+          13.1496,
+          11.7644,
+          13.0512,
+          12.9961,
+          13.11,
+          11.9628,
+          12.1189,
+          12.6062,
+          13.1084,
+          12.5183,
+          14.648,
+          14.5734,
+          15.4417,
+          12.6805,
+          12.8257,
+          15.6888
+        ],
+        "latency": {
+          "p50_ms": 13.0512,
+          "p95_ms": 15.4417,
+          "mean_ms": 13.3293,
+          "min_ms": 11.7644,
+          "max_ms": 15.6888
+        }
+      },
+      "after_workload": {
+        "daemon_rss_kib": 17272,
+        "daemon_hwm_kib": 22212,
+        "tree_rss_kib": 17272,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2
+      },
+      "measured_peak": {
+        "daemon_rss_kib": 21900,
+        "tree_rss_kib": 21900,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2,
+        "samples": 32,
+        "sampling_errors": 0
+      },
+      "upstream": {
+        "requests": 28,
+        "errors": []
+      },
+      "shutdown": {
+        "exit_code": 0,
+        "killed": false
+      },
+      "variant": "candidate",
+      "size_mib": 1,
+      "round": 4,
+      "pair_order": [
+        "candidate",
+        "baseline"
+      ]
+    },
+    {
+      "status": "passed",
+      "workers": 1,
+      "concurrency": 1,
+      "prompt_bytes": 1048576,
+      "payload_bytes": 1048694,
+      "payload_sha256": "f537d97e565b7f07d229bd6dd8ff603a44aa28d5471a487d0157f3d0a68756a3",
+      "startup_to_health_ms": 11.118,
+      "idle": {
+        "daemon_rss_kib": 11808,
+        "daemon_hwm_kib": 11808,
+        "tree_rss_kib": 11808,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2
+      },
+      "warmup": {
+        "requests": 4,
+        "successful_requests": 4,
+        "errors": [],
+        "elapsed_seconds": 0.072749,
+        "requests_per_second": 54.984,
+        "latencies_ms": [
+          20.7756,
+          17.5442,
+          15.3252,
+          18.9049
+        ],
+        "latency": {
+          "p50_ms": 17.5442,
+          "p95_ms": 20.7756,
+          "mean_ms": 18.1375,
+          "min_ms": 15.3252,
+          "max_ms": 20.7756
+        }
+      },
+      "after_warmup": {
+        "daemon_rss_kib": 18076,
+        "daemon_hwm_kib": 22632,
+        "tree_rss_kib": 18076,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2
+      },
+      "workload": {
+        "requests": 24,
+        "successful_requests": 24,
+        "errors": [],
+        "elapsed_seconds": 0.412513,
+        "requests_per_second": 58.18,
+        "latencies_ms": [
+          18.4444,
+          19.446,
+          16.4578,
+          15.4264,
+          16.234,
+          16.2545,
+          18.7002,
+          16.3325,
+          14.2868,
+          16.1645,
+          20.8408,
+          18.7264,
+          16.9316,
+          15.3858,
+          15.346,
+          14.7874,
+          16.0508,
+          17.3072,
+          17.0547,
+          17.2733,
+          19.9969,
+          17.1609,
+          20.2296,
+          16.9561
+        ],
+        "latency": {
+          "p50_ms": 16.9316,
+          "p95_ms": 20.2296,
+          "mean_ms": 17.1581,
+          "min_ms": 14.2868,
+          "max_ms": 20.8408
+        }
+      },
+      "after_workload": {
+        "daemon_rss_kib": 18076,
+        "daemon_hwm_kib": 23648,
+        "tree_rss_kib": 18076,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2
+      },
+      "measured_peak": {
+        "daemon_rss_kib": 22952,
+        "tree_rss_kib": 22952,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2,
+        "samples": 41,
+        "sampling_errors": 0
+      },
+      "upstream": {
+        "requests": 28,
+        "errors": []
+      },
+      "shutdown": {
+        "exit_code": 0,
+        "killed": false
+      },
+      "variant": "baseline",
+      "size_mib": 1,
+      "round": 4,
+      "pair_order": [
+        "candidate",
+        "baseline"
+      ]
+    },
+    {
+      "status": "passed",
+      "workers": 4,
+      "concurrency": 4,
+      "prompt_bytes": 1048576,
+      "payload_bytes": 1048694,
+      "payload_sha256": "f537d97e565b7f07d229bd6dd8ff603a44aa28d5471a487d0157f3d0a68756a3",
+      "startup_to_health_ms": 10.772,
+      "idle": {
+        "daemon_rss_kib": 11952,
+        "daemon_hwm_kib": 11952,
+        "tree_rss_kib": 11952,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5
+      },
+      "warmup": {
+        "requests": 4,
+        "successful_requests": 4,
+        "errors": [],
+        "elapsed_seconds": 0.038882,
+        "requests_per_second": 102.877,
+        "latencies_ms": [
+          31.1275,
+          32.114,
+          24.9953,
+          38.7492
+        ],
+        "latency": {
+          "p50_ms": 31.1275,
+          "p95_ms": 38.7492,
+          "mean_ms": 31.7465,
+          "min_ms": 24.9953,
+          "max_ms": 38.7492
+        }
+      },
+      "after_warmup": {
+        "daemon_rss_kib": 19180,
+        "daemon_hwm_kib": 36908,
+        "tree_rss_kib": 19180,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5
+      },
+      "workload": {
+        "requests": 24,
+        "successful_requests": 24,
+        "errors": [],
+        "elapsed_seconds": 0.160671,
+        "requests_per_second": 149.373,
+        "latencies_ms": [
+          28.8138,
+          18.0809,
+          23.8718,
+          19.169,
+          22.2862,
+          22.5397,
+          30.2105,
+          24.4596,
+          29.9197,
+          24.5788,
+          25.978,
+          25.2403,
+          29.2544,
+          29.7281,
+          24.3904,
+          20.5362,
+          21.8929,
+          26.9093,
+          30.2166,
+          23.2783,
+          29.8995,
+          27.7061,
+          24.57,
+          18.3929
+        ],
+        "latency": {
+          "p50_ms": 24.57,
+          "p95_ms": 30.2105,
+          "mean_ms": 25.0801,
+          "min_ms": 18.0809,
+          "max_ms": 30.2166
+        }
+      },
+      "after_workload": {
+        "daemon_rss_kib": 31988,
+        "daemon_hwm_kib": 44140,
+        "tree_rss_kib": 31988,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5
+      },
+      "measured_peak": {
+        "daemon_rss_kib": 37028,
+        "tree_rss_kib": 37028,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5,
+        "samples": 14,
+        "sampling_errors": 0
+      },
+      "upstream": {
+        "requests": 28,
+        "errors": []
+      },
+      "shutdown": {
+        "exit_code": 0,
+        "killed": false
+      },
+      "variant": "candidate",
+      "size_mib": 1,
+      "round": 4,
+      "pair_order": [
+        "candidate",
+        "baseline"
+      ]
+    },
+    {
+      "status": "passed",
+      "workers": 4,
+      "concurrency": 4,
+      "prompt_bytes": 1048576,
+      "payload_bytes": 1048694,
+      "payload_sha256": "f537d97e565b7f07d229bd6dd8ff603a44aa28d5471a487d0157f3d0a68756a3",
+      "startup_to_health_ms": 10.854,
+      "idle": {
+        "daemon_rss_kib": 11932,
+        "daemon_hwm_kib": 11932,
+        "tree_rss_kib": 11932,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5
+      },
+      "warmup": {
+        "requests": 4,
+        "successful_requests": 4,
+        "errors": [],
+        "elapsed_seconds": 0.052239,
+        "requests_per_second": 76.572,
+        "latencies_ms": [
+          40.0679,
+          40.9923,
+          37.9982,
+          52.1223
+        ],
+        "latency": {
+          "p50_ms": 40.0679,
+          "p95_ms": 52.1223,
+          "mean_ms": 42.7952,
+          "min_ms": 37.9982,
+          "max_ms": 52.1223
+        }
+      },
+      "after_warmup": {
+        "daemon_rss_kib": 23184,
+        "daemon_hwm_kib": 34452,
+        "tree_rss_kib": 23184,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5
+      },
+      "workload": {
+        "requests": 24,
+        "successful_requests": 24,
+        "errors": [],
+        "elapsed_seconds": 0.200977,
+        "requests_per_second": 119.417,
+        "latencies_ms": [
+          73.7396,
+          37.753,
+          18.9242,
+          25.9149,
+          25.7682,
+          17.7458,
+          64.5848,
+          45.6755,
+          27.0202,
+          21.6781,
+          22.6935,
+          18.7469,
+          65.785,
+          38.7413,
+          20.552,
+          22.1727,
+          22.2166,
+          17.5785,
+          31.6713,
+          42.4905,
+          43.1486,
+          20.5863,
+          21.8457,
+          22.5603
+        ],
+        "latency": {
+          "p50_ms": 22.6935,
+          "p95_ms": 65.785,
+          "mean_ms": 32.0664,
+          "min_ms": 17.5785,
+          "max_ms": 73.7396
+        }
+      },
+      "after_workload": {
+        "daemon_rss_kib": 36000,
+        "daemon_hwm_kib": 46048,
+        "tree_rss_kib": 36000,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5
+      },
+      "measured_peak": {
+        "daemon_rss_kib": 43020,
+        "tree_rss_kib": 43020,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5,
+        "samples": 19,
+        "sampling_errors": 0
+      },
+      "upstream": {
+        "requests": 28,
+        "errors": []
+      },
+      "shutdown": {
+        "exit_code": 0,
+        "killed": false
+      },
+      "variant": "baseline",
+      "size_mib": 1,
+      "round": 4,
+      "pair_order": [
+        "candidate",
+        "baseline"
+      ]
+    },
+    {
+      "status": "passed",
+      "workers": 1,
+      "concurrency": 1,
+      "prompt_bytes": 4194304,
+      "payload_bytes": 4194422,
+      "payload_sha256": "20a1f9217c3c24afaa6c59468856ad05068741929ae7d99ca45ea4787767d14f",
+      "startup_to_health_ms": 10.765,
+      "idle": {
+        "daemon_rss_kib": 11816,
+        "daemon_hwm_kib": 11816,
+        "tree_rss_kib": 11816,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2
+      },
+      "warmup": {
+        "requests": 4,
+        "successful_requests": 4,
+        "errors": [],
+        "elapsed_seconds": 0.254237,
+        "requests_per_second": 15.733,
+        "latencies_ms": [
+          65.147,
+          66.5673,
+          64.46,
+          57.8314
+        ],
+        "latency": {
+          "p50_ms": 64.46,
+          "p95_ms": 66.5673,
+          "mean_ms": 63.5014,
+          "min_ms": 57.8314,
+          "max_ms": 66.5673
+        }
+      },
+      "after_warmup": {
+        "daemon_rss_kib": 29444,
+        "daemon_hwm_kib": 49268,
+        "tree_rss_kib": 29444,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2
+      },
+      "workload": {
+        "requests": 24,
+        "successful_requests": 24,
+        "errors": [],
+        "elapsed_seconds": 1.21157,
+        "requests_per_second": 19.809,
+        "latencies_ms": [
+          58.2208,
+          53.9753,
+          51.8917,
+          53.5317,
+          60.5235,
+          60.3224,
+          47.9921,
+          48.0352,
+          54.6312,
+          49.1596,
+          47.8564,
+          49.6014,
+          47.3111,
+          46.269,
+          53.816,
+          49.5099,
+          51.8119,
+          51.3506,
+          45.609,
+          48.0279,
+          50.5343,
+          43.8303,
+          42.8838,
+          44.4025
+        ],
+        "latency": {
+          "p50_ms": 49.5099,
+          "p95_ms": 60.3224,
+          "mean_ms": 50.4624,
+          "min_ms": 42.8838,
+          "max_ms": 60.5235
+        }
+      },
+      "after_workload": {
+        "daemon_rss_kib": 29444,
+        "daemon_hwm_kib": 49800,
+        "tree_rss_kib": 29444,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2
+      },
+      "measured_peak": {
+        "daemon_rss_kib": 49804,
+        "tree_rss_kib": 49804,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2,
+        "samples": 113,
+        "sampling_errors": 0
+      },
+      "upstream": {
+        "requests": 28,
+        "errors": []
+      },
+      "shutdown": {
+        "exit_code": 0,
+        "killed": false
+      },
+      "variant": "candidate",
+      "size_mib": 4,
+      "round": 4,
+      "pair_order": [
+        "candidate",
+        "baseline"
+      ]
+    },
+    {
+      "status": "passed",
+      "workers": 1,
+      "concurrency": 1,
+      "prompt_bytes": 4194304,
+      "payload_bytes": 4194422,
+      "payload_sha256": "20a1f9217c3c24afaa6c59468856ad05068741929ae7d99ca45ea4787767d14f",
+      "startup_to_health_ms": 10.808,
+      "idle": {
+        "daemon_rss_kib": 11768,
+        "daemon_hwm_kib": 11768,
+        "tree_rss_kib": 11768,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2
+      },
+      "warmup": {
+        "requests": 4,
+        "successful_requests": 4,
+        "errors": [],
+        "elapsed_seconds": 0.220826,
+        "requests_per_second": 18.114,
+        "latencies_ms": [
+          62.0018,
+          58.0326,
+          51.8158,
+          48.8445
+        ],
+        "latency": {
+          "p50_ms": 51.8158,
+          "p95_ms": 62.0018,
+          "mean_ms": 55.1737,
+          "min_ms": 48.8445,
+          "max_ms": 62.0018
+        }
+      },
+      "after_warmup": {
+        "daemon_rss_kib": 33524,
+        "daemon_hwm_kib": 52536,
+        "tree_rss_kib": 33524,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2
+      },
+      "workload": {
+        "requests": 24,
+        "successful_requests": 24,
+        "errors": [],
+        "elapsed_seconds": 1.266304,
+        "requests_per_second": 18.953,
+        "latencies_ms": [
+          46.2548,
+          46.2205,
+          49.4152,
+          51.8041,
+          52.2294,
+          49.822,
+          61.1544,
+          59.0145,
+          59.0136,
+          54.1873,
+          54.8152,
+          59.5603,
+          52.8729,
+          53.8125,
+          47.4912,
+          48.4619,
+          47.8138,
+          50.5516,
+          50.5016,
+          55.1866,
+          55.7569,
+          46.3175,
+          49.6667,
+          63.934
+        ],
+        "latency": {
+          "p50_ms": 51.8041,
+          "p95_ms": 61.1544,
+          "mean_ms": 52.7441,
+          "min_ms": 46.2205,
+          "max_ms": 63.934
+        }
+      },
+      "after_workload": {
+        "daemon_rss_kib": 33500,
+        "daemon_hwm_kib": 53384,
+        "tree_rss_kib": 33500,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2
+      },
+      "measured_peak": {
+        "daemon_rss_kib": 53704,
+        "tree_rss_kib": 53704,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 2,
+        "samples": 120,
+        "sampling_errors": 0
+      },
+      "upstream": {
+        "requests": 28,
+        "errors": []
+      },
+      "shutdown": {
+        "exit_code": 0,
+        "killed": false
+      },
+      "variant": "baseline",
+      "size_mib": 4,
+      "round": 4,
+      "pair_order": [
+        "candidate",
+        "baseline"
+      ]
+    },
+    {
+      "status": "passed",
+      "workers": 4,
+      "concurrency": 4,
+      "prompt_bytes": 4194304,
+      "payload_bytes": 4194422,
+      "payload_sha256": "20a1f9217c3c24afaa6c59468856ad05068741929ae7d99ca45ea4787767d14f",
+      "startup_to_health_ms": 10.989,
+      "idle": {
+        "daemon_rss_kib": 11844,
+        "daemon_hwm_kib": 11844,
+        "tree_rss_kib": 11844,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5
+      },
+      "warmup": {
+        "requests": 4,
+        "successful_requests": 4,
+        "errors": [],
+        "elapsed_seconds": 0.11023,
+        "requests_per_second": 36.288,
+        "latencies_ms": [
+          110.1051,
+          87.1263,
+          106.9974,
+          107.205
+        ],
+        "latency": {
+          "p50_ms": 106.9974,
+          "p95_ms": 110.1051,
+          "mean_ms": 102.8585,
+          "min_ms": 87.1263,
+          "max_ms": 110.1051
+        }
+      },
+      "after_warmup": {
+        "daemon_rss_kib": 31356,
+        "daemon_hwm_kib": 102012,
+        "tree_rss_kib": 31356,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5
+      },
+      "workload": {
+        "requests": 24,
+        "successful_requests": 24,
+        "errors": [],
+        "elapsed_seconds": 0.42903,
+        "requests_per_second": 55.94,
+        "latencies_ms": [
+          83.6221,
+          64.154,
+          62.0044,
+          70.6964,
+          60.9619,
+          83.7342,
+          74.7127,
+          69.1723,
+          56.018,
+          58.6623,
+          58.6379,
+          60.1358,
+          95.6067,
+          64.0811,
+          62.158,
+          68.686,
+          62.2526,
+          75.6354,
+          92.6259,
+          70.152,
+          61.7881,
+          63.2097,
+          62.378,
+          75.5148
+        ],
+        "latency": {
+          "p50_ms": 64.0811,
+          "p95_ms": 92.6259,
+          "mean_ms": 69.025,
+          "min_ms": 56.018,
+          "max_ms": 95.6067
+        }
+      },
+      "after_workload": {
+        "daemon_rss_kib": 81024,
+        "daemon_hwm_kib": 129200,
+        "tree_rss_kib": 81024,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5
+      },
+      "measured_peak": {
+        "daemon_rss_kib": 119232,
+        "tree_rss_kib": 119232,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5,
+        "samples": 37,
+        "sampling_errors": 0
+      },
+      "upstream": {
+        "requests": 28,
+        "errors": []
+      },
+      "shutdown": {
+        "exit_code": 0,
+        "killed": false
+      },
+      "variant": "candidate",
+      "size_mib": 4,
+      "round": 4,
+      "pair_order": [
+        "candidate",
+        "baseline"
+      ]
+    },
+    {
+      "status": "passed",
+      "workers": 4,
+      "concurrency": 4,
+      "prompt_bytes": 4194304,
+      "payload_bytes": 4194422,
+      "payload_sha256": "20a1f9217c3c24afaa6c59468856ad05068741929ae7d99ca45ea4787767d14f",
+      "startup_to_health_ms": 10.894,
+      "idle": {
+        "daemon_rss_kib": 11828,
+        "daemon_hwm_kib": 11828,
+        "tree_rss_kib": 11828,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5
+      },
+      "warmup": {
+        "requests": 4,
+        "successful_requests": 4,
+        "errors": [],
+        "elapsed_seconds": 0.096663,
+        "requests_per_second": 41.381,
+        "latencies_ms": [
+          85.9541,
+          93.3476,
+          96.5456,
+          85.7711
+        ],
+        "latency": {
+          "p50_ms": 85.9541,
+          "p95_ms": 96.5456,
+          "mean_ms": 90.4046,
+          "min_ms": 85.7711,
+          "max_ms": 96.5456
+        }
+      },
+      "after_warmup": {
+        "daemon_rss_kib": 47732,
+        "daemon_hwm_kib": 132344,
+        "tree_rss_kib": 47732,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5
+      },
+      "workload": {
+        "requests": 24,
+        "successful_requests": 24,
+        "errors": [],
+        "elapsed_seconds": 0.47214,
+        "requests_per_second": 50.832,
+        "latencies_ms": [
+          93.2243,
+          72.3771,
+          83.8505,
+          69.898,
+          81.0054,
+          68.3572,
+          82.7436,
+          75.4118,
+          79.0637,
+          99.4691,
+          66.7189,
+          68.4447,
+          96.9026,
+          71.9831,
+          78.1685,
+          68.9463,
+          64.5092,
+          63.7533,
+          82.1281,
+          68.1484,
+          74.7311,
+          64.7439,
+          65.8091,
+          64.3091
+        ],
+        "latency": {
+          "p50_ms": 71.9831,
+          "p95_ms": 96.9026,
+          "mean_ms": 75.1957,
+          "min_ms": 63.7533,
+          "max_ms": 99.4691
+        }
+      },
+      "after_workload": {
+        "daemon_rss_kib": 97380,
+        "daemon_hwm_kib": 157424,
+        "tree_rss_kib": 97380,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5
+      },
+      "measured_peak": {
+        "daemon_rss_kib": 149564,
+        "tree_rss_kib": 149564,
+        "tree_swap_kib": 0,
+        "processes": 1,
+        "threads": 5,
+        "samples": 38,
+        "sampling_errors": 0
+      },
+      "upstream": {
+        "requests": 28,
+        "errors": []
+      },
+      "shutdown": {
+        "exit_code": 0,
+        "killed": false
+      },
+      "variant": "baseline",
+      "size_mib": 4,
+      "round": 4,
+      "pair_order": [
+        "candidate",
+        "baseline"
+      ]
+    }
+  ],
+  "artifact_identity_unchanged": true,
+  "changed_artifacts": [],
+  "status": "passed",
+  "stop_reason": null,
+  "elapsed_seconds": 22.928,
+  "planned_runs": 32,
+  "completed_runs": 32,
+  "summary": [
+    {
+      "size_mib": 1,
+      "concurrency": 1,
+      "variant": "baseline",
+      "rounds": 4,
+      "metrics": {
+        "requests_per_second": {
+          "median": 78.5765,
+          "min": 58.18,
+          "max": 81.592
+        },
+        "p50_ms": {
+          "median": 12.2807,
+          "min": 12.04,
+          "max": 16.9316
+        },
+        "p95_ms": {
+          "median": 14.9802,
+          "min": 13.6851,
+          "max": 20.2296
+        },
+        "peak_tree_rss_kib": {
+          "median": 22612.0,
+          "min": 20960,
+          "max": 22952
+        },
+        "peak_daemon_rss_kib": {
+          "median": 22612.0,
+          "min": 20960,
+          "max": 22952
+        },
+        "daemon_hwm_kib": {
+          "median": 23728.0,
+          "min": 23108,
+          "max": 23956
+        }
+      }
+    },
+    {
+      "size_mib": 1,
+      "concurrency": 1,
+      "variant": "candidate",
+      "rounds": 4,
+      "metrics": {
+        "requests_per_second": {
+          "median": 76.027,
+          "min": 72.968,
+          "max": 81.934
+        },
+        "p50_ms": {
+          "median": 12.8531,
+          "min": 11.9335,
+          "max": 13.6598
+        },
+        "p95_ms": {
+          "median": 15.4274,
+          "min": 14.2273,
+          "max": 15.6251
+        },
+        "peak_tree_rss_kib": {
+          "median": 21584.0,
+          "min": 21396,
+          "max": 21900
+        },
+        "peak_daemon_rss_kib": {
+          "median": 21584.0,
+          "min": 21396,
+          "max": 21900
+        },
+        "daemon_hwm_kib": {
+          "median": 21828.0,
+          "min": 21404,
+          "max": 22212
+        }
+      }
+    },
+    {
+      "size_mib": 1,
+      "concurrency": 4,
+      "variant": "baseline",
+      "rounds": 4,
+      "metrics": {
+        "requests_per_second": {
+          "median": 183.5935,
+          "min": 119.417,
+          "max": 208.011
+        },
+        "p50_ms": {
+          "median": 20.6051,
+          "min": 17.6839,
+          "max": 22.6935
+        },
+        "p95_ms": {
+          "median": 25.2895,
+          "min": 22.6346,
+          "max": 65.785
+        },
+        "peak_tree_rss_kib": {
+          "median": 46082.0,
+          "min": 43020,
+          "max": 51628
+        },
+        "peak_daemon_rss_kib": {
+          "median": 46082.0,
+          "min": 43020,
+          "max": 51628
+        },
+        "daemon_hwm_kib": {
+          "median": 49880.0,
+          "min": 46048,
+          "max": 54608
+        }
+      }
+    },
+    {
+      "size_mib": 1,
+      "concurrency": 4,
+      "variant": "candidate",
+      "rounds": 4,
+      "metrics": {
+        "requests_per_second": {
+          "median": 178.2305,
+          "min": 149.373,
+          "max": 218.137
+        },
+        "p50_ms": {
+          "median": 22.0193,
+          "min": 18.4584,
+          "max": 25.0502
+        },
+        "p95_ms": {
+          "median": 25.2123,
+          "min": 19.5138,
+          "max": 30.2105
+        },
+        "peak_tree_rss_kib": {
+          "median": 38062.0,
+          "min": 37028,
+          "max": 40860
+        },
+        "peak_daemon_rss_kib": {
+          "median": 38062.0,
+          "min": 37028,
+          "max": 40860
+        },
+        "daemon_hwm_kib": {
+          "median": 46196.0,
+          "min": 41628,
+          "max": 49232
+        }
+      }
+    },
+    {
+      "size_mib": 4,
+      "concurrency": 1,
+      "variant": "baseline",
+      "rounds": 4,
+      "metrics": {
+        "requests_per_second": {
+          "median": 17.308,
+          "min": 14.937,
+          "max": 19.389
+        },
+        "p50_ms": {
+          "median": 52.3482,
+          "min": 51.8041,
+          "max": 62.7938
+        },
+        "p95_ms": {
+          "median": 67.9578,
+          "min": 57.0971,
+          "max": 166.607
+        },
+        "peak_tree_rss_kib": {
+          "median": 53722.0,
+          "min": 51536,
+          "max": 53820
+        },
+        "peak_daemon_rss_kib": {
+          "median": 53722.0,
+          "min": 51536,
+          "max": 53820
+        },
+        "daemon_hwm_kib": {
+          "median": 53510.0,
+          "min": 53316,
+          "max": 53708
+        }
+      }
+    },
+    {
+      "size_mib": 4,
+      "concurrency": 1,
+      "variant": "candidate",
+      "rounds": 4,
+      "metrics": {
+        "requests_per_second": {
+          "median": 19.7965,
+          "min": 16.177,
+          "max": 20.174
+        },
+        "p50_ms": {
+          "median": 49.6109,
+          "min": 48.6302,
+          "max": 58.5689
+        },
+        "p95_ms": {
+          "median": 57.7809,
+          "min": 54.8014,
+          "max": 86.2639
+        },
+        "peak_tree_rss_kib": {
+          "median": 49558.0,
+          "min": 48592,
+          "max": 49896
+        },
+        "peak_daemon_rss_kib": {
+          "median": 49558.0,
+          "min": 48592,
+          "max": 49896
+        },
+        "daemon_hwm_kib": {
+          "median": 49868.0,
+          "min": 49428,
+          "max": 50688
+        }
+      }
+    },
+    {
+      "size_mib": 4,
+      "concurrency": 4,
+      "variant": "baseline",
+      "rounds": 4,
+      "metrics": {
+        "requests_per_second": {
+          "median": 47.267,
+          "min": 43.363,
+          "max": 50.832
+        },
+        "p50_ms": {
+          "median": 81.8259,
+          "min": 71.9831,
+          "max": 91.6189
+        },
+        "p95_ms": {
+          "median": 97.5088,
+          "min": 96.1659,
+          "max": 98.5502
+        },
+        "peak_tree_rss_kib": {
+          "median": 167414.0,
+          "min": 149564,
+          "max": 170732
+        },
+        "peak_daemon_rss_kib": {
+          "median": 167414.0,
+          "min": 149564,
+          "max": 170732
+        },
+        "daemon_hwm_kib": {
+          "median": 173840.0,
+          "min": 157424,
+          "max": 175112
+        }
+      }
+    },
+    {
+      "size_mib": 4,
+      "concurrency": 4,
+      "variant": "candidate",
+      "rounds": 4,
+      "metrics": {
+        "requests_per_second": {
+          "median": 52.872,
+          "min": 45.752,
+          "max": 55.94
+        },
+        "p50_ms": {
+          "median": 71.2966,
+          "min": 64.0811,
+          "max": 88.3337
+        },
+        "p95_ms": {
+          "median": 91.4226,
+          "min": 81.8066,
+          "max": 92.906
+        },
+        "peak_tree_rss_kib": {
+          "median": 124786.0,
+          "min": 119232,
+          "max": 145796
+        },
+        "peak_daemon_rss_kib": {
+          "median": 124786.0,
+          "min": 119232,
+          "max": 145796
+        },
+        "daemon_hwm_kib": {
+          "median": 142698.0,
+          "min": 128508,
+          "max": 158456
+        }
+      }
+    }
+  ]
+}
