@@ -34,6 +34,21 @@ paru -S zcalld zcalld-compat zcall-gui
 
 UI 使用 **zgpui（原名 zui-native）**，采用原生 GPU 绘制，不嵌入浏览器。Linux 为 X11／GLX／OpenGL，Wayland 桌面需 XWayland；Windows 为 Win32／WGL／OpenGL；macOS 为 AppKit／OpenGL，尚非 Metal。Rust 部分依赖 Project Z 自有 crate、无第三方 Cargo 依赖，**这不等于没有系统依赖**：仍需平台图形库、网络库及归档工具，Windows **core 归档**随附所需传输 DLL；可选 Go／Bun 组件另有自己的依赖与许可证。[原生后端与限制](https://github.com/LIghtJUNction/zgpui/blob/b4d5493e0cd985d00558c7be0b5726965ab5163a/docs/native.md) · [系统依赖](https://github.com/LIghtJUNction/zcalld/blob/0a0a62cdca25bbdf289a17f03dfeed1acc945595/README.md)
 
+### GUI 源码包修订：0.1.5-2
+
+Arch 的 [zcall-gui 源码包](https://aur.archlinux.org/packages/zcall-gui)修订为 **0.1.5-2**：`0.1.5` 是 GUI 版本，`-2` 是 AUR 包修订号。该修订修复空 Cargo 缓存下的离线构建：`prepare()` 核验正式归档中的库版本与锁文件，将构建副本的依赖指向随包提供的 `vendor/zgpui`，离线生成锁文件，后续构建与测试继续使用 `--frozen`。仓库的 Git 依赖及固定提交、运行时代码、正式发行资产和二进制 AUR 包保持原样。[包装修正](https://github.com/LIghtJUNction/zcall-gui/commit/d491b627223807da7b2929f3feea7461393d124c)
+
+新的冷缓存检查执行实际 `prepare()`，再分别解析 GUI 与启用 `native` 特性的内含库，要求完整依赖图均来自归档内源码。[AUR 专用工作流运行 44844718137](https://github.com/LIghtJUNction/zcall-gui/actions/runs/44844718137)已成功。维护者可用以下入口发布已有正式版本的源码包修订：
+
+```sh
+gh workflow run aur.yml --repo LIghtJUNction/zcall-gui --ref main \
+  -f version=0.1.5 -f source_pkgrel=2
+```
+
+该入口在检查成功后发布同一份已核验配方；后续新版本的默认包修订号仍为 `1`。[手动工作流与参数](https://github.com/LIghtJUNction/zcall-gui/blob/d491b627223807da7b2929f3feea7461393d124c/.github/workflows/aur.yml)
+
+**三项 Arch Linux x86_64 源码包的构建与隔离验收已完成：** `zcalld 0.4.4-1`、`zcalld-compat 0.3.1-1`、`zcall-gui 0.1.5-2` 的干净构建与 `check()` 均通过；三包联合安装后，六个程序的版本、Claude helper 能力声明及 system／user unit 语法检查均通过。namcap 错误为 0，原始警告依次为 **0／1／2**：compat 的核心服务依赖，以及 GUI 的 `zcalld`、`curl` 命令依赖均已按源码和实际产包逐项审核，未审警告为 0，原始警告总数保持。最终汇总复用已完成的实际构建与测试记录并复核原始证据，保留此前失败回执，没有将续验记作重新编译；这些结果属于隔离环境验收，生产设备部署单独验证。
+
 ## 开发与独立发布
 
 Core 日常验证入口为 [`./scripts/check.sh`](https://github.com/LIghtJUNction/zcalld/blob/0a0a62cdca25bbdf289a17f03dfeed1acc945595/scripts/check.sh) 与 `make check-native`。以下为维护者发起下一次补丁版的命令；本说明不会执行它们。
