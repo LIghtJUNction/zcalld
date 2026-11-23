@@ -23,7 +23,13 @@ keywords = ["ai", "gateway", "linux", "systemd", "plugins"]
 categories = ["command-line-utilities", "network-programming"]
 include = ["src/**", "examples/config.conf", "README.md", "LICENSE", "Cargo.toml", "Cargo.lock", "extensions/builtin-providers.json"]
 
+[workspace.dependencies]
+sha2 = { version = "0.11.1", default-features = false }
+zhex = { git = "https://github.com/LIghtJUNction/zhex.git" }
+
 [dependencies]
+sha2.workspace = true
+zhex.workspace = true
 zcall = { default-features = false, features = ["server"], git = "https://github.com/LIghtJUNction/zcall.git"}
 zconv = { default-features = false, git = "https://github.com/LIghtJUNction/zconv.git"}
 zplugin = { features = ["std"], git = "https://github.com/LIghtJUNction/zplugin.git"}

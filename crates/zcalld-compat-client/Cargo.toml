@@ -7,4 +7,6 @@ rust-version.workspace=true
 repository.workspace=true
 publish=false
 [dependencies]
+base64 = { version = "0.23.1", default-features = false, features = ["alloc"] }
+z64 = { git = "https://github.com/LIghtJUNction/z64.git" }
 zconv={default-features=false, git = "https://github.com/LIghtJUNction/zconv.git"}

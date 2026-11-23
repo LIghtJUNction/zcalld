@@ -307,66 +307,51 @@ pub fn quote(s: &str) -> String {
     out.push('"');
     out
 }
-const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+const COMPAT_BASE64: base64::engine::general_purpose::GeneralPurpose =
+    base64::engine::general_purpose::GeneralPurpose::new(
+        &base64::alphabet::STANDARD,
+        base64::engine::general_purpose::GeneralPurposeConfig::new()
+            .with_decode_allow_trailing_bits(true),
+    );
+
 pub fn encode(data: &[u8]) -> String {
-    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
-    for c in data.chunks(3) {
-        let v = ((c[0] as u32) << 16)
-            | ((c.get(1).copied().unwrap_or(0) as u32) << 8)
-            | (c.get(2).copied().unwrap_or(0) as u32);
-        for shift in [18, 12, 6, 0] {
-            out.push(B64[((v >> shift) & 63) as usize] as char)
-        }
-        if c.len() < 3 {
-            out.pop();
-            out.push('=');
-        }
-        if c.len() == 1 {
-            out.pop();
-            out.pop();
-            out.push('=');
-            out.push('=');
-        }
-    }
-    out
+    let size = z64::encoded_len(data.len(), z64::Mode::Standard)
+        .expect("encoded worker input length overflows usize");
+    let mut output = vec![0; size];
+    z64::encode(data, &mut output, z64::Mode::Standard)
+        .expect("encoded worker input fits its calculated length");
+    String::from_utf8(output).expect("base64 output is ASCII")
 }
+
 pub fn decode(s: &str) -> Result<Vec<u8>, String> {
+    use base64::Engine as _;
     if !s.len().is_multiple_of(4) || s.len() > MAX_LINE {
         return Err("invalid encoded worker output".into());
     }
-    let mut out = Vec::with_capacity(s.len() / 4 * 3);
-    for (index, c) in s.as_bytes().chunks(4).enumerate() {
-        let mut v = 0u32;
-        let mut padding = 0;
-        for (at, b) in c.iter().enumerate() {
-            v <<= 6;
-            if *b == b'=' {
-                if at < 2 {
-                    return Err("invalid base64 padding".into());
-                }
-                padding += 1;
-            } else {
-                if padding != 0 {
-                    return Err("invalid base64 padding".into());
-                }
-                v |= B64
-                    .iter()
-                    .position(|x| x == b)
-                    .ok_or("invalid base64 character")? as u32;
+    // Historical workers may set unused tail bits. Keep accepting these while
+    // the independent codec still requires standard alphabet and padding.
+    COMPAT_BASE64
+        .decode(s)
+        .map_err(|_| worker_encoding_error(s.as_bytes()).into())
+}
+
+fn worker_encoding_error(bytes: &[u8]) -> &'static str {
+    // Only classify a codec rejection here: preserve the original left-to-right
+    // padding/character diagnostic without implementing byte decoding again.
+    let mut padding = false;
+    for (index, &byte) in bytes.iter().enumerate() {
+        if byte == b'=' {
+            if index % 4 < 2 || index / 4 + 1 != bytes.len() / 4 {
+                return "invalid base64 padding";
             }
-        }
-        if padding > 0 && index + 1 != s.len() / 4 {
-            return Err("invalid base64 padding".into());
-        }
-        out.push((v >> 16) as u8);
-        if padding < 2 {
-            out.push((v >> 8) as u8)
-        }
-        if padding == 0 {
-            out.push(v as u8)
+            padding = true;
+        } else if padding {
+            return "invalid base64 padding";
+        } else if !byte.is_ascii_alphanumeric() && !matches!(byte, b'+' | b'/') {
+            return "invalid base64 character";
         }
     }
-    Ok(out)
+    "invalid encoded worker output"
 }
 #[cfg(test)]
 mod tests {
@@ -453,6 +438,68 @@ mod tests {
         .unwrap();
         drop(host);
         assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    #[test]
+    fn decoding_preserves_noncanonical_worker_tails() {
+        for symbol in b"QRSTUVWXYZabcdef" {
+            let encoded = String::from_utf8(vec![b'Y', *symbol, b'=', b'=']).unwrap();
+            assert_eq!(decode(&encoded).unwrap(), b"a");
+        }
+        for symbol in b"IJKL" {
+            let encoded = String::from_utf8(vec![b'Y', b'W', *symbol, b'=']).unwrap();
+            assert_eq!(decode(&encoded).unwrap(), b"ab");
+        }
+    }
+
+    #[test]
+    fn decoding_keeps_worker_error_categories_and_size_bound() {
+        for encoded in ["=AAA", "A===", "AA=A", "AA=?", "YQ==AAAA", "AAAA===="] {
+            assert_eq!(
+                decode(encoded).unwrap_err(),
+                "invalid base64 padding",
+                "{encoded:?}"
+            );
+        }
+        for encoded in ["?AA=", "AA?=", "A-AA", "A_AA", "A\nAA", "éAA"] {
+            assert_eq!(
+                decode(encoded).unwrap_err(),
+                "invalid base64 character",
+                "{encoded:?}"
+            );
+        }
+        for encoded in ["A", "YQ", "YWI", "YQ==="] {
+            assert_eq!(
+                decode(encoded).unwrap_err(),
+                "invalid encoded worker output"
+            );
+        }
+        assert_eq!(
+            decode(&"A".repeat(MAX_LINE)).unwrap().len(),
+            MAX_LINE / 4 * 3
+        );
+        assert_eq!(
+            decode(&"A".repeat(MAX_LINE + 4)).unwrap_err(),
+            "invalid encoded worker output"
+        );
+    }
+
+    #[test]
+    fn encoding_matches_standard_vectors() {
+        for (plain, encoded) in [
+            ("", ""),
+            ("f", "Zg=="),
+            ("fo", "Zm8="),
+            ("foo", "Zm9v"),
+            ("foob", "Zm9vYg=="),
+            ("fooba", "Zm9vYmE="),
+            ("foobar", "Zm9vYmFy"),
+        ] {
+            assert_eq!(encode(plain.as_bytes()), encoded);
+            assert_eq!(decode(encoded).unwrap(), plain.as_bytes());
+        }
+        let bytes = (0..=255).collect::<Vec<u8>>();
+        assert_eq!(decode(&encode(&bytes)).unwrap(), bytes);
     }
 
     #[test]
