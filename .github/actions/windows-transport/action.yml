@@ -1,0 +1,35 @@
+name: Windows TLS transport and request codecs
+description: Build pinned curl, zstd and zlib and export their link, DLL and license paths.
+runs:
+  using: composite
+  steps:
+    - name: Check out the pinned Windows transport build
+      if: runner.os == 'Windows'
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        repository: microsoft/vcpkg
+        ref: 8fbc7fde20b38405e194be2956132e50a642790d
+        path: _release/vcpkg
+        persist-credentials: false
+    - name: Build Windows TLS transport
+      if: runner.os == 'Windows'
+      shell: pwsh
+      working-directory: ${{ github.workspace }}
+      run: |
+        & ./_release/vcpkg/bootstrap-vcpkg.bat -disableMetrics
+        if ($LASTEXITCODE) { exit $LASTEXITCODE }
+        & ./_release/vcpkg/vcpkg.exe install 'curl[core,ssl]:x64-windows' 'zstd:x64-windows-static-md' 'zlib:x64-windows-static-md' --disable-metrics
+        if ($LASTEXITCODE) { exit $LASTEXITCODE }
+        $root = Join-Path $pwd '_release/vcpkg/installed/x64-windows'
+        $codecs = Join-Path $pwd '_release/vcpkg/installed/x64-windows-static-md'
+        # The pinned zlib 1.4 MSVC static target is named libzs.lib.
+        # Normalize that static archive to the stable Rust link name.
+        Copy-Item -LiteralPath "$codecs/lib/libzs.lib" -Destination "$codecs/lib/zlib.lib" -ErrorAction Stop
+        if (!(Test-Path "$codecs/lib/zstd.lib") -or !(Test-Path "$codecs/lib/zlib.lib")) {
+          throw 'Static request decoder libraries were not produced'
+        }
+        "RUSTFLAGS=-L native=$codecs/lib -L native=$root/lib" >> $env:GITHUB_ENV
+        "LIBCURL_DLL_DIR=$root/bin" >> $env:GITHUB_ENV
+        "LIBCURL_LICENSE_DIR=$root/share" >> $env:GITHUB_ENV
+        "CODEC_LICENSE_DIR=$codecs/share" >> $env:GITHUB_ENV
+        "$root/bin" >> $env:GITHUB_PATH
