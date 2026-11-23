@@ -16,3 +16,6 @@ zconv = { default-features = false, git = "https://github.com/LIghtJUNction/zcon
 [[bin]]
 name = "zcalld-installer"
 path = "src/main.rs"
+
+[target.'cfg(windows)'.dependencies]
+zsys.workspace = true

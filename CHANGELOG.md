@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Share Windows private-file checks and protection with zsys in both the gateway and installer. Retain DACL-only reprotection, directory inheritance, owner initialization for newly created objects and existing error messages. Route compatibility-client JSON string output through zconv while preserving control-byte spelling.
+
 ## 0.4.4 — 2026-11-20
 
 - Read installation journals from validated file snapshots during atomic state replacement, retaining owner, permission, type and hard-link checks.

@@ -24,6 +24,7 @@ categories = ["command-line-utilities", "network-programming"]
 include = ["src/**", "examples/config.conf", "README.md", "LICENSE", "Cargo.toml", "Cargo.lock", "extensions/builtin-providers.json"]
 
 [workspace.dependencies]
+zsys = { git = "https://github.com/LIghtJUNction/zsys.git" }
 sha2 = { version = "0.11.1", default-features = false }
 zhex = { git = "https://github.com/LIghtJUNction/zhex.git" }
 
@@ -44,3 +45,6 @@ strip = "symbols"
 
 [profile.dev]
 debug = 1
+
+[target.'cfg(windows)'.dependencies]
+zsys.workspace = true
