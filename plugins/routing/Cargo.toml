@@ -11,6 +11,8 @@ description = "Optional request routing, decision providers and usage for zcalld
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+sha2.workspace = true
+zhex.workspace = true
 zcalld-plugin-api = { path = "../../crates/zcalld-plugin-api", version = "=0.4.4" }
 zplugin = { features = ["std"], git = "https://github.com/LIghtJUNction/zplugin.git"}
 zconv = { default-features = false, git = "https://github.com/LIghtJUNction/zconv.git"}
