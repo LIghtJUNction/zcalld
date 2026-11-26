@@ -1,4 +1,5 @@
 //! On-demand configuration and service control. Never loaded as a separate daemon.
+mod privacy_stats;
 mod service_install;
 use crate::{
     config, http,
@@ -1071,6 +1072,9 @@ fn providers(context: &Context, args: &[String]) -> Result<(), String> {
 }
 
 fn privacy(context: &Context, args: &[String]) -> Result<(), String> {
+    if args.first().is_some_and(|action| action == "stats") {
+        return privacy_stats::run(context);
+    }
     let path = crate::extensions::privacy_settings_path(&context.path)?;
     let mut settings = if path.exists() {
         json::read(&path)?
@@ -1080,6 +1084,34 @@ fn privacy(context: &Context, args: &[String]) -> Result<(), String> {
     let mut restart_required = Value::Null;
     match args.first().map(String::as_str).unwrap_or("show") {
         "show" => {}
+        "configure" => {
+            let field = args
+                .get(1)
+                .map(String::as_str)
+                .ok_or("privacy setting required")?;
+            let enabled = match args.get(2).map(String::as_str) {
+                Some("on") => true,
+                Some("off") => false,
+                _ => return Err("privacy setting value must be on or off".into()),
+            };
+            let key = match field {
+                "model" => "redactModelOff",
+                "ignore-case" => "redactWordsAnyCase",
+                "whole-word" => "redactWordsWhole",
+                "shape" => "redactShape",
+                _ => return Err("unknown privacy setting".into()),
+            };
+            settings.set(
+                key,
+                (if field == "model" { !enabled } else { enabled }).into(),
+            );
+            if field == "model" && enabled {
+                settings.set("redactModelAuto", true.into());
+            }
+            backup(context, std::slice::from_ref(&path), "privacy")?;
+            json::atomic_write(&path, settings.stringify().as_bytes())?;
+            restart_required = false.into();
+        }
         "set" => {
             let mode = args
                 .get(1)
@@ -1102,7 +1134,7 @@ fn privacy(context: &Context, args: &[String]) -> Result<(), String> {
                 _ => return Err("privacy mode must be off, secrets or personal".into()),
             }
         }
-        _ => return Err("privacy expects show or set".into()),
+        _ => return Err("privacy expects show, set, configure or stats".into()),
     }
     let requested = settings.get("zcalldEnabled").as_bool().unwrap_or(true)
         && (settings.get("redact").as_bool().unwrap_or(false)
@@ -1155,6 +1187,26 @@ fn privacy(context: &Context, args: &[String]) -> Result<(), String> {
         (
             "custom_words",
             settings.get("redactWords").as_array().len().into(),
+        ),
+        (
+            "model_enabled",
+            (!settings.get("redactModelOff").as_bool().unwrap_or(false)).into(),
+        ),
+        (
+            "words_whole",
+            settings
+                .get("redactWordsWhole")
+                .as_bool()
+                .unwrap_or(false)
+                .into(),
+        ),
+        (
+            "shape",
+            settings
+                .get("redactShape")
+                .as_bool()
+                .unwrap_or(false)
+                .into(),
         ),
         ("settings_path", path.to_string_lossy().into_owned().into()),
     ]))

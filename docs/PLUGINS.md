@@ -249,7 +249,7 @@ zcalld plugins update sample --revision NEW_FULL_COMMIT_HASH --json
 zcalld plugins remove sample --json
 ```
 
-New packages start disabled. Git revisions are immutable full hashes, npm
+New packages are enabled after a successful install. Updates preserve their enabled state. Git revisions are immutable full hashes, npm
 versions are exact, and copied local packages have recorded SHA-256 digests.
 An optional supplied digest must match. Native packages are verified before
 activation and loading. Package lifecycle scripts are disabled. These controls

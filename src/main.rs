@@ -53,7 +53,7 @@ Configuration:
   groups list|set|remove
   model-catalog list|refresh [--type decision] [--query TEXT]
   agents list|detect|sync|apply|revert|catalog|config
-  privacy show|set off|secrets|personal
+  privacy show|set|configure|stats off|secrets|personal
   desktop show|configure|disable|plan|sync
   plugins list|inspect|install|enable|disable|remove|update|config|providers
   plugins quota list
