@@ -537,7 +537,7 @@ fn skills(context: &Context, state: &mut Value, args: &[String]) -> Result<(), S
             let dest = root.join(id);
             let current = if dest.exists() { read_tree(&dest, false)? } else { BTreeMap::new() };
             if action == "update" && previous.get("kind").as_str() == Some("git")
-                && tree_record(&current) != *previous.get("files") && !args.iter().any(|arg| arg == "--force") {
+                && git_tree_record(&current) != *previous.get("files") && !args.iter().any(|arg| arg == "--force") {
                 return Err("stored Git skill has local changes; review them or use --force to replace them".into());
             }
             // Force accepts this snapshot, never edits made while loading the source.
@@ -2140,11 +2140,22 @@ fn apply_skills(
     Ok(Value::Object(output))
 }
 fn tree_record(tree: &BTreeMap<PathBuf, FileData>) -> Value {
+    tree_record_with_paths(tree, |path| path.to_string_lossy().into_owned())
+}
+
+fn git_tree_record(tree: &BTreeMap<PathBuf, FileData>) -> Value {
+    tree_record_with_paths(tree, resource_path)
+}
+
+fn tree_record_with_paths(
+    tree: &BTreeMap<PathBuf, FileData>,
+    path_name: impl Fn(&Path) -> String,
+) -> Value {
     Value::Object(
         tree.iter()
             .map(|(path, file)| {
                 (
-                    path.to_string_lossy().into_owned(),
+                    path_name(path),
                     object([
                         ("sha256", sha256(&file.bytes).into()),
                         ("executable", file.executable.into()),

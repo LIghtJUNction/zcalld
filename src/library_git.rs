@@ -416,7 +416,7 @@ pub(super) fn fetch(
             },
         ),
         ("commit", commit.into()),
-        ("files", super::tree_record(&tree)),
+        ("files", super::git_tree_record(&tree)),
     ]);
     Ok((tree, metadata))
 }
