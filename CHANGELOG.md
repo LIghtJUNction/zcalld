@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.4.5 — 2026-11-26
+
+- Synchronize Magpie provider OAuth and record parity gaps [skip ci]
+- Validate edited provider headers before saving [skip ci]
+- Record the updated console source [skip ci]
+- Expose provider auth and header references for advanced editing [skip ci]
+- Record OAuth provider setup GUI [skip ci]
+- Bind authenticated plugin accounts to new providers [skip ci]
+- Record the synchronized gateway GUI source [skip ci]
+- Sync live agent configuration and scope gateway package updates [skip ci]
+- Update the GUI component for zgpui 0.1.9
+- build: sync zcall-gui with the native UI 0.1.9 update
+- Integrate native SSMCP listener with the local gateway [skip ci]
+- Refresh the SHA-2 lock and bundled graphical client [skip ci]
+- Synchronize zplugin Git source [skip ci]
+- Sync verified zcall-gui source [skip ci]
+- Fix routing manifest and synchronize zsys source [skip ci]
+- ci: share pinned Windows transport setup with native release consumers [skip ci]
+- Share JSON escaping and Windows privacy checks with canonical libraries [skip ci]
+- refactor: share digest and Base64 implementations across consumers [skip ci]
+- feat: improve usage, Git skills and gateway memory [skip ci]
+- chore: propagate verified Project Z dependency sources [skip ci]
+- chore(deps): synchronize current internal Git sources [skip ci]
+- Align zplugin snapshot with current canonical Git source
+- Coordinate canonical Project Z dependency snapshots
+- chore: integrate agent identity UI and validation [skip ci]
+- docs: record GUI 0.1.6 navigation fix and verified AUR package
+- chore: track zcall-gui v0.1.6 navigation repaint fix
+- docs: record verified Arch source cohort and GUI pkgrel 2 [skip ci]
+- docs: record verified 0.4.4 native release and component workflows [skip ci]
+
 ## Unreleased
 
 - Share Windows private-file checks and protection with zsys in both the gateway and installer. Retain DACL-only reprotection, directory inheritance, owner initialization for newly created objects and existing error messages. Route compatibility-client JSON string output through zconv while preserving control-byte spelling.
