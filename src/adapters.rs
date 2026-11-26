@@ -1309,22 +1309,60 @@ fn commit_agent_change(
     Ok(saved)
 }
 
+fn automatic_route<'a>(
+    config: &'a config::Config,
+    agent: Option<&Agent>,
+    url: &str,
+) -> Option<&'a str> {
+    use crate::protocol::Protocol;
+    let current = agent.and_then(|agent| observed_connection(agent, url)?.1);
+    let automatic = current.as_ref().map(|model| format!("auto/{model}"));
+    let source = match agent.map(|agent| agent.format) {
+        Some("codex") => Protocol::OpenAiResponses,
+        Some("claude") => Protocol::AnthropicMessages,
+        Some("gemini") => Protocol::GeminiGenerateContent,
+        _ => Protocol::OpenAiChat,
+    };
+    config
+        .routes
+        .iter()
+        .filter_map(|route| {
+            let (protocol, _, _) = config.providers[route.provider].for_protocol(source);
+            if protocol.is_decision() {
+                return None;
+            }
+            let score = if current.as_deref() == Some(route.name.as_str()) {
+                0
+            } else if automatic.as_deref() == Some(route.name.as_str()) {
+                1
+            } else if current.as_deref() == Some(route.model.as_str()) {
+                2
+            } else {
+                3
+            };
+            Some(((score, protocol != source), route.name.as_str()))
+        })
+        .min_by_key(|(rank, _)| *rank)
+        .map(|(_, route)| route)
+}
+
 fn apply(context: &Context, args: &[String]) -> Result<(), String> {
     let name = args.get(1).ok_or("agent name required")?;
     let config = config::Config::load(&context.path)?;
+    let agent = agents(context).into_iter().find(|agent| agent.id == name);
+    let url = control::gateway_url(context)?;
     let route = control::option(args, "--route")?
-        .map(str::to_string)
-        .or_else(|| config.routes.first().map(|r| r.name.clone()))
-        .ok_or("add a provider/model route before applying an agent")?;
+        .or_else(|| automatic_route(&config, agent.as_ref(), &url))
+        .ok_or("add a generation model route before connecting this tool")?
+        .to_owned();
     if !config.routes.iter().any(|r| r.name == route) {
         return Err("route is not in the configured model catalog".into());
     }
-    let url = control::gateway_url(context)?;
     let v1 = format!("{url}/v1");
     let token = control::gateway_token(context)?;
     let mut changes = Vec::new();
     let mut credential_key = None;
-    if let Some(agent) = agents(context).into_iter().find(|a| a.id == name) {
+    if let Some(agent) = agent {
         let first = &agent.files[0];
         let text = read_or(
             first,
@@ -1807,6 +1845,38 @@ mod tests {
         };
         (context, path)
     }
+    #[test]
+    fn automatic_codex_connect_prefers_matching_route_and_skips_decision_models() {
+        let (context, root) = fixture();
+        let file = root.join("codex.toml");
+        fs::create_dir_all(&context.directory).unwrap();
+        fs::write(
+            &context.path,
+            "[server]\nlisten = 127.0.0.1:9415\nunix_socket = none\n\
+             [provider decisions]\nbase_url = https://example.test/v1\nprotocol = decisions\n\
+             [provider text]\nbase_url = https://example.test/v1\nprotocol = responses\n\
+             [route 00-decision]\nprovider = decisions\nmodel = old\n\
+             [route auto/old]\nprovider = text\nmodel = old\n\
+             [route other]\nprovider = text\nmodel = other\n",
+        )
+        .unwrap();
+        fs::write(&file, "model = \"old\"\nmodel_provider = \"openai\"\n").unwrap();
+        let agent = Agent {
+            id: "codex",
+            binary: "codex",
+            files: vec![file],
+            format: "codex",
+        };
+        let config = config::Config::load(&context.path).unwrap();
+        let url = "http://127.0.0.1:9415";
+        assert_eq!(
+            automatic_route(&config, Some(&agent), url),
+            Some("auto/old")
+        );
+        assert_eq!(automatic_route(&config, None, url), Some("auto/old"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn sync_uses_live_codex_provider_and_route_and_preserves_external_edits() {
         let (context, root) = fixture();
