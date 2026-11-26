@@ -637,7 +637,10 @@ fn providers(context: &Context, args: &[String]) -> Result<(), String> {
                     })
                 })
                 .collect();
-            emit(object([("providers", Value::Array(list))]))
+            emit(object([
+                ("providers", Value::Array(list)),
+                ("oauth_binding", true.into()),
+            ]))
         }
         "add" | "edit" => {
             let name = args.get(1).ok_or("provider name required")?;
@@ -680,6 +683,23 @@ fn providers(context: &Context, args: &[String]) -> Result<(), String> {
             )?;
             text = ini_set(&text, &section, "base_url", &url)?;
             text = ini_set(&text, &section, "protocol", &protocol)?;
+            if let Some(plugin) = option(args, "--plugin")? {
+                let account = option(args, "--plugin-account")?
+                    .ok_or("--plugin-account required for an OAuth provider")?;
+                if !valid_name(plugin) || !valid_name(account) {
+                    return Err("invalid plugin provider or account ID".into());
+                }
+                if !old.is_empty() {
+                    return Err("a provider with this name already exists".into());
+                }
+                if flag(args, "--api-key-stdin") || option(args, "--api-key-env")?.is_some() {
+                    return Err("a plugin account cannot be combined with an API key".into());
+                }
+                text = ini_set(&text, &section, "plugin", plugin)?;
+                text = ini_set(&text, &section, "plugin_account", account)?;
+            } else if option(args, "--plugin-account")?.is_some() {
+                return Err("--plugin-account requires --plugin".into());
+            }
             if let Some(env) = option(args, "--api-key-env")? {
                 if !config::valid_env_name(env) {
                     return Err("invalid environment variable name".into());
