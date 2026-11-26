@@ -1,4 +1,5 @@
 //! Agent discovery and reversible, field-level configuration changes.
+mod editor;
 use crate::{
     config,
     control::{self, Context},
@@ -316,7 +317,8 @@ pub fn run(context: &Context, args: &[String]) -> Result<(), String> {
         "apply" => apply(context, args),
         "revert" => revert(context, args),
         "catalog" => catalog(context, args),
-        _ => Err("agents expects list, detect, sync, apply, revert or catalog".into()),
+        "config" => editor::run(context, args),
+        _ => Err("agents expects list, detect, sync, apply, revert, catalog or config".into()),
     }
 }
 

@@ -52,7 +52,7 @@ Configuration:
   routes list|set|remove
   groups list|set|remove
   model-catalog list|refresh [--type decision] [--query TEXT]
-  agents list|detect|sync|apply|revert|catalog
+  agents list|detect|sync|apply|revert|catalog|config
   privacy show|set off|secrets|personal
   desktop show|configure|disable|plan|sync
   plugins list|inspect|install|enable|disable|remove|update|config|providers
