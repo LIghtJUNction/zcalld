@@ -57,11 +57,58 @@ fn semver(value: &str) -> Result<[u64; 3], String> {
         .try_into()
         .map_err(|_| "release must use major.minor.patch".into())
 }
+#[cfg(target_os = "linux")]
+fn arch_owner(exe: &std::path::Path) -> Result<Option<String>, String> {
+    let Some(pacman) = crate::adapters::executable("pacman") else {
+        return Ok(None);
+    };
+    let output = std::process::Command::new(pacman)
+        .arg("-Qqo")
+        .arg(exe)
+        .output()
+        .map_err(|e| format!("could not query the installed gateway package: {e}"))?;
+    let owner = String::from_utf8_lossy(&output.stdout);
+    Ok(output.status.success().then(|| owner.trim().to_owned()))
+}
+
+#[cfg(target_os = "linux")]
+fn update_arch_package(package: &str) -> Result<(), String> {
+    if !matches!(package, "zcalld" | "zcalld-bin") {
+        return Err("the gateway belongs to a different package; use its package manager".into());
+    }
+    let helper = ["paru", "yay"]
+        .into_iter()
+        .find_map(crate::adapters::executable)
+        .ok_or("install paru or yay to update the installed zcalld package")?;
+    let status = std::process::Command::new(helper)
+        .args(["-S", "--needed", "--", package])
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit())
+        .status()
+        .map_err(|e| format!("could not start the gateway package update: {e}"))?;
+    if !status.success() {
+        return Err(format!("gateway package update exited with {status}"));
+    }
+    control::emit(object([
+        ("ok", true.into()),
+        ("method", "package-manager".into()),
+        ("package", package.into()),
+    ]))
+}
+
 fn update(_context: &Context, args: &[String]) -> Result<(), String> {
     let action = args.first().map(String::as_str).unwrap_or("check");
     if args.len() > 1 || !matches!(action, "check" | "apply") {
         return Err("update expects check or apply".into());
     }
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let managed = crate::installer::managed(&exe);
+    #[cfg(target_os = "linux")]
+    let managed = match arch_owner(&exe)? {
+        Some(package) if action == "apply" => return update_arch_package(&package),
+        Some(_) => true,
+        None => managed,
+    };
     let release = json::parse(&fetch(
         "https://api.github.com/repos/LIghtJUNction/zcalld/releases/latest",
     )?)?;
@@ -71,8 +118,6 @@ fn update(_context: &Context, args: &[String]) -> Result<(), String> {
         .ok_or("release has no version tag")?;
     let latest_version = semver(latest)?;
     let available = latest_version > semver(env!("CARGO_PKG_VERSION"))?;
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let managed = crate::installer::managed(&exe);
     if action == "check" {
         return control::emit(object([
             ("current", env!("CARGO_PKG_VERSION").into()),
@@ -110,7 +155,7 @@ fn update(_context: &Context, args: &[String]) -> Result<(), String> {
         ]));
     }
     if managed {
-        return Err("this installation is owned by the package manager; on Arch run paru -Syu zcalld-bin (or zcalld for source builds)".into());
+        return Err("could not identify a supported package owner for this system installation; use its package manager".into());
     }
     crate::installer::update(latest.trim_start_matches('v'), &exe)
 }

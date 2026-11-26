@@ -90,7 +90,7 @@ zcalld keys list --json
 zcalld providers add work --base-url https://api.example.com/v1 --api-key-stdin
 zcalld routes list --json
 zcalld groups set group/work --members work/model-a,work/model-b --mode rotate
-zcalld agents detect --json
+zcalld agents sync --json
 zcalld agents apply claude --route group/work --json
 zcalld agents revert claude --json
 zcalld plugins list --json
@@ -106,6 +106,7 @@ zcalld usage enable --json
 zcalld usage summary --model group/work --json
 zcalld usage export --file usage-export.jsonl --json
 zcalld update check --json
+zcalld update apply
 ```
 
 Provider `--api-key-stdin` updates an exclusive credential reference in place. If another provider, header or gateway token shares that reference, the edited provider receives a separate credential slot and the other references keep their saved value. New slots avoid existing saved credentials, configuration references and environment variables. Use `--api-key-env NAME` to select an existing credential instead; it cannot be combined with `--api-key-stdin`. Environment values still take precedence over saved credentials. Invalid or oversized credential files are rejected before either file is changed.

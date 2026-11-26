@@ -312,12 +312,176 @@ pub fn executable(name: &str) -> Option<PathBuf> {
 
 pub fn run(context: &Context, args: &[String]) -> Result<(), String> {
     match args.first().map(String::as_str).unwrap_or("list") {
-        "list" | "detect" => list(context),
+        "list" | "detect" | "sync" => list(context),
         "apply" => apply(context, args),
         "revert" => revert(context, args),
         "catalog" => catalog(context, args),
-        _ => Err("agents expects list, detect, apply, revert or catalog".into()),
+        _ => Err("agents expects list, detect, sync, apply, revert or catalog".into()),
     }
+}
+
+// Read the same fields the built-in adapters write. An inactive provider
+// or a URL in a comment must not count as a gateway connection.
+fn observed_connection(agent: &Agent, url: &str) -> Option<(bool, Option<String>)> {
+    let text = control::read_text(&agent.files[0]).ok()?;
+    let v1 = format!("{url}/v1");
+    let json_value = |text: &str| json::parse_jsonc(text).ok();
+    let secondary = || control::read_text(&agent.files[1]).ok();
+    let (connected, route) = match agent.format {
+        "codex" => (
+            scalar(&text, "", "model_provider", '=').as_deref() == Some("zcalld")
+                && scalar(&text, "model_providers.zcalld", "base_url", '=').as_deref() == Some(&v1),
+            scalar(&text, "", "model", '='),
+        ),
+        "aider" => (
+            scalar(&text, "", "openai-api-base", ':').as_deref() == Some(&v1),
+            scalar(&text, "", "model", ':')
+                .and_then(|model| model.strip_prefix("openai/").map(str::to_owned)),
+        ),
+        "goose" => (
+            scalar(&text, "", "GOOSE_PROVIDER", ':').as_deref() == Some("openai")
+                && scalar(&text, "", "OPENAI_HOST", ':').as_deref() == Some(url),
+            scalar(&text, "", "GOOSE_MODEL", ':'),
+        ),
+        "detect" => return None,
+        format => {
+            let data = json_value(&text)?;
+            let model = data.get("model");
+            let (connected, route) = match format {
+                "claude" => {
+                    let env = data.get("env");
+                    (
+                        env.get("ANTHROPIC_BASE_URL").as_str() == Some(url),
+                        env.get("ANTHROPIC_MODEL")
+                            .as_str()
+                            .or_else(|| model.as_str()),
+                    )
+                }
+                "gemini" | "qwen" => {
+                    let auth = data
+                        .get("security")
+                        .get("auth")
+                        .get("selectedType")
+                        .as_str();
+                    let env = secondary().unwrap_or_default();
+                    let connected = if format == "gemini" {
+                        auth == Some("gemini-api-key")
+                            && scalar(&env, "", "GOOGLE_GEMINI_BASE_URL", '=').as_deref()
+                                == Some(url)
+                    } else {
+                        auth == Some("openai")
+                            && model.get("baseUrl").as_str() == Some(&v1)
+                            && scalar(&env, "", "OPENAI_BASE_URL", '=').as_deref() == Some(&v1)
+                    };
+                    (connected, model.get("name").as_str())
+                }
+                "opencode" => {
+                    let route = model
+                        .as_str()
+                        .and_then(|model| model.strip_prefix("zcalld/"));
+                    (
+                        route.is_some()
+                            && data
+                                .get("provider")
+                                .get("zcalld")
+                                .get("options")
+                                .get("baseURL")
+                                .as_str()
+                                == Some(&v1),
+                        route,
+                    )
+                }
+                "zed" => {
+                    let default = data.get("agent").get("default_model");
+                    (
+                        default.get("provider").as_str() == Some("zcalld")
+                            && data
+                                .get("language_models")
+                                .get("openai_compatible")
+                                .get("zcalld")
+                                .get("api_url")
+                                .as_str()
+                                == Some(&v1),
+                        default.get("model").as_str(),
+                    )
+                }
+                "pi" => {
+                    let settings = json_value(&secondary()?)?;
+                    return Some((
+                        settings.get("defaultProvider").as_str() == Some("zcalld")
+                            && data.get("providers").get("zcalld").get("baseUrl").as_str()
+                                == Some(&v1),
+                        settings.get("defaultModel").as_str().map(str::to_owned),
+                    ));
+                }
+                "vscode" => {
+                    let models = json_value(&secondary()?)?;
+                    let route = data.get("chat.defaultModel").as_str();
+                    let endpoint = format!("{v1}/chat/completions");
+                    (
+                        models.as_array().iter().any(|group| {
+                            group.get("name").as_str() == Some("zcalld")
+                                && group.get("vendor").as_str() == Some("customendpoint")
+                                && group.get("models").as_array().iter().any(|model| {
+                                    route.is_some()
+                                        && model.get("id").as_str() == route
+                                        && model.get("url").as_str() == Some(&endpoint)
+                                })
+                        }),
+                        route,
+                    )
+                }
+                _ => return None,
+            };
+            (connected, route.map(str::to_owned))
+        }
+    };
+    Some((connected, route))
+}
+
+fn scalar(text: &str, table: &str, key: &str, separator: char) -> Option<String> {
+    let mut current = "";
+    let mut found = None;
+    for line in text.lines() {
+        if separator == ':' && line.starts_with([' ', '\t']) {
+            continue;
+        }
+        let line = line.trim();
+        if separator == '=' && line.starts_with('[') {
+            let header = &line[..inline_comment(line).unwrap_or(line.len())];
+            current = header.trim().trim_matches(['[', ']']).trim();
+            continue;
+        }
+        let Some((name, value)) = line.trim_start_matches("export ").split_once(separator) else {
+            continue;
+        };
+        if current != table || name.trim() != key {
+            continue;
+        }
+        if found.is_some() {
+            return None;
+        }
+        let value = value[..inline_comment(value).unwrap_or(value.len())].trim();
+        found = Some(if value.starts_with('"') {
+            json::parse(value.as_bytes()).ok()?.as_str()?.to_owned()
+        } else if let Some(value) = value.strip_prefix('\'') {
+            value.strip_suffix('\'')?.to_owned()
+        } else {
+            value.to_owned()
+        });
+    }
+    found.filter(|value| !value.is_empty())
+}
+
+fn restore_state(applied: &Value, name: &str) -> (bool, bool) {
+    let Some(backup) = applied.get(name).get("backup").as_str() else {
+        return (false, false);
+    };
+    let backup = Path::new(backup);
+    let restorable = json::read(&backup.join("manifest.json"))
+        .and_then(|manifest| check_applied_files(backup, &manifest))
+        .is_ok();
+    (restorable, !restorable)
 }
 
 fn list(context: &Context) -> Result<(), String> {
@@ -327,16 +491,25 @@ fn list(context: &Context) -> Result<(), String> {
     for agent in agents(context) {
         let binary = agent_executable(context, &agent);
         let observed = agent.files.iter().any(|p| p.is_file());
-        let configured = agent
-            .files
-            .iter()
-            .any(|p| !url.is_empty() && control::read_text(p).is_ok_and(|s| s.contains(&url)));
+        let (configured, route) = if url.is_empty() {
+            (false, None)
+        } else {
+            observed_connection(&agent, &url).unwrap_or_default()
+        };
+        let (restorable, changed) = restore_state(&applied, agent.id);
         list.push(object([
             ("name", agent.id.into()),
             ("installed", binary.is_some().into()),
             ("detected_config", observed.into()),
             ("configured", configured.into()),
-            ("route", applied.get(agent.id).get("route").clone()),
+            (
+                "route",
+                route
+                    .filter(|_| configured)
+                    .map_or(Value::Null, Value::from),
+            ),
+            ("restorable", restorable.into()),
+            ("changed", changed.into()),
             ("path", agent.files[0].to_string_lossy().into_owned().into()),
             (
                 "executable",
@@ -352,25 +525,65 @@ fn list(context: &Context) -> Result<(), String> {
     for (name, definition) in custom_definitions(context)? {
         let binary = definition.get("binary").as_str().and_then(executable);
         let files = definition.get("files").as_array();
-        let paths: Vec<_> = files
+        let files: Vec<_> = files
             .iter()
-            .filter_map(|f| f.get("path").as_str())
-            .filter_map(|p| under_home(context, p).ok())
+            .filter_map(|file| {
+                let path = under_home(context, file.get("path").as_str()?).ok()?;
+                Some((path, file.get("bindings").as_array()))
+            })
             .collect();
-        let configured = paths
-            .iter()
-            .any(|p| !url.is_empty() && control::read_text(p).is_ok_and(|s| s.contains(&url)));
+        let configured = !url.is_empty()
+            && files.iter().any(|(path, bindings)| {
+                let Some(data) = control::read_text(path)
+                    .ok()
+                    .and_then(|text| json::parse_jsonc(&text).ok())
+                else {
+                    return false;
+                };
+                bindings.iter().any(|binding| {
+                    let Some(template) = binding.get("value").as_str() else {
+                        return false;
+                    };
+                    if !template.contains("${gateway}")
+                        && !template.contains("${gateway_v1}")
+                        && template != url
+                        && template != format!("{url}/v1")
+                    {
+                        return false;
+                    }
+                    let actual = binding
+                        .get("path")
+                        .as_array()
+                        .iter()
+                        .try_fold(&data, |data, key| Some(data.get(key.as_str()?)));
+                    let expected = template
+                        .replace("${gateway}", &url)
+                        .replace("${gateway_v1}", &format!("{url}/v1"));
+                    actual.and_then(Value::as_str) == Some(expected.as_str())
+                })
+            });
+        let (restorable, changed) = restore_state(&applied, &name);
+        let route = if configured && restorable {
+            applied.get(&name).get("route").clone()
+        } else {
+            Value::Null
+        };
         list.push(object([
             ("name", name.into()),
             ("installed", binary.is_some().into()),
-            ("detected_config", paths.iter().any(|p| p.is_file()).into()),
+            (
+                "detected_config",
+                files.iter().any(|(path, _)| path.is_file()).into(),
+            ),
             ("configured", configured.into()),
-            ("route", Value::Null),
+            ("route", route),
+            ("restorable", restorable.into()),
+            ("changed", changed.into()),
             (
                 "path",
-                paths
+                files
                     .first()
-                    .map(|p| p.to_string_lossy().into_owned())
+                    .map(|(path, _)| path.to_string_lossy().into_owned())
                     .unwrap_or_default()
                     .into(),
             ),
@@ -445,8 +658,11 @@ fn toml_set_literal(text: &str, table: &str, key: &str, value: &str) -> Result<S
     }
     let new = format!("{key} = {value}");
     if let Some(i) = found {
-        let comment = toml_comment(lines[i].split_once('=').unwrap().1);
-        lines[i] = format!("{new}{comment}");
+        let previous = lines[i].split_once('=').unwrap().1;
+        lines[i] = match inline_comment(previous) {
+            Some(offset) => format!("{new} {}", &previous[offset..]),
+            None => new,
+        };
     } else if let Some(i) = insertion {
         lines.insert(i, new);
     } else {
@@ -456,7 +672,7 @@ fn toml_set_literal(text: &str, table: &str, key: &str, value: &str) -> Result<S
     }
     Ok(lines.join("\n") + "\n")
 }
-fn toml_comment(value: &str) -> String {
+fn inline_comment(value: &str) -> Option<usize> {
     let mut quote = None;
     let mut escape = false;
     for (i, c) in value.char_indices() {
@@ -475,10 +691,10 @@ fn toml_comment(value: &str) -> String {
         } else if c == '\'' || c == '"' {
             quote = Some(c);
         } else if c == '#' {
-            return format!(" {}", &value[i..]);
+            return Some(i);
         }
     }
-    String::new()
+    None
 }
 fn env_set(text: &str, key: &str, value: &str) -> String {
     let mut lines: Vec<_> = text
@@ -1389,6 +1605,18 @@ fn apply(context: &Context, args: &[String]) -> Result<(), String> {
     ]))
 }
 
+fn check_applied_files(directory: &Path, manifest: &Value) -> Result<(), String> {
+    for (i, record) in manifest.get("files").as_array().iter().enumerate() {
+        let path = Path::new(record.get("path").as_str().ok_or("invalid backup path")?);
+        let expected =
+            fs::read(directory.join(format!("{i}.applied"))).map_err(|e| e.to_string())?;
+        if fs::read(path).map_err(|e| e.to_string())? != expected {
+            return Err("agent file changed after apply; review it before reverting, or use --force to restore exact backup".into());
+        }
+    }
+    Ok(())
+}
+
 fn restore_manifest(
     directory: &Path,
     check: bool,
@@ -1396,14 +1624,7 @@ fn restore_manifest(
 ) -> Result<(), String> {
     let manifest = json::read(&directory.join("manifest.json"))?;
     if check {
-        for (i, record) in manifest.get("files").as_array().iter().enumerate() {
-            let path = Path::new(record.get("path").as_str().ok_or("invalid backup path")?);
-            let expected =
-                fs::read(directory.join(format!("{i}.applied"))).map_err(|e| e.to_string())?;
-            if fs::read(path).map_err(|e| e.to_string())? != expected {
-                return Err("agent file changed after apply; review it before reverting, or use --force to restore exact backup".into());
-            }
-        }
+        check_applied_files(directory, &manifest)?;
     }
     let credential = manifest.get("credential");
     if credential.get("url").as_str().is_some() {
@@ -1434,7 +1655,13 @@ fn revert(context: &Context, args: &[String]) -> Result<(), String> {
         .filter(|s| control::safe_id(s))
         .ok_or("safe agent name required")?;
     let path = context.directory.join("agents/applied.json");
-    let mut state = json::read(&path)?;
+    let mut state = match fs::read(&path) {
+        Ok(bytes) => json::parse(&bytes)?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Err("agent has no managed change to revert".into());
+        }
+        Err(error) => return Err(format!("{}: {error}", path.display())),
+    };
     let backup = state
         .get(name)
         .get("backup")
@@ -1580,6 +1807,64 @@ mod tests {
         };
         (context, path)
     }
+    #[test]
+    fn sync_uses_live_codex_provider_and_route_and_preserves_external_edits() {
+        let (context, root) = fixture();
+        let file = root.join("tool/config.toml");
+        let url = "http://127.0.0.1:9415";
+        let config = |provider, route| {
+            format!(
+                "model = '{route}' # current route\nmodel_provider = '{provider}'\n\n[model_providers.zcalld] # gateway settings\nbase_url = '{url}/v1'\n"
+            )
+        };
+        let agent = Agent {
+            id: "codex",
+            binary: "codex",
+            files: vec![file.clone()],
+            format: "codex",
+        };
+
+        json::atomic_write(&file, config("zcalld", "manual").as_bytes()).unwrap();
+        assert_eq!(
+            observed_connection(&agent, url),
+            Some((true, Some("manual".into())))
+        );
+        assert_eq!(restore_state(&Value::Null, "codex"), (false, false));
+
+        let backup = commit_agent_change(
+            &context,
+            "codex",
+            "original-route",
+            &[(file.clone(), config("zcalld", "original-route"))],
+            None,
+        )
+        .unwrap();
+        let applied = json::read(&context.directory.join("agents/applied.json")).unwrap();
+        assert_eq!(restore_state(&applied, "codex"), (true, false));
+
+        json::atomic_write(&file, config("zcalld", "edited-route").as_bytes()).unwrap();
+        assert_eq!(
+            observed_connection(&agent, url),
+            Some((true, Some("edited-route".into())))
+        );
+        assert_eq!(restore_state(&applied, "codex"), (false, true));
+        assert!(restore_manifest(&backup, true, None).is_err());
+        assert_eq!(
+            fs::read_to_string(&file).unwrap(),
+            config("zcalld", "edited-route")
+        );
+
+        json::atomic_write(&file, config("openai", "edited-route").as_bytes()).unwrap();
+        assert_eq!(
+            observed_connection(&agent, url),
+            Some((false, Some("edited-route".into())))
+        );
+        fs::remove_file(&file).unwrap();
+        assert_eq!(observed_connection(&agent, url), None);
+        assert_eq!(restore_state(&applied, "codex"), (false, true));
+        fs::remove_dir_all(root).unwrap();
+    }
+
     struct MemoryCredentials {
         values: std::cell::RefCell<BTreeMap<String, Vec<u8>>>,
         unavailable: bool,

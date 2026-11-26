@@ -50,7 +50,7 @@ Configuration:
   keys list|add|rotate|revoke
   routes list|set|remove
   groups list|set|remove
-  agents list|apply|revert|catalog
+  agents list|detect|sync|apply|revert|catalog
   privacy show|set off|secrets|personal
   desktop show|configure|disable|plan|sync
   plugins list|inspect|install|enable|disable|remove|update|config|providers
