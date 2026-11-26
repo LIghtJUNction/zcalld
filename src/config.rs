@@ -525,6 +525,31 @@ fn valid_header_name(name: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&byte))
 }
 
+pub(crate) fn custom_header_allowed(name: &str) -> bool {
+    valid_header_name(name)
+        && !matches!(
+            name,
+            "host"
+                | "connection"
+                | "content-length"
+                | "transfer-encoding"
+                | "keep-alive"
+                | "proxy-connection"
+                | "te"
+                | "trailer"
+                | "upgrade"
+                | "expect"
+                | "content-type"
+                | "content-encoding"
+                | "accept"
+                | "accept-encoding"
+                | "authorization"
+                | "proxy-authorization"
+                | "x-api-key"
+                | "x-goog-api-key"
+        )
+}
+
 fn provider_headers(
     values: &mut Section,
     directory: &Path,
@@ -542,29 +567,7 @@ fn provider_headers(
     for key in keys {
         let (prefix, name) = key.split_once('.').expect("header prefix");
         let name = name.to_ascii_lowercase();
-        if !valid_header_name(&name)
-            || matches!(
-                name.as_str(),
-                "host"
-                    | "connection"
-                    | "content-length"
-                    | "transfer-encoding"
-                    | "keep-alive"
-                    | "proxy-connection"
-                    | "te"
-                    | "trailer"
-                    | "upgrade"
-                    | "expect"
-                    | "content-type"
-                    | "content-encoding"
-                    | "accept"
-                    | "accept-encoding"
-                    | "authorization"
-                    | "proxy-authorization"
-                    | "x-api-key"
-                    | "x-goog-api-key"
-            )
-        {
+        if !custom_header_allowed(&name) {
             return Err(format!("provider header {name} is managed by the gateway"));
         }
         let value = values.remove(&key).expect("enumerated key");

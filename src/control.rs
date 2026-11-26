@@ -601,6 +601,51 @@ fn provider_credential_env(
     selected
 }
 
+fn replace_header_refs(text: &str, section: &str, input: &str) -> Result<String, String> {
+    let old = sections(text)
+        .into_iter()
+        .find(|(name, _)| name == section)
+        .map(|(_, fields)| fields)
+        .unwrap_or_default();
+    let mut names = std::collections::BTreeSet::new();
+    for key in old.keys() {
+        if let Some(name) = key.strip_prefix("header.") {
+            names.insert(name.to_ascii_lowercase());
+        }
+    }
+    let mut refs = Vec::new();
+    for entry in input.split(',').filter(|_| !input.trim().is_empty()) {
+        let (header, env) = entry.split_once('=').ok_or("expected Header=ENV_VAR")?;
+        let header = header.trim().to_ascii_lowercase();
+        let env = env.trim();
+        if !config::custom_header_allowed(&header)
+            || !config::valid_env_name(env)
+            || !names.insert(header.clone())
+            || names.len() > 32
+        {
+            return Err("invalid, conflicting or excessive provider header references".into());
+        }
+        refs.push((format!("header_env.{header}"), env));
+    }
+    let mut active = false;
+    let mut result = String::new();
+    for line in text.lines() {
+        if let Some(name) = section_header(line) {
+            active = name == section;
+        }
+        if active && line.trim_start().starts_with("header_env.") && line.split_once('=').is_some()
+        {
+            continue;
+        }
+        result.push_str(line);
+        result.push('\n');
+    }
+    for (header, env) in refs {
+        result = ini_set(&result, section, &header, env)?;
+    }
+    Ok(result)
+}
+
 fn providers(context: &Context, args: &[String]) -> Result<(), String> {
     let action = args.first().map(String::as_str).unwrap_or("list");
     let mut text = config_text(context)?;
@@ -613,6 +658,18 @@ fn providers(context: &Context, args: &[String]) -> Result<(), String> {
                         let env = v.get("api_key_env").cloned().unwrap_or_default();
                         object([
                             ("name", name.into()),
+                            ("auth", v.get("auth").cloned().unwrap_or_default().into()),
+                            (
+                                "header_env",
+                                v.iter()
+                                    .filter_map(|(key, val)| {
+                                        key.strip_prefix("header_env.")
+                                            .map(|header| format!("{header}={val}"))
+                                    })
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                                    .into(),
+                            ),
                             (
                                 "base_url",
                                 v.get("base_url").cloned().unwrap_or_default().into(),
@@ -640,6 +697,7 @@ fn providers(context: &Context, args: &[String]) -> Result<(), String> {
             emit(object([
                 ("providers", Value::Array(list)),
                 ("oauth_binding", true.into()),
+                ("advanced_options", true.into()),
             ]))
         }
         "add" | "edit" => {
@@ -683,6 +741,32 @@ fn providers(context: &Context, args: &[String]) -> Result<(), String> {
             )?;
             text = ini_set(&text, &section, "base_url", &url)?;
             text = ini_set(&text, &section, "protocol", &protocol)?;
+            if let Some(auth) = option(args, "--auth")? {
+                text = match auth {
+                    "default" => {
+                        let mut active = false;
+                        text.lines()
+                            .filter(|line| {
+                                if let Some(name) = section_header(line) {
+                                    active = name == section;
+                                }
+                                !active
+                                    || !line
+                                        .split_once('=')
+                                        .is_some_and(|(key, _)| key.trim() == "auth")
+                            })
+                            .map(|line| format!("{line}\n"))
+                            .collect()
+                    }
+                    "bearer" | "x-api-key" | "x-goog-api-key" | "none" => {
+                        ini_set(&text, &section, "auth", auth)?
+                    }
+                    _ => return Err("invalid provider authentication method".into()),
+                };
+            }
+            if let Some(references) = option(args, "--header-env")? {
+                text = replace_header_refs(&text, &section, references)?;
+            }
             if let Some(plugin) = option(args, "--plugin")? {
                 let account = option(args, "--plugin-account")?
                     .ok_or("--plugin-account required for an OAuth provider")?;
@@ -1299,6 +1383,38 @@ fn service(context: &Context, args: &[String]) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn provider_header_references_preserve_other_fields_and_reject_conflicts() {
+        let text = "[provider demo]\n# keep me\nheader.X-Literal = stable\nheader_env.X-Old = OLD_TOKEN\n[provider other]\nheader_env.X-Old = UNCHANGED\n";
+        let updated = replace_header_refs(
+            text,
+            "provider demo",
+            "X-Client=CLIENT_ID, X-Project=PROJECT_ID",
+        )
+        .unwrap();
+        assert!(updated.contains("# keep me\nheader.X-Literal = stable\n"));
+        assert_eq!(
+            ini_get(&updated, "provider demo", "header_env.x-client").as_deref(),
+            Some("CLIENT_ID")
+        );
+        assert_eq!(
+            ini_get(&updated, "provider other", "header_env.X-Old").as_deref(),
+            Some("UNCHANGED")
+        );
+        assert!(ini_get(&updated, "provider demo", "header_env.X-Old").is_none());
+        assert!(replace_header_refs(text, "provider demo", "Authorization=KEY").is_err());
+        assert!(replace_header_refs(text, "provider demo", "x-literal=KEY").is_err());
+        assert!(replace_header_refs(text, "provider demo", "X-Test=KEY,x-test=KEY").is_err());
+        assert!(
+            ini_get(
+                &replace_header_refs(text, "provider demo", "").unwrap(),
+                "provider demo",
+                "header_env.X-Old"
+            )
+            .is_none()
+        );
+    }
+
     #[test]
     fn ini_edits_keep_unrelated_sections_and_comments() {
         let text =
