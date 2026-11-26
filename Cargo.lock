@@ -133,7 +133,7 @@ dependencies = [
 
 [[package]]
 name = "zcalld"
-version = "0.4.7"
+version = "0.4.8"
 dependencies = [
  "sha2",
  "zcall",
@@ -148,7 +148,7 @@ dependencies = [
 
 [[package]]
 name = "zcalld-compat-client"
-version = "0.4.7"
+version = "0.4.8"
 dependencies = [
  "base64",
  "z64",
@@ -157,7 +157,7 @@ dependencies = [
 
 [[package]]
 name = "zcalld-installer"
-version = "0.4.7"
+version = "0.4.8"
 dependencies = [
  "sha2",
  "zconv",
@@ -167,7 +167,7 @@ dependencies = [
 
 [[package]]
 name = "zcalld-plugin-aliases"
-version = "0.4.7"
+version = "0.4.8"
 dependencies = [
  "zcalld-plugin-api",
  "zplugin",
@@ -175,14 +175,14 @@ dependencies = [
 
 [[package]]
 name = "zcalld-plugin-api"
-version = "0.4.7"
+version = "0.4.8"
 dependencies = [
  "zplugin",
 ]
 
 [[package]]
 name = "zcalld-plugin-community"
-version = "0.4.7"
+version = "0.4.8"
 dependencies = [
  "zcalld-compat-client",
  "zcalld-plugin-api",
@@ -191,7 +191,7 @@ dependencies = [
 
 [[package]]
 name = "zcalld-plugin-desktop"
-version = "0.4.7"
+version = "0.4.8"
 dependencies = [
  "zcalld-compat-client",
  "zcalld-plugin-api",
@@ -202,7 +202,7 @@ dependencies = [
 
 [[package]]
 name = "zcalld-plugin-policy"
-version = "0.4.7"
+version = "0.4.8"
 dependencies = [
  "zcalld-plugin-api",
  "zplugin",
@@ -210,7 +210,7 @@ dependencies = [
 
 [[package]]
 name = "zcalld-plugin-redact"
-version = "0.4.7"
+version = "0.4.8"
 dependencies = [
  "zcalld-compat-client",
  "zcalld-plugin-api",
@@ -219,7 +219,7 @@ dependencies = [
 
 [[package]]
 name = "zcalld-plugin-routing"
-version = "0.4.7"
+version = "0.4.8"
 dependencies = [
  "sha2",
  "zcalld-compat-client",

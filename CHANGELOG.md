@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.8 — 2026-11-26
+
+- Compare Git skill snapshots using portable resource names [skip ci]
+- Select a matching generation route for one-click agent setup [skip ci]
+
 ## 0.4.7 — 2026-11-26
 
 - Pass canonical Windows repository paths to Git without Win32 namespace prefixes [skip ci]

@@ -4,7 +4,7 @@ exclude = ["apps/zcall-gui", "extensions/compat", "vendor/zcall", "vendor/zconv"
 resolver = "3"
 
 [workspace.package]
-version = "0.4.7"
+version = "0.4.8"
 edition = "2024"
 rust-version = "1.100"
 license = "MIT"
@@ -34,9 +34,9 @@ zhex.workspace = true
 zcall = { default-features = false, features = ["server"], git = "https://github.com/LIghtJUNction/zcall.git"}
 zconv = { default-features = false, git = "https://github.com/LIghtJUNction/zconv.git"}
 zplugin = { features = ["std"], git = "https://github.com/LIghtJUNction/zplugin.git"}
-zcalld-plugin-api = { version = "=0.4.7", path = "crates/zcalld-plugin-api" }
-zcalld-compat-client = { version = "=0.4.7", path = "crates/zcalld-compat-client" }
-zcalld-installer = { version = "=0.4.7", path = "crates/zcalld-installer" }
+zcalld-plugin-api = { version = "=0.4.8", path = "crates/zcalld-plugin-api" }
+zcalld-compat-client = { version = "=0.4.8", path = "crates/zcalld-compat-client" }
+zcalld-installer = { version = "=0.4.8", path = "crates/zcalld-installer" }
 
 [profile.release]
 lto = "thin"
