@@ -76,6 +76,35 @@ impl Client {
     }
 
     pub fn perform(&mut self, options: Options<'_>, sink: &mut dyn Sink) -> Result<(), String> {
+        self.perform_inner(options, sink, None, false)
+    }
+
+    #[cfg(target_os = "linux")]
+    pub fn perform_local(
+        &mut self,
+        options: Options<'_>,
+        socket: Option<&std::path::Path>,
+        sink: &mut dyn Sink,
+    ) -> Result<(), String> {
+        self.perform_inner(options, sink, socket, true)
+    }
+
+    fn perform_inner(
+        &mut self,
+        options: Options<'_>,
+        sink: &mut dyn Sink,
+        socket: Option<&std::path::Path>,
+        local: bool,
+    ) -> Result<(), String> {
+        let socket = socket
+            .map(|path| {
+                path.to_str()
+                    .ok_or_else(|| "local gateway socket must be UTF-8".to_owned())
+                    .and_then(|path| {
+                        CString::new(path).map_err(|_| "invalid local gateway socket".to_owned())
+                    })
+            })
+            .transpose()?;
         let url = CString::new(options.url).map_err(|_| "invalid upstream URL")?;
         let mut headers = HeaderList(std::ptr::null_mut());
         for value in options.headers {
@@ -106,6 +135,12 @@ impl Client {
                 }};
             }
             option!(10002, url.as_ptr()); // CURLOPT_URL
+            if let Some(path) = socket.as_ref() {
+                option!(10231, path.as_ptr()); // CURLOPT_UNIX_SOCKET_PATH
+            }
+            if local {
+                option!(10004, c"".as_ptr()); // Local listener requests never use ambient proxies.
+            }
             // A read/seek pair refuses rewinds after upload starts. POSTFIELDS
             // would let libcurl silently replay POST on a stale pooled socket.
             option!(10015, std::ptr::null::<c_char>()); // CURLOPT_POSTFIELDS

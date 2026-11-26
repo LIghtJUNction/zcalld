@@ -12,6 +12,7 @@ mod extensions;
 mod http;
 mod installer;
 mod keys;
+mod listener;
 mod maintenance;
 mod migration;
 mod plugin_http;
@@ -38,6 +39,8 @@ Gateway:
   serve                    Foreground daemon; systemd/launchd friendly
   check | health | status  Validate configuration or inspect the live gateway
   models                   Show public models and retained capability metadata
+  listen --ssmcp-socket PATH --model ROUTE [--once] [--timeout-ms N]
+                           Local Linux listener; --config PATH and --token-env NAME are optional
   env [openai|anthropic|gemini]
   service start|stop|restart|enable|disable|status [--system]
   service install          Prepare a Linux user unit for a verified private install
@@ -107,6 +110,9 @@ fn run() -> Result<(), String> {
     if management_args.iter().any(|a| a == "--help" || a == "-h") {
         print!("{HELP}");
         return Ok(());
+    }
+    if let Some(result) = listener::run(&management_args) {
+        return result;
     }
     if let Some(result) = control::run(&management_args) {
         return result;
