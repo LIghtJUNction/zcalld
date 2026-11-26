@@ -765,7 +765,14 @@ fn providers(context: &Context, args: &[String]) -> Result<(), String> {
                 };
             }
             if let Some(references) = option(args, "--header-env")? {
-                text = replace_header_refs(&text, &section, references)?;
+                let candidate = replace_header_refs(&text, &section, references)?;
+                let mut fields = sections(&candidate)
+                    .into_iter()
+                    .find(|(entry, _)| entry == &section)
+                    .map(|(_, fields)| fields)
+                    .unwrap_or_default();
+                config::provider_headers(&mut fields, &context.directory)?;
+                text = candidate;
             }
             if let Some(plugin) = option(args, "--plugin")? {
                 let account = option(args, "--plugin-account")?

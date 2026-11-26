@@ -550,7 +550,7 @@ pub(crate) fn custom_header_allowed(name: &str) -> bool {
         )
 }
 
-fn provider_headers(
+pub(crate) fn provider_headers(
     values: &mut Section,
     directory: &Path,
 ) -> Result<Vec<(String, String)>, String> {
