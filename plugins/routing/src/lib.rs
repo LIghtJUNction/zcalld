@@ -1041,7 +1041,7 @@ impl GatewayPlugin for Router {
         };
         let mut preferred = Vec::new();
         // A pause is re-evaluated on every request, including a held tool turn.
-        let excluded = rules
+        let mut excluded = rules
             .iter()
             .enumerate()
             .filter(|(index, rule)| {
@@ -1049,6 +1049,14 @@ impl GatewayPlugin for Router {
             })
             .map(|(_, rule)| string(rule, "use"))
             .collect::<Vec<_>>();
+        excluded.extend(
+            context
+                .get("disabled_routes")
+                .as_array()
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_owned),
+        );
         let mut effort = String::new();
         let mut intent = String::new();
         let mut apply_from_turn = None;
@@ -1372,6 +1380,15 @@ impl zcalld_plugin_api::RecoveryPlugin for Router {
             .iter()
             .find(|group| group.get("name").as_str() == Some(&state.group))
             .ok_or(Error::InvalidArgument)?;
+        if state
+            ._context
+            .get("disabled_routes")
+            .as_array()
+            .iter()
+            .any(|route| route.as_str() == Some(model))
+        {
+            return Err(Error::InvalidArgument);
+        }
         if !group.get("members").as_array().iter().any(|member| {
             member.get("model").as_str() == Some(model) && member.get("off").as_bool() != Some(true)
         }) {

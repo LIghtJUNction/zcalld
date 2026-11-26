@@ -330,6 +330,132 @@ pub(crate) fn check_group_route_mutation<'a>(
     Ok(())
 }
 
+/// Reconcile persisted groups with configured routes, preserving disabled
+/// providers and all surviving group settings.
+pub(crate) fn sync_provider_routes(
+    context: &Context,
+    mut text: String,
+    removed_routes: usize,
+) -> Result<(), String> {
+    let path = context.directory.join("routing.json");
+    let mut state = routing_state(context)?;
+    let sections = control::sections(&text);
+    let providers: std::collections::BTreeSet<_> = sections
+        .iter()
+        .filter_map(|(section, _)| section.strip_prefix("provider "))
+        .collect();
+    let routes: std::collections::BTreeMap<_, _> = sections
+        .iter()
+        .filter_map(|(section, fields)| {
+            let name = section.strip_prefix("route ")?;
+            let provider = fields.get("provider")?;
+            let model = fields.get("model")?;
+            providers
+                .contains(provider.as_str())
+                .then_some((name, (provider, model)))
+        })
+        .collect();
+    let mut groups = Vec::new();
+    let mut detached = 0usize;
+    let mut removed_groups = 0usize;
+    for group in state.get("groups").as_array() {
+        let name = group.get("name").as_str().unwrap();
+        let section = format!("route {name}");
+        let mut group = group.clone();
+        let mut members = group.get("members").as_array().to_vec();
+        let previous = members.len();
+        members.retain(|member| {
+            member
+                .get("model")
+                .as_str()
+                .is_some_and(|id| routes.contains_key(id))
+        });
+        detached += previous - members.len();
+        let Some((provider, model)) = members
+            .first()
+            .and_then(|member| routes.get(member.get("model").as_str().unwrap()))
+        else {
+            text = control::ini_remove(&text, &section);
+            removed_groups += 1;
+            continue;
+        };
+        if !routes.contains_key(name) {
+            text = control::ini_set(&text, &section, "provider", provider)?;
+            text = control::ini_set(&text, &section, "model", &format!("\"{model}\""))?;
+        }
+        let mut original = group.get("original").clone();
+        if let Value::Array(rules) = original.get("rules") {
+            let valid = |target: &Value| members.iter().any(|member| member.get("model") == target);
+            let rules = rules
+                .iter()
+                .filter(|rule| valid(rule.get("use")))
+                .cloned()
+                .map(|mut rule| {
+                    if let Value::Array(more) = rule.get("more") {
+                        rule.set(
+                            "more",
+                            Value::Array(more.iter().filter(|item| valid(item)).cloned().collect()),
+                        );
+                    }
+                    rule
+                })
+                .collect();
+            original.set("rules", Value::Array(rules));
+            group.set("original", original);
+        }
+        group.set("members", Value::Array(members));
+        groups.push(group);
+    }
+    let preserved_names: std::collections::BTreeSet<_> = groups
+        .iter()
+        .filter_map(|group| group.get("name").as_str())
+        .collect();
+    let mut dangling = 0usize;
+    for (section, _) in &sections {
+        if let Some(name) = section.strip_prefix("route ")
+            && !routes.contains_key(name)
+            && !preserved_names.contains(name)
+        {
+            text = control::ini_remove(&text, section);
+            dangling += 1;
+        }
+    }
+    crate::config::Config::parse(&text, &context.directory)?;
+    let changed =
+        text != control::config_text(context)? || state.get("groups").as_array() != groups;
+    if changed {
+        if state.get("groups").as_array() == groups {
+            control::save_config(context, &text, "provider-sync")?;
+        } else {
+            state.set("groups", Value::Array(groups));
+            if let Some(configuration) =
+                crate::migration::rule_configuration(state.get("groups").as_array())
+            {
+                let worker = crate::migration::validate_rule_configuration(
+                    &configuration,
+                    state.get("rules_worker").as_str(),
+                )?;
+                state.set("rules_worker", worker.to_string_lossy().into_owned().into());
+            }
+            control::replace_files(
+                context,
+                &[
+                    (path, Some(state.stringify().into_bytes())),
+                    (context.path.clone(), Some(text.into_bytes())),
+                ],
+                "provider-sync",
+            )?;
+        }
+    }
+    control::emit(object([
+        ("ok", true.into()),
+        ("removed_routes", (removed_routes + dangling).into()),
+        ("detached_members", detached.into()),
+        ("removed_groups", removed_groups.into()),
+        ("restart_required", changed.into()),
+    ]))
+}
+
 fn groups(context: &Context, args: &[String]) -> Result<(), String> {
     let path = context.directory.join("routing.json");
     let mut state = routing_state(context)?;

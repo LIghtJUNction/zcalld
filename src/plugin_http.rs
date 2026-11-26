@@ -68,9 +68,17 @@ fn metadata(
                 .unwrap_or("")
                 .into(),
         );
+        let disabled = config
+            .routes
+            .iter()
+            .filter(|route| !config.providers[route.provider].enabled)
+            .map(|route| Value::from(route.name.clone()))
+            .collect();
+        result.set("disabled_routes", Value::Array(disabled));
         let providers = config
             .providers
             .iter()
+            .filter(|provider| provider.enabled)
             .map(|provider| {
                 object([
                     ("id", provider.name.clone().into()),
@@ -96,6 +104,10 @@ fn metadata(
         let routes = config
             .routes
             .iter()
+            .filter(|route| {
+                config.providers[route.provider].enabled
+                    || config.dynamic_routes.contains(&route.name)
+            })
             .map(|route| {
                 let dynamic = config.dynamic_routes.contains(&route.name);
                 object([

@@ -652,6 +652,33 @@ fn providers(context: &Context, args: &[String]) -> Result<(), String> {
     let action = args.first().map(String::as_str).unwrap_or("list");
     let mut text = config_text(context)?;
     match action {
+        "enable" | "disable" => {
+            let name = args.get(1).ok_or("provider name required")?;
+            let section = format!("provider {name}");
+            if !sections(&text)
+                .iter()
+                .any(|(section_name, _)| section_name == &section)
+            {
+                return Err("provider does not exist".into());
+            }
+            let enabled = action == "enable";
+            let current = ini_get(&text, &section, "enabled").is_none_or(|value| value != "false");
+            if current != enabled {
+                text = ini_set(
+                    &text,
+                    &section,
+                    "enabled",
+                    if enabled { "true" } else { "false" },
+                )?;
+                save_config(context, &text, "provider-state")?;
+            }
+            emit(object([
+                ("ok", true.into()),
+                ("enabled", enabled.into()),
+                ("restart_required", (current != enabled).into()),
+            ]))
+        }
+
         "list" => {
             let list = sections(&text)
                 .into_iter()
@@ -660,6 +687,10 @@ fn providers(context: &Context, args: &[String]) -> Result<(), String> {
                         let env = v.get("api_key_env").cloned().unwrap_or_default();
                         object([
                             ("name", name.into()),
+                            (
+                                "enabled",
+                                (v.get("enabled").is_none_or(|flag| flag != "false")).into(),
+                            ),
                             ("auth", v.get("auth").cloned().unwrap_or_default().into()),
                             (
                                 "header_env",
@@ -876,24 +907,14 @@ fn providers(context: &Context, args: &[String]) -> Result<(), String> {
                 .filter(|(s, v)| s.starts_with("route ") && v.get("provider") == Some(name))
                 .map(|(s, _)| s)
                 .collect();
-            crate::maintenance::check_group_route_mutation(
-                context,
-                routes
-                    .iter()
-                    .filter_map(|section| section.strip_prefix("route ")),
-                true,
-            )?;
+            // Managed aliases are rebuilt from their surviving members.
             text = ini_remove(&text, &section);
-            for r in &routes {
-                text = ini_remove(&text, r);
+            for route in &routes {
+                text = ini_remove(&text, route);
             }
-            save_config(context, &text, "provider-remove")?;
-            emit(object([
-                ("ok", true.into()),
-                ("removed_routes", routes.len().into()),
-                ("restart_required", true.into()),
-            ]))
+            crate::maintenance::sync_provider_routes(context, text, routes.len())
         }
+        "sync" => crate::maintenance::sync_provider_routes(context, text, 0),
         "test" | "models" => {
             let name = args.get(1).ok_or("provider name required")?;
             let c = config::Config::load(&context.path)?;
@@ -903,29 +924,53 @@ fn providers(context: &Context, args: &[String]) -> Result<(), String> {
                 .find(|p| &p.name == name)
                 .ok_or("unknown provider")?;
             if let Some(plugin) = &p.plugin {
-                let provider_index = c
-                    .providers
-                    .iter()
-                    .position(|item| item.name == p.name)
-                    .unwrap();
-                let catalog = json::parse(c.models_json.as_bytes())?;
-                let rows = catalog
-                    .get("data")
-                    .as_array()
-                    .iter()
-                    .filter(|row| {
-                        row.get("id").as_str().is_some_and(|id| {
-                            c.routes
-                                .iter()
-                                .any(|route| route.provider == provider_index && route.name == id)
-                        })
-                    })
-                    .cloned()
-                    .collect();
                 if action == "models" {
+                    let helper = crate::extensions::helper()?;
+                    let root = crate::extensions::root(&context.path)?;
+                    let mut params = object([("provider", plugin.clone().into())]);
+                    if let Some(account) = &p.plugin_account {
+                        params.set("account", account.clone().into());
+                    }
+                    let request = object([
+                        ("id", 1u64.into()),
+                        ("method", "modelCatalog".into()),
+                        ("params", params),
+                    ]);
+                    let input = format!("{}\n", request.stringify());
+                    let (code, out, _) = command(
+                        &helper.to_string_lossy(),
+                        &[
+                            "--root".into(),
+                            root.to_string_lossy().into_owned(),
+                            "session".into(),
+                        ],
+                        Some(input.as_bytes()),
+                        Duration::from_secs(23),
+                    )?;
+                    if code != 0 {
+                        return Err("OAuth model catalog is unavailable".into());
+                    }
+                    let response = json::parse(out.as_bytes())?;
+                    let result = response.get("result");
+                    match result.get("status").as_str() {
+                        Some("missing") => return Err("oauth_catalog_account_missing".into()),
+                        Some("expired") => return Err("oauth_catalog_account_expired".into()),
+                        _ => (),
+                    }
+                    let Value::Array(models) = result.get("models") else {
+                        return Err(
+                            "OAuth model catalog is unavailable for the bound account".into()
+                        );
+                    };
+                    let rows = models
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .filter(|id| config::valid_model(id))
+                        .map(|id| object([("id", id.into())]))
+                        .collect();
                     return emit(object([
                         ("name", name.clone().into()),
-                        ("source", "configured_catalog".into()),
+                        ("source", "oauth_catalog".into()),
                         (
                             "catalog",
                             object([("object", "list".into()), ("data", Value::Array(rows))]),
@@ -1067,7 +1112,10 @@ fn providers(context: &Context, args: &[String]) -> Result<(), String> {
                 ]))
             }
         }
-        _ => Err("providers expects list, add, edit, remove, test or models".into()),
+        _ => Err(
+            "providers expects list, add, edit, enable, disable, remove, sync, test or models"
+                .into(),
+        ),
     }
 }
 

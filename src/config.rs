@@ -15,6 +15,7 @@ use std::{
 #[derive(Clone)]
 pub struct Provider {
     pub name: String,
+    pub enabled: bool,
     pub base_url: String,
     pub protocol: Protocol,
     pub api_key_env: Option<String>,
@@ -135,11 +136,29 @@ impl Config {
             config.plugins.push(privacy);
         }
         if let Some((routing, groups)) = crate::extensions::routing_plugin(path)? {
+            let mut active_groups = groups.clone();
             if !groups.is_empty() {
                 use crate::state_json::{self as json, Value};
                 let routing_state = json::read(Path::new(&routing.config))?;
+                active_groups.retain(|name| {
+                    routing_state.get("groups").as_array().iter().any(|group| {
+                        group.get("name").as_str() == Some(name)
+                            && group.get("members").as_array().iter().any(|member| {
+                                member.get("off").as_bool() != Some(true)
+                                    && member
+                                        .get("model")
+                                        .as_str()
+                                        .is_some_and(|model| config.route(model).is_some())
+                            })
+                    })
+                });
                 let mut catalog = json::parse(config.models_json.as_bytes())?;
                 let mut rows = catalog.get("data").as_array().to_vec();
+                rows.retain(|row| {
+                    let id = row.get("id").as_str().unwrap_or("");
+                    !groups.iter().any(|group| group == id)
+                        || active_groups.iter().any(|group| group == id)
+                });
                 for row in &mut rows {
                     let id = row.get("id").as_str().unwrap_or("");
                     if let Some(group) = routing_state
@@ -158,7 +177,7 @@ impl Config {
                 catalog.set("data", Value::Array(rows));
                 config.models_json = catalog.stringify();
             }
-            config.dynamic_routes = groups;
+            config.dynamic_routes = active_groups;
             // The managed observer may already be explicitly configured. Loading
             // the same library/configuration twice would write every usage row twice.
             let same_path = |left: &Path, right: &Path| {
@@ -182,6 +201,7 @@ impl Config {
         if config.plugins.len() > 32 {
             return Err("configuration exceeds plugin limit after managed extensions".into());
         }
+        config.hide_disabled_models();
         Ok(config)
     }
 
@@ -336,9 +356,15 @@ impl Config {
                     {
                         return Err(format!("[{section}] plugin metadata exceeds 512 bytes"));
                     }
+                    let enabled = match take(&mut values, "enabled", "true").as_str() {
+                        "true" => true,
+                        "false" => false,
+                        _ => return Err(format!("[{section}] enabled must be true or false")),
+                    };
                     unknown(&values, &section)?;
                     providers.push(Provider {
                         name: name.into(),
+                        enabled,
                         base_url,
                         protocol,
                         api_key_env,
@@ -387,9 +413,6 @@ impl Config {
                 _ => return Err(format!("unknown section [{section}]")),
             }
         }
-        if providers.is_empty() || pending_routes.is_empty() {
-            return Err("configure at least one provider and one route".into());
-        }
         if providers.len() > 128 || pending_routes.len() > 4096 || plugins.len() > 32 {
             return Err("configuration exceeds provider/route/plugin limits".into());
         }
@@ -430,11 +453,32 @@ impl Config {
         })
     }
 
+    fn hide_disabled_models(&mut self) {
+        if self.providers.iter().all(|provider| provider.enabled) {
+            return;
+        }
+        if let Ok(mut catalog) = crate::state_json::parse(self.models_json.as_bytes()) {
+            let rows = catalog
+                .get("data")
+                .as_array()
+                .iter()
+                .filter(|row| {
+                    let id = row.get("id").as_str().unwrap_or_default();
+                    self.route(id).is_some() || self.dynamic_routes.iter().any(|group| group == id)
+                })
+                .cloned()
+                .collect();
+            catalog.set("data", crate::state_json::Value::Array(rows));
+            self.models_json = catalog.stringify();
+        }
+    }
+
     pub fn route(&self, model: &str) -> Option<&Route> {
         self.routes
             .binary_search_by(|r| r.name.as_str().cmp(model))
             .ok()
             .map(|n| &self.routes[n])
+            .filter(|route| self.providers[route.provider].enabled)
     }
 }
 

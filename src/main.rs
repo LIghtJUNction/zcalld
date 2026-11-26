@@ -47,7 +47,7 @@ Gateway:
   service install          Prepare a Linux user unit for a verified private install
 
 Configuration:
-  providers list|add|edit|remove|test|models
+  providers list|add|edit|enable|disable|remove|sync|test|models
   keys list|add|rotate|revoke
   routes list|set|remove
   groups list|set|remove
@@ -228,7 +228,10 @@ fn run() -> Result<(), String> {
             if json {
                 println!("{}", server::models_json(&config));
             } else {
-                for route in &config.routes {
+                for route in config.routes.iter().filter(|route| {
+                    config.route(&route.name).is_some()
+                        || config.dynamic_routes.contains(&route.name)
+                }) {
                     println!(
                         "{}\t{}\t{}",
                         route.name, config.providers[route.provider].name, route.model

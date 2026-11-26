@@ -247,7 +247,7 @@ fn handle(socket: &mut Stream, config: &Config, plugins: &mut Plugins, client: &
         Leases::default()
     };
     if plugins.has_context() {
-        let context = match request_context(
+        let mut context = match request_context(
             &request,
             source,
             &inspect,
@@ -262,6 +262,17 @@ fn handle(socket: &mut Stream, config: &Config, plugins: &mut Plugins, client: &
                 return;
             }
         };
+        if config.providers.iter().any(|provider| !provider.enabled) {
+            let disabled = config
+                .routes
+                .iter()
+                .filter(|route| !config.providers[route.provider].enabled)
+                .map(|route| http::quote(&route.name))
+                .collect::<Vec<_>>()
+                .join(",");
+            context.pop();
+            context.push_str(&format!(",\"disabled_routes\":[{disabled}]}}"));
+        }
         if let Err(error) = plugins.context(&context) {
             let _ = http::error(socket, 503, &error);
             return;

@@ -160,6 +160,17 @@ def check(binary, routing):
             process.stderr.close()
             upstream.shutdown()
 
+        assert cli("providers", "disable", "decision-a")["enabled"] is False
+        assert "a" not in {row["id"] for row in cli("models")["data"]}
+        assert "virtual" in {row["id"] for row in cli("models")["data"]}
+        assert {"a", "b"} <= {row["name"] for row in cli("routes", "list")["routes"]}
+        assert cli("providers", "enable", "decision-a")["enabled"] is True
+        assert cli("providers", "remove", "decision-a")["detached_members"] == 2
+        for group in cli("groups", "list")["groups"]:
+            if group["name"] in {"ordered", "virtual"}:
+                assert [member["model"] for member in group["members"]] == ["b"], group
+        assert cli("providers", "sync")["restart_required"] is False
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
