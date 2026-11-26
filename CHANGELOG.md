@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.6 — 2026-11-26
+
+- Link Windows filesystem helpers in the routing plugin [skip ci]
+
 ## 0.4.5 — 2026-11-26
 
 - Synchronize Magpie provider OAuth and record parity gaps [skip ci]

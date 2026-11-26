@@ -14,7 +14,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 zplugin = { features = ["std"], git = "https://github.com/LIghtJUNction/zplugin.git"}
-zcalld-plugin-api = { version = "=0.4.5", path = "../../crates/zcalld-plugin-api" }
-zcalld-compat-client = { version = "=0.4.5", path = "../../crates/zcalld-compat-client" }
+zcalld-plugin-api = { version = "=0.4.6", path = "../../crates/zcalld-plugin-api" }
+zcalld-compat-client = { version = "=0.4.6", path = "../../crates/zcalld-compat-client" }
 zsys = { default-features = false, features = ["std", "dylib"], git = "https://github.com/LIghtJUNction/zsys.git"}
 zconv = { default-features = false, git = "https://github.com/LIghtJUNction/zconv.git"}
