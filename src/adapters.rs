@@ -1479,14 +1479,30 @@ fn apply(context: &Context, args: &[String]) -> Result<(), String> {
                     .routes
                     .iter()
                     .map(|r| {
-                        object([
+                        let mut model = object([
                             ("id", r.name.clone().into()),
                             ("name", r.name.clone().into()),
                             ("reasoning", true.into()),
                             ("input", Value::Array(vec!["text".into(), "image".into()])),
                             ("contextWindow", 200000u64.into()),
                             ("maxTokens", 32768u64.into()),
-                        ])
+                        ]);
+                        let (native, _, _) = config.providers[r.provider]
+                            .for_protocol(crate::protocol::Protocol::AnthropicMessages);
+                        if native == crate::protocol::Protocol::AnthropicMessages {
+                            model.set("api", "anthropic-messages".into());
+                            model.set("baseUrl", url.clone().into());
+                            let upstream = r.model.replace('.', "-");
+                            if upstream == "claude-opus-4-7"
+                                || upstream.starts_with("claude-opus-4-7-")
+                            {
+                                model.set(
+                                    "compat",
+                                    object([("forceAdaptiveThinking", true.into())]),
+                                );
+                            }
+                        }
+                        model
                     })
                     .collect();
                 let s = patch(
