@@ -64,10 +64,21 @@ fn source_location(source: &str) -> Result<String, String> {
     }
     let path = Path::new(source);
     if path.is_dir() {
-        return path
-            .canonicalize()
-            .map(|p| p.to_string_lossy().into_owned())
-            .map_err(|e| e.to_string());
+        let canonical = path.canonicalize().map_err(|e| e.to_string())?;
+        let canonical = canonical.to_string_lossy();
+        #[cfg(windows)]
+        {
+            // Git interprets the Win32 extended path prefix as part of a remote.
+            if let Some(unc) = canonical.strip_prefix(r"\\?\UNC\") {
+                return Ok(format!(r"\\{unc}"));
+            }
+            if let Some(disk) = canonical.strip_prefix(r"\\?\")
+                && disk.as_bytes().get(1) == Some(&b':')
+            {
+                return Ok(disk.to_owned());
+            }
+        }
+        return Ok(canonical.into_owned());
     }
     Err("Git source must be an HTTPS URL or an existing local repository".into())
 }
