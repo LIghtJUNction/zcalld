@@ -13,10 +13,10 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 sha2.workspace = true
 zhex.workspace = true
-zcalld-plugin-api = { path = "../../crates/zcalld-plugin-api", version = "=0.4.6" }
+zcalld-plugin-api = { path = "../../crates/zcalld-plugin-api", version = "=0.4.7" }
 zplugin = { features = ["std"], git = "https://github.com/LIghtJUNction/zplugin.git"}
 zconv = { default-features = false, git = "https://github.com/LIghtJUNction/zconv.git"}
-zcalld-compat-client = { version = "=0.4.6", path = "../../crates/zcalld-compat-client" }
+zcalld-compat-client = { version = "=0.4.7", path = "../../crates/zcalld-compat-client" }
 
 [[example]]
 name = "recovery-fixture"

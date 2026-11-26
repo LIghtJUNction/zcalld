@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.7 — 2026-11-26
+
+- Pass canonical Windows repository paths to Git without Win32 namespace prefixes [skip ci]
+- Record the virtual model desktop integration [skip ci]
+- Route native System One and OpenAI decision requests [skip ci]
+
 ## 0.4.6 — 2026-11-26
 
 - Link Windows filesystem helpers in the routing plugin [skip ci]

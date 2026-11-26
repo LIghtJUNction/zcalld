@@ -13,5 +13,5 @@ name = "zcalld_aliases"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-zcalld-plugin-api = { path = "../../crates/zcalld-plugin-api", version = "=0.4.6" }
+zcalld-plugin-api = { path = "../../crates/zcalld-plugin-api", version = "=0.4.7" }
 zplugin = { default-features = false, features = ["std", "macros"], git = "https://github.com/LIghtJUNction/zplugin.git"}
