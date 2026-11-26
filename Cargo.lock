@@ -227,6 +227,7 @@ dependencies = [
  "zconv",
  "zhex",
  "zplugin",
+ "zsys",
 ]
 
 [[package]]

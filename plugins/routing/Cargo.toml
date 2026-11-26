@@ -22,3 +22,6 @@ zcalld-compat-client = { version = "=0.4.5", path = "../../crates/zcalld-compat-
 name = "recovery-fixture"
 path = "examples/recovery_fixture.rs"
 crate-type = ["cdylib"]
+
+[target.'cfg(windows)'.dependencies]
+zsys.workspace = true
