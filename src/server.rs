@@ -221,6 +221,26 @@ fn handle(socket: &mut Stream, config: &Config, plugins: &mut Plugins, client: &
             return;
         }
     };
+    if source == Protocol::SystemOne
+        && let Some(key) = request.header("idempotency-key")
+        && (config
+            .dynamic_routes
+            .iter()
+            .any(|route| route == &inspect.model)
+            || key.is_empty()
+            || key.len() > 128
+            || !key.as_bytes()[0].is_ascii_alphanumeric()
+            || !key
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || b"._:-".contains(&byte)))
+    {
+        let _ = http::error(
+            socket,
+            422,
+            "System One idempotency keys need a direct route and a printable key",
+        );
+        return;
+    }
     let mut events = if plugins.has_events() {
         plugins.begin_events(&events::request_metadata(&request, protocol_id(source)))
     } else {
@@ -282,6 +302,17 @@ fn handle(socket: &mut Stream, config: &Config, plugins: &mut Plugins, client: &
     let mut recovered_once = false;
     for attempt in 0..MAX_GROUP_ATTEMPTS {
         if socket.is_disconnected() {
+            return;
+        }
+        if source == Protocol::SystemOne
+            && request.header("idempotency-key").is_some()
+            && selected != inspect.model
+        {
+            let _ = http::error(
+                socket,
+                422,
+                "System One idempotency keys require a direct route",
+            );
             return;
         }
         let Some(route) = config.route(&selected) else {
@@ -348,6 +379,7 @@ fn handle(socket: &mut Stream, config: &Config, plugins: &mut Plugins, client: &
             stream,
             maximum: config.max_response,
             defer_rejections: !recovered_once
+                && !(source == Protocol::SystemOne && request.header("idempotency-key").is_some())
                 && (plugins.has_retry() || plugins.has_recovery())
                 && attempt + 1 < MAX_GROUP_ATTEMPTS,
             quota_source: plugins
@@ -775,10 +807,17 @@ fn upstream_headers(
     {
         headers.push(format!("openai-beta: {beta}"));
     }
+    let idempotency_key = (protocol == Protocol::SystemOne)
+        .then(|| request.header("idempotency-key"))
+        .flatten();
+    if let Some(key) = idempotency_key {
+        headers.push(format!("Idempotency-Key: {key}"));
+    }
     headers.extend(
         provider
             .headers
             .iter()
+            .filter(|(name, _)| idempotency_key.is_none() || name != "idempotency-key")
             .map(|(name, value)| format!("{name}: {value}")),
     );
     headers
@@ -796,6 +835,8 @@ fn ingress(path: &str) -> Result<(Protocol, Option<String>, bool), String> {
         "/v1/responses" | "/responses" | "/backend-api/codex/responses" => {
             Some(Protocol::OpenAiResponses)
         }
+        "/v1/systemone" | "/systemone" => Some(Protocol::SystemOne),
+        "/v1/decisions" | "/decisions" => Some(Protocol::OpenAiDecisions),
         "/v1/messages" | "/messages" => Some(Protocol::AnthropicMessages),
         "/v1/completions" | "/completions" => Some(Protocol::OpenAiCompletions),
         "/v1beta/interactions" | "/v1/interactions" | "/interactions" => {
@@ -852,6 +893,8 @@ fn protocol_id(protocol: Protocol) -> u32 {
         Protocol::GeminiGenerateContent => ids::GEMINI_GENERATE_CONTENT,
         Protocol::OpenAiCompletions => ids::OPENAI_COMPLETIONS,
         Protocol::GeminiInteractions => ids::GEMINI_INTERACTIONS,
+        Protocol::SystemOne => ids::SYSTEM_ONE,
+        Protocol::OpenAiDecisions => ids::OPENAI_DECISIONS,
     }
 }
 
@@ -1053,6 +1096,18 @@ fn response_header_allowed(name: &str) -> bool {
         "retry-after",
         "request-id",
         "x-request-id",
+        "x-upstream-request-id",
+        "x-typesafe-request-id",
+        "x-idempotency-replayed",
+        "x-system-one-credits",
+        "x-system-one-error-code",
+        "x-system-one-error-source",
+        "x-ratelimit-limit",
+        "x-ratelimit-remaining",
+        "x-ratelimit-reset",
+        "x-upstream-ratelimit-limit",
+        "x-upstream-ratelimit-remaining",
+        "x-upstream-ratelimit-reset",
         "x-codex-credits-has-credits",
         "x-codex-credits-unlimited",
         "x-codex-credits-balance",

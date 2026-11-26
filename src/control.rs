@@ -67,6 +67,7 @@ pub fn run(input: &[String]) -> Option<Result<(), String>> {
             | "update"
             | "accounts"
             | "groups"
+            | "model-catalog"
             | "library"
             | "usage"
             | "routes"
@@ -974,6 +975,8 @@ fn providers(context: &Context, args: &[String]) -> Result<(), String> {
                 "/messages",
                 "/completions",
                 "/interactions",
+                "/systemone",
+                "/decisions",
             ] {
                 if let Some(prefix) = base.strip_suffix(suffix) {
                     base = prefix.to_owned();

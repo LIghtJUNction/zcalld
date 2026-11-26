@@ -66,7 +66,7 @@ model = upstream-model
 
 Put secrets in the private `credentials` file beside the configuration, as `NAME="value"` assignments. Environment values take precedence. Provider credentials and caller credentials are separate; incoming authorization, cookies and query keys are not forwarded upstream. A non-loopback listener requires a LAN-capable credential.
 
-Protocol names are `chat`, `responses`, `anthropic`, `gemini`, `completions` and `interactions`. Native per-protocol endpoint overrides accept a base URL or a complete endpoint URL. Same-protocol forwarding retains provider extensions. Cross-protocol conversion uses strict zcall semantics and rejects unsupported information loss.
+Protocol names are `chat`, `responses`, `anthropic`, `gemini`, `completions`, `interactions`, `systemone` and `decisions`. Native per-protocol endpoint overrides accept a base URL or a complete endpoint URL. Same-protocol forwarding retains provider extensions. Cross-protocol conversion uses strict zcall semantics and rejects unsupported information loss.
 
 | Endpoint | Purpose |
 | --- | --- |
@@ -76,10 +76,36 @@ Protocol names are `chat`, `responses`, `anthropic`, `gemini`, `completions` and
 | `/v1beta/models/{model}:generateContent` | Gemini generation |
 | `/v1beta/models/{model}:streamGenerateContent` | Gemini streaming |
 | `/v1/completions`, `/v1beta/interactions` | Additional protocol ingress |
+| `POST /v1/systemone` | System One named decisions and typed extraction |
+| `POST /v1/decisions` | OpenAI Decisions |
 | `GET /v1/models` | Public routes with preserved catalog metadata |
 | `GET /backend-api/codex/models` and bound account metadata paths | Optional [native Codex metadata](docs/CODEX.md); disabled until explicitly configured |
 | `GET /healthz` | Readiness |
 | `POST /mcp/zcalld/tools`, `POST /mcp/magpie/tools` | Optional community-tool MCP; the legacy address remains valid |
+
+### Decision routes and virtual models
+
+Use `systemone` with [System One](https://docs.system-one.dev/en/docs/api) and
+`decisions` with [OpenAI Decisions](https://developers.openai.com/api/docs/guides/decisions).
+Pass a configured gateway route name in `model`. The gateway substitutes the
+provider model ID and forwards native JSON. Decision groups require the same
+wire protocol across their members. Send a System One `Idempotency-Key` with a
+direct route so retries stay bound to the same upstream.
+
+Use the desktop app's **Routing provider** to create a virtual model from
+configured routes. Priority order starts with the first eligible member and
+uses later members when the routing plugin can recover. Round robin rotates
+between eligible members. Use [models.dev](https://models.dev/labs/) to attach
+metadata such as `typesafe/jev-latest` to a virtual model. Provider routes and
+credentials determine upstream availability. Restart the gateway after
+changing configured routes or groups.
+
+```sh
+zcalld model-catalog refresh --type decision --query jev --json
+zcalld groups set jev-route --stdin <<'JSON'
+{"mode":"rotate","affinity":"none","members":["work/jev","backup/jev"],"catalog_model":"typesafe/jev-latest"}
+JSON
+```
 
 ## Management
 

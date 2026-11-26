@@ -10,6 +10,7 @@ pub fn run(context: &Context, args: &[String]) -> Result<(), String> {
         Some("update") => update(context, &args[1..]),
         Some("accounts") => accounts(context, &args[1..]),
         Some("groups") => groups(context, &args[1..]),
+        Some("model-catalog") => crate::model_catalog::run(context, &args[1..]),
         Some("library") => library(context, &args[1..]),
         Some("usage") => usage(context, &args[1..]),
         Some("routes") => routes(context, &args[1..]),
@@ -366,9 +367,22 @@ fn groups(context: &Context, args: &[String]) -> Result<(), String> {
     let section = format!("route {name}");
     match action {
         "set" => {
-            let definition = control::option(args, "--file")?
-                .map(|file| json::read(std::path::Path::new(file)))
-                .transpose()?;
+            let file = control::option(args, "--file")?;
+            let definition = if control::flag(args, "--stdin") {
+                use std::io::Read;
+                if file.is_some() {
+                    return Err("use either --stdin or --file".into());
+                }
+                let mut bytes = Vec::new();
+                std::io::stdin()
+                    .take(262_145)
+                    .read_to_end(&mut bytes)
+                    .map_err(|error| error.to_string())?;
+                Some(json::parse_with_limit(&bytes, 262_144)?)
+            } else {
+                file.map(|file| json::read(std::path::Path::new(file)))
+                    .transpose()?
+            };
             if let Some(value) = &definition {
                 let fields = value
                     .as_object()
@@ -388,6 +402,7 @@ fn groups(context: &Context, args: &[String]) -> Result<(), String> {
                             | "levels"
                             | "intentSure"
                             | "effortMaps"
+                            | "catalog_model"
                     )
                 }) {
                     return Err("group definition contains an unknown field".into());
@@ -456,6 +471,7 @@ fn groups(context: &Context, args: &[String]) -> Result<(), String> {
             let mut members = Vec::new();
             let mut seen = std::collections::BTreeSet::new();
             let mut first = None;
+            let mut wire = None;
             for definition in &definitions {
                 // JSON members already carry exact route names and optional settings.
                 let model = definition
@@ -477,6 +493,15 @@ fn groups(context: &Context, args: &[String]) -> Result<(), String> {
                     .iter()
                     .find(|r| r.name == model)
                     .ok_or_else(|| format!("unknown route {model}"))?;
+                let protocol = configured.providers[route.provider].protocol;
+                let decision = protocol.is_decision().then_some(protocol);
+                if wire.is_some_and(|previous| previous != decision) {
+                    return Err(
+                        "all members of a decision group must use the same decision protocol"
+                            .into(),
+                    );
+                }
+                wire = Some(decision);
                 if !seen.insert(model) {
                     return Err("group members must be unique".into());
                 }
@@ -526,6 +551,26 @@ fn groups(context: &Context, args: &[String]) -> Result<(), String> {
             let mut next = previous.unwrap_or_else(|| object([("name", name.clone().into())]));
             next.set("mode", mode.into());
             next.set("members", Value::Array(members));
+            if let Some(catalog_id) = file
+                .as_object()
+                .and_then(|fields| fields.get("catalog_model"))
+            {
+                match catalog_id {
+                    Value::Null => {
+                        next.remove("catalog_model");
+                        next.remove("catalog_metadata");
+                    }
+                    value => {
+                        let id = value
+                            .as_str()
+                            .filter(|id| !id.is_empty())
+                            .ok_or("catalog_model must be an ID or null")?;
+                        let metadata = crate::model_catalog::lookup(&context.directory, id)?;
+                        next.set("catalog_model", id.into());
+                        next.set("catalog_metadata", metadata);
+                    }
+                }
+            }
             if let Some(definition) = &definition {
                 let mut original = match definition.get("original") {
                     Value::Null => next.get("original").clone(),

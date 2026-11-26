@@ -188,6 +188,10 @@ impl Router {
     }
 }
 
+fn is_decision_protocol(protocol: u32) -> bool {
+    matches!(protocol, protocol::SYSTEM_ONE | protocol::OPENAI_DECISIONS)
+}
+
 fn validate(settings: &Value) -> Result<()> {
     if settings.get("groups").as_array().len() > 1024 {
         return Err(Error::InvalidArgument);
@@ -1133,6 +1137,10 @@ impl GatewayPlugin for Router {
             state.excluded = excluded;
             state.apply_effort = apply;
         }
+        if is_decision_protocol(protocol) {
+            // The gateway rewrites the model without reserializing the decision payload.
+            return Ok(0);
+        }
         // Gemini selects its model in the request path; route() carries that choice.
         if protocol != protocol::GEMINI_GENERATE_CONTENT {
             request.set("model", selected.into());
@@ -1350,6 +1358,9 @@ impl zcalld_plugin_api::RecoveryPlugin for Router {
         }
         if !protocol::is_supported(protocol) {
             return Err(Error::InvalidArgument);
+        }
+        if is_decision_protocol(protocol) {
+            return Ok(0);
         }
         if output.len() < input.len().saturating_add(2048) {
             return Err(Error::BufferTooSmall);

@@ -135,6 +135,29 @@ impl Config {
             config.plugins.push(privacy);
         }
         if let Some((routing, groups)) = crate::extensions::routing_plugin(path)? {
+            if !groups.is_empty() {
+                use crate::state_json::{self as json, Value};
+                let routing_state = json::read(Path::new(&routing.config))?;
+                let mut catalog = json::parse(config.models_json.as_bytes())?;
+                let mut rows = catalog.get("data").as_array().to_vec();
+                for row in &mut rows {
+                    let id = row.get("id").as_str().unwrap_or("");
+                    if let Some(group) = routing_state
+                        .get("groups")
+                        .as_array()
+                        .iter()
+                        .find(|group| group.get("name").as_str() == Some(id))
+                    {
+                        row.set("virtual", true.into());
+                        if !matches!(group.get("catalog_metadata"), Value::Null) {
+                            row.set("catalog_source", "models.dev".into());
+                            row.set("catalog_metadata", group.get("catalog_metadata").clone());
+                        }
+                    }
+                }
+                catalog.set("data", Value::Array(rows));
+                config.models_json = catalog.stringify();
+            }
             config.dynamic_routes = groups;
             // The managed observer may already be explicitly configured. Loading
             // the same library/configuration twice would write every usage row twice.
@@ -258,6 +281,8 @@ impl Config {
                         ("gemini_url", Protocol::GeminiGenerateContent),
                         ("completions_url", Protocol::OpenAiCompletions),
                         ("interactions_url", Protocol::GeminiInteractions),
+                        ("systemone_url", Protocol::SystemOne),
+                        ("decisions_url", Protocol::OpenAiDecisions),
                     ] {
                         if let Some(url) = values.remove(key) {
                             protocol::endpoint(&url, native, "validation-model", false)?;

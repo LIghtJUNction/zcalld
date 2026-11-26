@@ -13,9 +13,11 @@ pub mod protocol {
     pub const GEMINI_GENERATE_CONTENT: u32 = 4;
     pub const OPENAI_COMPLETIONS: u32 = 5;
     pub const GEMINI_INTERACTIONS: u32 = 6;
+    pub const SYSTEM_ONE: u32 = 7;
+    pub const OPENAI_DECISIONS: u32 = 8;
 
     pub const fn is_supported(value: u32) -> bool {
-        matches!(value, 1..=6)
+        matches!(value, 1..=8)
     }
 }
 

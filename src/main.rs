@@ -15,6 +15,7 @@ mod keys;
 mod listener;
 mod maintenance;
 mod migration;
+mod model_catalog;
 mod plugin_http;
 mod plugins;
 mod protocol;
@@ -50,6 +51,7 @@ Configuration:
   keys list|add|rotate|revoke
   routes list|set|remove
   groups list|set|remove
+  model-catalog list|refresh [--type decision] [--query TEXT]
   agents list|detect|sync|apply|revert|catalog
   privacy show|set off|secrets|personal
   desktop show|configure|disable|plan|sync
