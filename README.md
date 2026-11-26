@@ -107,6 +107,30 @@ zcalld groups set jev-route --stdin <<'JSON'
 JSON
 ```
 
+### Native provider bindings
+
+A native library exporting the provider transport interface can handle a
+specific provider ID. Set `provider_id` in its plugin section to the same value
+as `plugin` in the provider section. An exact match takes precedence over the
+optional community bridge. Explicitly bound IDs must be unique.
+
+```ini
+[plugin lmm-oauth-native]
+path = /absolute/path/liblmm_oauth.so
+provider_id = lmm-oauth
+config_file = lmm-oauth.json
+
+[provider lmm]
+base_url = https://api.lmm.best/v1
+protocol = chat
+plugin = lmm-oauth
+plugin_account = personal
+
+[route lmm/model]
+provider = lmm
+model = CATALOG_MODEL_ID
+```
+
 ## Management
 
 ```sh

@@ -191,7 +191,11 @@ pub fn managed_plugins(config_path: &Path) -> Result<Vec<PluginSpec>, String> {
                 } else {
                     String::new()
                 };
-                specs.push(PluginSpec { path, config });
+                specs.push(PluginSpec {
+                    path,
+                    config,
+                    provider_id: None,
+                });
             }
             _ => return Err("unknown managed extension kind".into()),
         }
@@ -200,6 +204,7 @@ pub fn managed_plugins(config_path: &Path) -> Result<Vec<PluginSpec>, String> {
         let file = root.join("host.json");
         let config = state_json::read(&file)?.stringify();
         specs.push(PluginSpec {
+            provider_id: None,
             path: library("community")?,
             config,
         });
@@ -222,6 +227,7 @@ pub fn privacy_plugin(config_path: &Path) -> Result<Option<PluginSpec>, String> 
         binding.remove("desktop_inbox");
     }
     Ok(Some(PluginSpec {
+        provider_id: None,
         path: library("redact")?,
         config: binding.stringify(),
     }))
@@ -259,6 +265,7 @@ pub fn routing_plugin(config_path: &Path) -> Result<Option<(PluginSpec, Vec<Stri
         .collect::<Result<Vec<_>, _>>()?;
     Ok(Some((
         PluginSpec {
+            provider_id: None,
             path: library("plugin_routing")?,
             config: path.to_string_lossy().into_owned(),
         },
@@ -449,6 +456,7 @@ pub(crate) fn enable_privacy(config_path: &Path, settings: &Value) -> Result<boo
     preview.set("settings", probe.to_string_lossy().into_owned().into());
     let preflight = (|| {
         let mut plugins = crate::plugins::Plugins::load(&[PluginSpec {
+            provider_id: None,
             path: native,
             config: preview.stringify(),
         }])?;

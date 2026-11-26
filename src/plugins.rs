@@ -18,6 +18,7 @@ const REQUEST_BUFFER_HEADROOM: usize = 2048;
 pub struct PluginSpec {
     pub path: PathBuf,
     pub config: String,
+    pub provider_id: Option<String>,
 }
 
 impl std::fmt::Debug for PluginSpec {
@@ -32,6 +33,7 @@ impl std::fmt::Debug for PluginSpec {
 
 struct Entry {
     path: PathBuf,
+    provider_id: Option<String>,
     proxy: GatewayPluginProxy<'static>,
     context: Option<ContextPluginProxy<'static>>,
     response: Option<ResponsePluginProxy<'static>>,
@@ -195,11 +197,22 @@ impl Plugins {
             if recovery_executor && entries.iter().any(|e: &Entry| e.recovery_executor) {
                 return Err("only one provider recovery executor may be configured".into());
             }
-            if provider.is_some() && entries.iter().any(|e: &Entry| e.provider.is_some()) {
-                return Err("only one community provider host may be configured".into());
+            if spec.provider_id.is_some() && provider.is_none() {
+                return Err(format!(
+                    "{} has no provider transport interface",
+                    path.display()
+                ));
+            }
+            if provider.is_some()
+                && entries
+                    .iter()
+                    .any(|e: &Entry| e.provider.is_some() && e.provider_id == spec.provider_id)
+            {
+                return Err("duplicate provider plugin binding".into());
             }
             entries.push(Entry {
                 path,
+                provider_id: spec.provider_id.clone(),
                 proxy,
                 context,
                 response,
@@ -368,23 +381,37 @@ impl Plugins {
         })
     }
 
-    /// Select the first configured custom provider bridge explicitly.
-    pub fn provider_fetch(&mut self, request_json: &[u8]) -> Result<ProviderResponse, String> {
-        for entry in &mut self.entries {
-            if let Some(provider) = &mut entry.provider {
-                let resource = provider
-                    .fetch(request_json)
-                    .map_err(|e| hook_error(&entry.path, "provider fetch", e))?;
-                resource
-                    .check("dev.zcalld.provider-stream", 1)
-                    .map_err(|e| hook_error(&entry.path, "provider stream", e))?;
-                return Ok(ProviderResponse {
-                    resource,
-                    ended: false,
-                });
-            }
-        }
-        Err("no custom provider plugin is configured".into())
+    /// Exact native bindings take precedence over the existing community bridge.
+    pub fn provider_fetch(
+        &mut self,
+        id: &str,
+        request_json: &[u8],
+    ) -> Result<ProviderResponse, String> {
+        let index = self
+            .entries
+            .iter()
+            .position(|entry| entry.provider_id.as_deref() == Some(id))
+            .or_else(|| {
+                self.entries
+                    .iter()
+                    .position(|entry| entry.provider_id.is_none() && entry.provider.is_some())
+            })
+            .ok_or("no provider transport is configured for this plugin")?;
+        let entry = &mut self.entries[index];
+        let provider = entry
+            .provider
+            .as_mut()
+            .ok_or("provider transport unavailable")?;
+        let resource = provider
+            .fetch(request_json)
+            .map_err(|error| hook_error(&entry.path, "provider fetch", error))?;
+        resource
+            .check("dev.zcalld.provider-stream", 1)
+            .map_err(|error| hook_error(&entry.path, "provider stream", error))?;
+        Ok(ProviderResponse {
+            resource,
+            ended: false,
+        })
     }
 
     pub fn has_context(&self) -> bool {
@@ -975,6 +1002,7 @@ mod tests {
     #[test]
     fn rejects_relative_paths_and_invalid_output_lengths() {
         let spec = PluginSpec {
+            provider_id: None,
             path: PathBuf::from("plugin.so"),
             config: String::new(),
         };

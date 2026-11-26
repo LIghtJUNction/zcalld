@@ -137,6 +137,7 @@ fn defaults(mut value: Value, config: &Path) -> Result<Value, String> {
 }
 fn spec(value: &Value) -> Result<PluginSpec, String> {
     Ok(PluginSpec {
+        provider_id: None,
         path: crate::extensions::library("desktop")?,
         config: value.stringify(),
     })

@@ -373,8 +373,16 @@ impl Config {
                         (None, Some(value)) => read_bounded(&resolve(directory, &value), 65536)?,
                         (None, None) => String::new(),
                     };
+                    let provider_id = values.remove("provider_id");
+                    if provider_id.as_deref().is_some_and(|id| !valid_name(id)) {
+                        return Err(format!("[{section}] invalid provider_id"));
+                    }
                     unknown(&values, &section)?;
-                    plugins.push(PluginSpec { path, config });
+                    plugins.push(PluginSpec {
+                        path,
+                        config,
+                        provider_id,
+                    });
                 }
                 _ => return Err(format!("unknown section [{section}]")),
             }

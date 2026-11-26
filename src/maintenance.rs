@@ -846,6 +846,7 @@ fn usage_recording(context: &Context, enabled: bool) -> Result<(), String> {
             if let Some(native) = native {
                 // Preflight against the staged file before publishing the setting.
                 let _plugins = crate::plugins::Plugins::load(&[crate::plugins::PluginSpec {
+                    provider_id: None,
                     path: native,
                     config: probe.to_string_lossy().into_owned(),
                 }])

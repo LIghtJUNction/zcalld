@@ -1276,9 +1276,9 @@ fn execute(
         provider,
         model,
     } = upstream;
-    let mut community = if provider.plugin.is_some() {
+    let mut community = if let Some(id) = provider.plugin.as_deref() {
         match provider_envelope(provider, model, &options)
-            .and_then(|request| plugins.provider_fetch(request.as_bytes()))
+            .and_then(|request| plugins.provider_fetch(id, request.as_bytes()))
         {
             Ok(response) => Some(response),
             Err(error) => {
